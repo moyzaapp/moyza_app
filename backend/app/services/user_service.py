@@ -6,10 +6,7 @@ from app.schemas.user import UserCreate
 from app.core.security import hash_password
 
 
-def create_user(
-    db: Session,
-    user: UserCreate
-):
+def create_user(db: Session, user: UserCreate):
 
     existing_user = (
     db.query(User)
