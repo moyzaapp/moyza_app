@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  backend:
+    container_name: moyza_backend
+
+    build:
+      context: ./backend
+
+    ports:
+      - "8000:8000"
+
+    env_file:
+      - ./backend/.env
+
+    restart: always
+
+    volumes:
+      - ./storage:/storage
+
+    networks:
+      - moyza_network
+
+networks:
+  moyza_network:
+    driver: bridge
