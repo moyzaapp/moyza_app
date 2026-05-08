@@ -35,9 +35,30 @@ def get_current_user(
     return user
 
 
-def require_role(role: str):
+def require_role(role: int):
     def wrapper(current_user=Depends(get_current_user)):
-        if current_user.role != role:
-            raise HTTPException(status_code=403, detail=current_user.role)
+        if current_user.role_id != role:
+            raise HTTPException(status_code=403, detail=current_user.role_id)
         return current_user
     return wrapper
+
+
+def require_permission(permission_code: str):
+
+    def permission_checker(current_user: User = Depends(get_current_user)):
+
+        permissions = [
+            permission.code
+            for permission in current_user.role.permissions
+        ]
+
+        if permission_code not in permissions:
+
+            raise HTTPException(
+                status_code=403,
+                detail="Permission denied"
+            )
+
+        return current_user
+
+    return permission_checker
