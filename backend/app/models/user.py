@@ -1,4 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy.orm import relationship
+from sqlalchemy import ForeignKey
 
 from app.db.base import Base
 
@@ -17,4 +19,6 @@ class User(Base):
 
     is_active = Column(Boolean, default=True)
 
-    role = Column(String, default="agent")
+    role_id = Column(Integer, ForeignKey("roles.id"))
+    
+    role = relationship("Role")
