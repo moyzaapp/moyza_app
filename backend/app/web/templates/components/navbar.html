@@ -1,0 +1,22 @@
+<header class="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-8">
+
+    <h2 class="text-xl font-semibold text-gray-800">
+        Dashboard
+    </h2>
+
+    <div class="flex items-center gap-4">
+
+        <span class="text-gray-600">
+            {{ current_user.name }}
+        </span>
+
+        <a
+            href="/logout"
+            class="bg-red-500 text-white px-4 py-2 rounded-xl"
+        >
+            Salir
+        </a>
+
+    </div>
+
+</header>

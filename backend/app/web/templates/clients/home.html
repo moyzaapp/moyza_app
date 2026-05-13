@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+
+{% block title %}
+Clientes
+{% endblock %}
+
+{% block content %}
+
+<div class="flex items-center justify-between mb-8">
+
+    <div>
+
+        <h1 class="text-3xl font-bold text-gray-800">
+            Clientes
+        </h1>
+
+        <p class="text-gray-500 mt-1">
+            Gestión de clientes registrados
+        </p>
+
+    </div>
+
+    <button class="bg-black text-white px-5 py-3 rounded-xl">
+        Nuevo Cliente
+    </button>
+
+</div>
+
+{% with
+    headers=[
+        "Nombre",
+        "Correo",
+        "Teléfono",
+        "Estado"
+    ],
+
+    rows=[
+        ["Juan Perez", "juan@test.com", "300123456", "Activo"],
+        ["Maria Lopez", "maria@test.com", "300555555", "Activo"],
+        ["Carlos Ruiz", "carlos@test.com", "311999999", "Pendiente"]
+    ]
+%}
+
+    {% include 'components/table.html' %}
+
+{% endwith %}
+
+{% endblock %}

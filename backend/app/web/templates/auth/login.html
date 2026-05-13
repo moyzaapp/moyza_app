@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <title>
+        Login
+    </title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+</head>
+
+<body class="bg-gray-100">
+
+    <div class="min-h-screen flex items-center justify-center">
+
+        <form
+            action="/login"
+            method="POST"
+            class="bg-white p-10 rounded-2xl shadow-lg w-[400px]"
+        >
+
+            <h1 class="text-3xl font-bold mb-8 text-center">
+                MOYZA
+            </h1>
+
+            <input
+                type="text"
+                name="username"
+                placeholder="Correo"
+                required
+                class="w-full border p-3 rounded-lg mb-4"
+            >
+
+            <input
+                type="password"
+                name="password"
+                placeholder="Contraseña"
+                required
+                class="w-full border p-3 rounded-lg mb-6"
+            >
+
+            {% if error %}
+
+            <div class="bg-red-100 text-red-700 p-3 rounded-lg mb-4">
+
+                {{ error }}
+
+            </div>
+
+            {% endif %}
+
+            <button
+                class="w-full bg-black text-white p-3 rounded-xl"
+            >
+                Ingresar
+            </button>
+
+        </form>
+
+    </div>
+
+</body>
+</html>
