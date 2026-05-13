@@ -20,29 +20,17 @@ Clientes
 
     </div>
 
-    <button class="bg-black text-white px-5 py-3 rounded-xl">
+    <button
+        onclick="openModal()"
+        class="bg-black text-white px-5 py-3 rounded-xl hover:opacity-90"
+    >
         Nuevo Cliente
     </button>
 
 </div>
 
-{% with
-    headers=[
-        "Nombre",
-        "Correo",
-        "Teléfono",
-        "Estado"
-    ],
+{% include 'clients/table.html' %}
 
-    rows=[
-        ["Juan Perez", "juan@test.com", "300123456", "Activo"],
-        ["Maria Lopez", "maria@test.com", "300555555", "Activo"],
-        ["Carlos Ruiz", "carlos@test.com", "311999999", "Pendiente"]
-    ]
-%}
-
-    {% include 'components/table.html' %}
-
-{% endwith %}
+{% include 'clients/form.html' %}
 
 {% endblock %}
