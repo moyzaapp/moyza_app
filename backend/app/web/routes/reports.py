@@ -120,3 +120,29 @@ async def download_report(
         filename=report.filename,
         media_type="application/octet-stream"
     )
+
+@router.post("/reports/delete/")
+async def delete_report(
+    request: Request,
+    report_id: int = Form(...),
+    db: Session = Depends(get_db)
+):
+
+    report = db.query(Report).filter(
+        Report.id == report_id
+    ).first()
+
+    if not report:
+        return {"error": "Report not found"}
+
+    if os.path.exists(report.filepath):
+        os.remove(report.filepath)
+
+    db.delete(report)
+
+    db.commit()
+
+    return RedirectResponse(
+        url="/reports",
+        status_code=302
+    )
