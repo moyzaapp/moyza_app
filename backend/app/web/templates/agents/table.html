@@ -1,0 +1,96 @@
+<div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+
+    <table class="w-full">
+
+        <thead class="bg-gray-50 border-b border-gray-200">
+
+            <tr>
+
+                <th class="px-6 py-4 text-left">
+                    Nombre
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Correo
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Teléfono
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Zona
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Acciones
+                </th>
+
+            </tr>
+
+        </thead>
+
+        <tbody>
+
+            {% for agent in agents %}
+
+            <tr class="border-b border-gray-100">
+
+                <td class="px-6 py-4">
+                    {{ agent.name }}
+                </td>
+
+                <td class="px-6 py-4">
+                    {{ agent.email }}
+                </td>
+
+                <td class="px-6 py-4">
+                    {{ agent.phone }}
+                </td>
+
+                <td class="px-6 py-4">
+                    {{ agent.zone }}
+                </td>
+
+                <td class="px-6 py-4 flex gap-3">
+
+                    <button
+                        class="bg-red-100 text-blue-600 px-4 py-2 rounded-lg text-sm"
+                        onclick="editAgent(
+                            '{{ agent.id }}',
+                            '{{ agent.name }}',
+                            '{{ agent.email }}',
+                            '{{ agent.phone }}',
+                            '{{ agent.zone }}'
+                        )"
+                    >
+                        Editar
+                    </button>
+
+                    <form
+                        action="/agents/delete/{{ agent.id }}"
+                        method="POST"
+                        onsubmit="return confirm('¿Eliminar agente?')"
+                    >
+
+                        <button
+                            class="bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm"
+                            type="submit"
+                            class="text-red-600"
+                        >
+                            Eliminar
+                        </button>
+
+                    </form>
+
+                </td>
+
+            </tr>
+
+            {% endfor %}
+
+        </tbody>
+
+    </table>
+
+</div>

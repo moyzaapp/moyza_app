@@ -65,3 +65,6 @@ Thumbs.db
 storage/**
 !storage/.gitkeep
 !storage/**/.gitkeep
+
+# --- Ignore specific files .pdf
+*.pdf

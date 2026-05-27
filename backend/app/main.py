@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from app.db.base import Base
 from app.db.session import engine
 from app.api.v1.router import api_router
-from app.web.routes import dashboard, clients, agents, auth
+from app.web.routes import dashboard, clients, agents, auth, properties, reports
 from app.web.middleware.auth import AuthMiddleware
 
 
@@ -22,6 +22,8 @@ app.include_router(dashboard.router)
 app.include_router(clients.router)
 app.include_router(agents.router)
 app.include_router(auth.router)
+app.include_router(properties.router)
+app.include_router(reports.router)
 
 
 @app.get("/")

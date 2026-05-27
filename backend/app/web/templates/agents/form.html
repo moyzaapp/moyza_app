@@ -1,5 +1,5 @@
 <div
-    id="clientModal"
+    id="agentModal"
     class="fixed inset-0 bg-black/50 hidden items-center justify-center"
 >
 
@@ -8,7 +8,7 @@
         <div class="flex items-center justify-between mb-6">
 
             <h2 class="text-2xl font-bold">
-                Nuevo Cliente
+                Agente
             </h2>
 
             <button onclick="closeModal()">
@@ -17,12 +17,16 @@
 
         </div>
 
-        <!-- <form action="/clients/create" method="post"> -->
-        <form id="clientForm" action="/clients/create" method="POST">
+        <form
+            id="agentForm"
+            action="/agents/create"
+            method="POST"
+        >
+
             <input
                 type="hidden"
-                name="client_id"
-                id="client_id"
+                name="agent_id"
+                id="agent_id"
             >
 
             <div class="mb-4">
@@ -55,7 +59,7 @@
 
             </div>
 
-            <div class="mb-6">
+            <div class="mb-4">
 
                 <label class="block mb-2 text-sm font-medium">
                     Teléfono
@@ -65,6 +69,21 @@
                     type="text"
                     id="phone"
                     name="phone"
+                    class="w-full border border-gray-300 rounded-xl p-3"
+                >
+
+            </div>
+
+            <div class="mb-6">
+
+                <label class="block mb-2 text-sm font-medium">
+                    Zona
+                </label>
+
+                <input
+                    type="text"
+                    id="zone"
+                    name="zone"
                     class="w-full border border-gray-300 rounded-xl p-3"
                 >
 
@@ -99,25 +118,25 @@
 
 function openModal() {
 
-    document.getElementById("clientForm").reset()
+    document.getElementById("agentForm").reset()
 
-    document.getElementById("clientForm")
-        .action = "/clients/create"
+    document.getElementById("agentForm")
+        .action = "/agents/create"
 
-    document.getElementById("client_id").value = ""
+    document.getElementById("agent_id").value = ""
 
-    const modal = document.getElementById("clientModal")
+    const modal = document.getElementById("agentModal")
 
     modal.classList.remove("hidden")
     modal.classList.add("flex")
 }
 
 
-function editClient(id, name, email, phone) {
+function editAgent(id, name, email, phone, zone) {
 
     openModal()
 
-    document.getElementById("client_id").value = id
+    document.getElementById("agent_id").value = id
 
     document.getElementById("name").value = name
 
@@ -125,14 +144,16 @@ function editClient(id, name, email, phone) {
 
     document.getElementById("phone").value = phone
 
-    document.getElementById("clientForm")
-        .action = "/clients/update"
+    document.getElementById("zone").value = zone
+
+    document.getElementById("agentForm")
+        .action = "/agents/update"
 }
 
 
 function closeModal() {
 
-    const modal = document.getElementById("clientModal")
+    const modal = document.getElementById("agentModal")
 
     modal.classList.remove("flex")
     modal.classList.add("hidden")

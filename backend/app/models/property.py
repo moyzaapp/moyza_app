@@ -1,0 +1,53 @@
+from sqlalchemy import Column
+from sqlalchemy import Integer
+from sqlalchemy import String
+from sqlalchemy import ForeignKey
+from sqlalchemy import Text
+from sqlalchemy import Numeric
+
+from sqlalchemy.orm import relationship
+
+from app.db.base import Base
+
+
+class Property(Base):
+
+    __tablename__ = "properties"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    title = Column(String, nullable=False)
+
+    address = Column(String)
+
+    city = Column(String)
+
+    property_type = Column(String, default="Casa")
+
+    business_type = Column(String, default="Venta")
+
+    price = Column(Numeric)
+
+    status = Column(String, default="Activa")
+
+    description = Column(Text)
+
+    client_id = Column(
+        Integer,
+        ForeignKey("clients.id")
+    )
+
+    agent_id = Column(
+        Integer,
+        ForeignKey("agents.id")
+    )
+
+    client = relationship(
+        "Client",
+        back_populates="properties"
+    )
+
+    agent = relationship(
+        "Agent",
+        back_populates="properties"
+    )

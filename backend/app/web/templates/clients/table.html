@@ -82,9 +82,21 @@
                             Editar
                         </button>
 
-                        <button class="bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm">
-                            Eliminar
-                        </button>
+                        <form
+                            action="/clients/delete/{{ client.id }}"
+                            method="POST"
+                            onsubmit="return confirm('¿Eliminar cliente?')"
+                        >
+
+                            <button 
+                                class="bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm"
+                                type="submit"
+                                class="text-red-600"
+                            >
+                                Eliminar
+                            </button>
+
+                        </form>
 
                     </div>
 

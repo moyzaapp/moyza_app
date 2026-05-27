@@ -1,6 +1,7 @@
 from app.web.dependencies.auth import get_current_web_user
 from app.models.user import User
 from app.models.client import Client
+from app.models.property import Property
 from fastapi import APIRouter
 from fastapi import Request
 from fastapi import Depends
@@ -25,13 +26,16 @@ async def clients_page(request: Request, db: Session = Depends(get_db)):
 
     current_user = request.state.user
 
+    error = request.query_params.get("error")
+
     return templates.TemplateResponse(
         request=request,
         name="clients/home.html",
         context={
             "request": request,
             "clients": clients,
-            "current_user": current_user
+            "current_user": current_user,
+            "error": error
         }
     )
 
@@ -79,6 +83,36 @@ async def update_client(
         client.name = name
         client.email = email
         client.phone = phone
+
+        db.commit()
+
+    return RedirectResponse(
+        url="/clients",
+        status_code=302
+    )
+
+@router.post("/clients/delete/{client_id}")
+async def delete_client(
+    client_id: int,
+    db: Session = Depends(get_db)
+):
+    properties = db.query(Property).filter(
+        Property.client_id == client_id
+    ).count()
+
+    if properties > 0:
+        return RedirectResponse(
+            url="/clients?error=in_use",
+            status_code=302
+        )
+
+    client = db.query(Client).filter(
+        Client.id == client_id
+    ).first()
+
+    if client:
+
+        db.delete(client)
 
         db.commit()
 
