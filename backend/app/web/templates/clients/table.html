@@ -71,6 +71,12 @@
                     <div class="flex justify-end gap-2">
 
                         <button
+                            onclick="editClient(
+                                '{{ client.id }}',
+                                '{{ client.name }}',
+                                '{{ client.email }}',
+                                '{{ client.phone }}'
+                            )"
                             class="bg-gray-100 px-4 py-2 rounded-lg text-sm"
                         >
                             Editar

@@ -17,7 +17,13 @@
 
         </div>
 
-        <form action="/clients/create" method="post">
+        <!-- <form action="/clients/create" method="post"> -->
+        <form id="clientForm" action="/clients/create" method="POST"></form>
+            <input
+                type="hidden"
+                name="client_id"
+                id="client_id"
+            >
 
             <div class="mb-4">
 
@@ -27,6 +33,7 @@
 
                 <input
                     type="text"
+                    id="name"
                     name="name"
                     class="w-full border border-gray-300 rounded-xl p-3"
                 >
@@ -41,6 +48,7 @@
 
                 <input
                     type="text"
+                    id="email"
                     name="email"
                     class="w-full border border-gray-300 rounded-xl p-3"
                 >
@@ -55,6 +63,7 @@
 
                 <input
                     type="text"
+                    id="phone"
                     name="phone"
                     class="w-full border border-gray-300 rounded-xl p-3"
                 >
@@ -89,11 +98,36 @@
 
 function openModal() {
 
+    document.getElementById("clientForm").reset()
+
+    document.getElementById("clientForm")
+        .action = "/clients/create"
+
+    document.getElementById("client_id").value = ""
+
     const modal = document.getElementById("clientModal")
 
     modal.classList.remove("hidden")
     modal.classList.add("flex")
 }
+
+
+function editClient(id, name, email, phone) {
+
+    openModal()
+
+    document.getElementById("client_id").value = id
+
+    document.getElementById("name").value = name
+
+    document.getElementById("email").value = email
+
+    document.getElementById("phone").value = phone
+
+    document.getElementById("clientForm")
+        .action = "/clients/update"
+}
+
 
 function closeModal() {
 
