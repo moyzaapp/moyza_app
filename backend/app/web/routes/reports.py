@@ -106,7 +106,7 @@ async def upload_report(
         print(report.filepath, report.filename, client_phone)
 
         file_url = f"https://moyza.duckdns.org/{report.filepath}"
-        file_url = f"https://moyza.duckdns.org/storage/reports/fc6d4a93-78e7-424b-8110-90e1e4761121.pdf"
+        # file_url = f"https://moyza.duckdns.org/storage/reports/fc6d4a93-78e7-424b-8110-90e1e4761121.pdf"
 
         send_report(
             phone=client_phone,
