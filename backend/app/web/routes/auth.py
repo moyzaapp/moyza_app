@@ -50,9 +50,7 @@ async def auth_page(
 
     permissions = db.query(Permission).all()
 
-    current_user = request.state.user
-
-    print("user:", users[0].full_name)    
+    current_user = request.state.user 
 
     return templates.TemplateResponse(
         request=request,
