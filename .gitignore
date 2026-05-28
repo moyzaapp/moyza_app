@@ -68,3 +68,5 @@ storage/**
 
 # --- Ignore specific files .pdf
 *.pdf
+.env
+.env.example
