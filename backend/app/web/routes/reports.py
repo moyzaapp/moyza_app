@@ -22,6 +22,7 @@ from app.db.deps import get_db
 
 from app.models.report import Report
 from app.models.property import Property
+from app.services.whatsapp import send_report
 
 
 router = APIRouter()
@@ -61,6 +62,7 @@ async def upload_report(
     report_type: str = Form(...),
     notes: str = Form(...),
     report_file: UploadFile = File(...),
+    send_whatsapp: str = Form(None),
     db: Session = Depends(get_db)
 ):
 
@@ -96,6 +98,21 @@ async def upload_report(
     db.add(report)
 
     db.commit()
+
+    if send_whatsapp:
+        property_item = db.query(Property).filter(Property.id == property_id).first()
+        client_phone = property_item.client.phone
+
+        print(report.filepath, report.filename)
+
+        file_url = f"https://moyza.duckdns.org/{report.filepath}"
+        file_url = f"https://moyza.duckdns.org/storage/reports/fc6d4a93-78e7-424b-8110-90e1e4761121.pdf"
+
+        send_report(
+            phone=client_phone,
+            file_url=file_url,
+            caption="Reporte generado automáticamente"
+        )
 
     return RedirectResponse(
         url="/reports",
