@@ -1,13 +1,32 @@
 <header class="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-8">
+    <div class="flex items-center gap-3">
 
-    <h2 class="text-xl font-semibold text-gray-800">
-        Dashboard
-    </h2>
+        <div class="w-10 h-10 rounded-full bg-black text-white flex items-center justify-center font-bold">
+
+            {{ current_user.full_name[0] }}
+
+        </div>
+
+        <div>
+
+            <p class="font-semibold text-gray-800">
+                {{ current_user.email }}
+            </p>
+
+            <p class="text-sm text-gray-500">
+
+                {{ current_user.role_id | capitalize }}
+
+            </p>
+
+        </div>
+
+    </div>
 
     <div class="flex items-center gap-4">
 
         <span class="text-gray-600">
-            {{ current_user.name }}
+            {{ current_user.full_name }}
         </span>
 
         <a

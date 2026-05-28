@@ -12,6 +12,9 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.db.deps import get_db
+from app.models.user import User
+from app.models.role import Role
+from app.models.permission import Permission
 
 from app.services.auth_service import authenticate_user
 from app.core.security import create_access_token
@@ -36,15 +39,29 @@ async def login_page(request: Request):
 
 
 @router.get("/auth", response_class=HTMLResponse)
-async def auth(request: Request):
+async def auth_page(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+
+    users = db.query(User).all()
+
+    roles = db.query(Role).all()
+
+    permissions = db.query(Permission).all()
 
     current_user = request.state.user
+
+    print("user:", users[0].full_name)    
 
     return templates.TemplateResponse(
         request=request,
         name="auth/home.html",
         context={
             "request": request,
+            "users": users,
+            "roles": roles,
+            "permissions": permissions,
             "current_user": current_user
         }
     )
