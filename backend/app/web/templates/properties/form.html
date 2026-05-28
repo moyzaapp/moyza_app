@@ -7,7 +7,10 @@
 
         <div class="flex items-center justify-between mb-6">
 
-            <h2 class="text-2xl font-bold">
+            <h2
+                id="modalTitle"
+                class="text-2xl font-bold"
+            >
                 Nueva Propiedad
             </h2>
 
@@ -106,6 +109,33 @@
                 class="w-full border rounded-xl p-3 mt-4"
             ></textarea>
 
+            <div id="statusContainer" class="mb-4 hidden">
+
+                <label class="block mb-2 text-sm font-medium">
+                    Estado
+                </label>
+
+                <select
+                    id="status"
+                    name="status"
+                    class="w-full border border-gray-300 rounded-xl p-3"
+                >
+                    <option value="Activa">
+                        Activa
+                    </option>
+
+                    <option value="Pausada">
+                        Pausada
+                    </option>
+
+                    <option value="Vendida">
+                        Vendida
+                    </option>
+
+                </select>
+
+            </div>
+            
             <div class="flex justify-end gap-3 mt-6">
 
                 <button
@@ -135,14 +165,20 @@
 function openModal() {
 
     const modal = document.getElementById("propertyModal")
+    document.getElementById("modalTitle").innerText = "Nueva Propiedad"
+    document.getElementById("statusContainer").classList.add("hidden")
 
     modal.classList.remove("hidden")
     modal.classList.add("flex")
 }
 
-function editProperty(id, title, price, client_id, city, agent_id, status) {
+function editProperty(id, title, price, client_id, city, agent_id, address, status) {
 
     openModal()
+
+    document.getElementById("modalTitle").innerText = "Actualizar Propiedad"
+
+    document.getElementById("statusContainer").classList.remove("hidden")
 
     document.getElementById("property_id").value = id
 
@@ -155,6 +191,10 @@ function editProperty(id, title, price, client_id, city, agent_id, status) {
     document.getElementById("city").value = city
 
     document.getElementById("agent_id").value = agent_id
+
+    document.getElementById("address").value = address
+
+    document.getElementById("status").value = status
     
     document.getElementById("propertyForm").action = "/properties/update"
 }

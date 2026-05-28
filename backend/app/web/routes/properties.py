@@ -37,6 +37,15 @@ async def properties_page(
 
     current_user = request.state.user
 
+    active_count = db.query(Property).filter(Property.status == "Activa").count()
+    paused_count = db.query(Property).filter(Property.status == "Pausada").count()
+    sold_count = db.query(Property).filter(Property.status == "Vendida").count()
+
+    search = request.query_params.get("search")
+
+    if search:
+        properties = db.query(Property).filter(Property.title.contains(search)).all()
+
     return templates.TemplateResponse(
         request=request,
         name="properties/home.html",
@@ -45,7 +54,10 @@ async def properties_page(
             "properties": properties,
             "clients": clients,
             "agents": agents,
-            "current_user": current_user
+            "current_user": current_user,
+            "active_count": active_count,
+            "paused_count": paused_count,
+            "sold_count": sold_count
         }
     )
 
@@ -90,6 +102,7 @@ async def update_property(
     price: float = Form(...),
     client_id: int = Form(...),
     agent_id: int = Form(...),
+    address: str = Form(...),
     status: str = Form(...),
     db: Session = Depends(get_db)
 ):
@@ -104,6 +117,7 @@ async def update_property(
         property.price = price
         property.client_id = client_id
         property.agent_id = agent_id
+        property.address = address
         property.status = status
 
         db.commit()
