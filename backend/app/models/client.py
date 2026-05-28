@@ -11,7 +11,7 @@ class Client(Base):
 
     name = Column(String, nullable=False)
 
-    email = Column(String, nullable=False)
+    email = Column(String, nullable=False, unique=True)
 
     phone = Column(String)
 

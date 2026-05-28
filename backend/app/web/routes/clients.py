@@ -41,12 +41,22 @@ async def clients_page(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/clients/create")
 async def create_client(
-    request: Request,
-    name: str = Form(...),
-    email: str = Form(...),
-    phone: str = Form(...),
-    db: Session = Depends(get_db)
-):
+        request: Request,
+        name: str = Form(...),
+        email: str = Form(...),
+        phone: str = Form(...),
+        db: Session = Depends(get_db)
+    ):
+    
+    existing_client = db.query(Client).filter(
+        Client.email == email
+    ).first()
+
+    if existing_client:
+        return RedirectResponse(
+            url="/clients?error=email_exists",
+            status_code=302
+        )
 
     client = Client(
         name=name,
@@ -66,13 +76,13 @@ async def create_client(
 
 @router.post("/clients/update")
 async def update_client(
-    request: Request,
-    client_id: int = Form(...),
-    name: str = Form(...),
-    email: str = Form(...),
-    phone: str = Form(...),
-    db: Session = Depends(get_db)
-):
+        request: Request,
+        client_id: int = Form(...),
+        name: str = Form(...),
+        email: str = Form(...),
+        phone: str = Form(...),
+        db: Session = Depends(get_db)
+    ):
 
     client = db.query(Client).filter(
         Client.id == client_id
@@ -93,9 +103,9 @@ async def update_client(
 
 @router.post("/clients/delete/{client_id}")
 async def delete_client(
-    client_id: int,
-    db: Session = Depends(get_db)
-):
+        client_id: int,
+        db: Session = Depends(get_db)
+    ):
     properties = db.query(Property).filter(
         Property.client_id == client_id
     ).count()
