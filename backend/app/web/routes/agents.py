@@ -48,13 +48,23 @@ async def agents_page(
 
 @router.post("/agents/create")
 async def create_agent(
-    request: Request,
-    name: str = Form(...),
-    email: str = Form(...),
-    phone: str = Form(...),
-    zone: str = Form(...),
-    db: Session = Depends(get_db)
-):
+        request: Request,
+        name: str = Form(...),
+        email: str = Form(...),
+        phone: str = Form(...),
+        zone: str = Form(...),
+        db: Session = Depends(get_db)
+    ):
+
+    existing_agent = db.query(Agent).filter(
+        Agent.email == email
+    ).first()
+
+    if existing_agent:
+        return RedirectResponse(
+            url="/agents?error=email_exists",
+            status_code=302
+        )
 
     agent = Agent(
         name=name,
