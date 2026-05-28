@@ -103,7 +103,7 @@ async def upload_report(
         property_item = db.query(Property).filter(Property.id == property_id).first()
         client_phone = property_item.client.phone
 
-        print(report.filepath, report.filename)
+        print(report.filepath, report.filename, client_phone)
 
         file_url = f"https://moyza.duckdns.org/{report.filepath}"
         file_url = f"https://moyza.duckdns.org/storage/reports/fc6d4a93-78e7-424b-8110-90e1e4761121.pdf"
