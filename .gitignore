@@ -69,5 +69,5 @@ storage/**
 # --- Ignore specific files .pdf
 *.pdf
 # --- Ignore .env files ---
-.env
-.env.*
+*.env
+*.env.*
