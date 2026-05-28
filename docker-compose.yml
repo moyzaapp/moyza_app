@@ -16,7 +16,7 @@ services:
     restart: always
 
     volumes:
-      - ./storage:/storage
+      - ./storage:/app/storage
 
     networks:
       - moyza_network
