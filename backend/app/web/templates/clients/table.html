@@ -1,0 +1,113 @@
+<div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+
+    <table class="w-full">
+
+        <thead class="bg-gray-50 border-b border-gray-200">
+
+            <tr>
+
+                <th class="px-6 py-4 text-left">
+                    Nombre
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Correo
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Teléfono
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Estado
+                </th>
+
+                <th class="px-6 py-4 text-right">
+                    Acciones
+                </th>
+
+            </tr>
+
+        </thead>
+
+        <tbody>
+
+            {% for client in clients %}
+
+            <tr class="border-b border-gray-100 hover:bg-gray-50">
+
+                <td class="px-6 py-4">
+                    {{ client.name }}
+                </td>
+
+                <td class="px-6 py-4">
+                    {{ client.email }}
+                </td>
+
+                <td class="px-6 py-4">
+                    {{ client.phone }}
+                </td>
+
+                <td class="px-6 py-4">
+
+                    {% if client.status == 'Activo' %}
+
+                    <span class="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm">
+                        Activo
+                    </span>
+
+                    {% else %}
+
+                    <span class="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-sm">
+                        Pendiente
+                    </span>
+
+                    {% endif %}
+
+                </td>
+
+                <td class="px-6 py-4">
+
+                    <div class="flex justify-end gap-2">
+
+                        <button
+                            onclick="editClient(
+                                '{{ client.id }}',
+                                '{{ client.name }}',
+                                '{{ client.email }}',
+                                '{{ client.phone }}'
+                            )"
+                            class="bg-gray-100 px-4 py-2 rounded-lg text-sm"
+                        >
+                            Editar
+                        </button>
+
+                        <form
+                            action="/clients/delete/{{ client.id }}"
+                            method="POST"
+                            onsubmit="return confirm('¿Eliminar cliente?')"
+                        >
+
+                            <button 
+                                class="bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm"
+                                type="submit"
+                                class="text-red-600"
+                            >
+                                Eliminar
+                            </button>
+
+                        </form>
+
+                    </div>
+
+                </td>
+
+            </tr>
+
+            {% endfor %}
+
+        </tbody>
+
+    </table>
+
+</div>

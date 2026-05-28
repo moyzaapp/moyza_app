@@ -1,0 +1,162 @@
+<div
+    id="agentModal"
+    class="fixed inset-0 bg-black/50 hidden items-center justify-center"
+>
+
+    <div class="bg-white rounded-2xl w-[500px] p-8">
+
+        <div class="flex items-center justify-between mb-6">
+
+            <h2 class="text-2xl font-bold">
+                Agente
+            </h2>
+
+            <button onclick="closeModal()">
+                ✕
+            </button>
+
+        </div>
+
+        <form
+            id="agentForm"
+            action="/agents/create"
+            method="POST"
+        >
+
+            <input
+                type="hidden"
+                name="agent_id"
+                id="agent_id"
+            >
+
+            <div class="mb-4">
+
+                <label class="block mb-2 text-sm font-medium">
+                    Nombre
+                </label>
+
+                <input
+                    type="text"
+                    id="name"
+                    name="name"
+                    class="w-full border border-gray-300 rounded-xl p-3"
+                >
+
+            </div>
+
+            <div class="mb-4">
+
+                <label class="block mb-2 text-sm font-medium">
+                    Correo
+                </label>
+
+                <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    class="w-full border border-gray-300 rounded-xl p-3"
+                >
+
+            </div>
+
+            <div class="mb-4">
+
+                <label class="block mb-2 text-sm font-medium">
+                    Teléfono
+                </label>
+
+                <input
+                    type="text"
+                    id="phone"
+                    name="phone"
+                    class="w-full border border-gray-300 rounded-xl p-3"
+                >
+
+            </div>
+
+            <div class="mb-6">
+
+                <label class="block mb-2 text-sm font-medium">
+                    Zona
+                </label>
+
+                <input
+                    type="text"
+                    id="zone"
+                    name="zone"
+                    class="w-full border border-gray-300 rounded-xl p-3"
+                >
+
+            </div>
+
+            <div class="flex justify-end gap-3">
+
+                <button
+                    type="button"
+                    onclick="closeModal()"
+                    class="px-5 py-3 rounded-xl bg-gray-100"
+                >
+                    Cancelar
+                </button>
+
+                <button
+                    type="submit"
+                    class="px-5 py-3 rounded-xl bg-black text-white"
+                >
+                    Guardar
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+<script>
+
+function openModal() {
+
+    document.getElementById("agentForm").reset()
+
+    document.getElementById("agentForm")
+        .action = "/agents/create"
+
+    document.getElementById("agent_id").value = ""
+
+    const modal = document.getElementById("agentModal")
+
+    modal.classList.remove("hidden")
+    modal.classList.add("flex")
+}
+
+
+function editAgent(id, name, email, phone, zone) {
+
+    openModal()
+
+    document.getElementById("agent_id").value = id
+
+    document.getElementById("name").value = name
+
+    document.getElementById("email").value = email
+
+    document.getElementById("phone").value = phone
+
+    document.getElementById("zone").value = zone
+
+    document.getElementById("agentForm")
+        .action = "/agents/update"
+}
+
+
+function closeModal() {
+
+    const modal = document.getElementById("agentModal")
+
+    modal.classList.remove("flex")
+    modal.classList.add("hidden")
+}
+
+</script>

@@ -1,0 +1,91 @@
+<div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+
+    <table class="w-full">
+
+        <thead class="bg-gray-50">
+
+            <tr>
+
+                <th class="px-6 py-4 text-left">
+                    Propiedad
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Tipo
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Archivo
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Fecha
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Acciones
+                </th>
+
+            </tr>
+
+        </thead>
+
+        <tbody>
+
+            {% for report in reports %}
+
+            <tr class="border-b border-gray-100">
+
+                <td class="px-6 py-4">
+                    {{ report.property.title }}
+                </td>
+
+                <td class="px-6 py-4">
+                    {{ report.report_type }}
+                </td>
+
+                <td class="px-6 py-4">
+                    {{ report.filename }}
+                </td>
+
+                <td class="px-6 py-4">
+                    {{ report.created_at }}
+                </td>
+
+                <td class="px-6 py-4">
+
+                    <a
+                        href="/reports/download/{{ report.id }}"
+                        class="bg-black text-white px-4 py-2 rounded-lg text-sm"
+                    >
+                        Descargar
+                    </a>
+
+                    <form 
+                        action="/reports/delete/" 
+                        method="post" 
+                        style="display: inline;">
+                        
+                        <input type="hidden" name="report_id" value="{{ report.id }}">
+
+                        <button
+                            class="bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm"
+                            type="submit"
+                            onclick="return confirm('¿Eliminar informe: {{ report.filename }}?')"
+                        >
+                            Eliminar
+                        </button>
+
+                    </form>
+
+                </td>
+
+            </tr>
+
+            {% endfor %}
+
+        </tbody>
+
+    </table>
+
+</div>

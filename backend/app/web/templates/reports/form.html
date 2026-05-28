@@ -1,0 +1,108 @@
+<div
+    id="reportModal"
+    class="fixed inset-0 bg-black/50 hidden items-center justify-center"
+>
+
+    <div class="bg-white rounded-2xl w-[600px] p-8">
+
+        <div class="flex items-center justify-between mb-6">
+
+            <h2 class="text-2xl font-bold">
+                Subir Informe
+            </h2>
+
+            <button onclick="closeModal()">
+                ✕
+            </button>
+
+        </div>
+
+        <form
+            action="/reports/upload"
+            method="POST"
+            enctype="multipart/form-data"
+        >
+
+            <select
+                name="property_id"
+                class="w-full border rounded-xl p-3 mb-4"
+            >
+
+                <option value="">
+                    Seleccionar Propiedad
+                </option>
+
+                {% for property in properties %}
+
+                <option value="{{ property.id }}">
+                    {{ property.title }}
+                </option>
+
+                {% endfor %}
+
+            </select>
+
+            <input
+                type="text"
+                name="report_type"
+                placeholder="Tipo de informe"
+                class="w-full border rounded-xl p-3 mb-4"
+            >
+
+            <textarea
+                name="notes"
+                placeholder="Observaciones"
+                class="w-full border rounded-xl p-3 mb-4"
+            ></textarea>
+
+            <input
+                type="file"
+                name="report_file"
+                class="w-full border rounded-xl p-3 mb-6"
+            >
+
+            <div class="flex justify-end gap-3">
+
+                <button
+                    type="button"
+                    onclick="closeModal()"
+                    class="bg-gray-100 px-5 py-3 rounded-xl"
+                >
+                    Cancelar
+                </button>
+
+                <button
+                    class="bg-black text-white px-5 py-3 rounded-xl"
+                >
+                    Subir
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+<script>
+
+function openModal() {
+
+    const modal = document.getElementById("reportModal")
+
+    modal.classList.remove("hidden")
+
+    modal.classList.add("flex")
+}
+
+function closeModal() {
+
+    const modal = document.getElementById("reportModal")
+
+    modal.classList.remove("flex")
+
+    modal.classList.add("hidden")
+}
+
+</script>

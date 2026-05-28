@@ -1,0 +1,146 @@
+{% extends 'base.html' %}
+
+{% block title %}
+Auth
+{% endblock %}
+
+{% block content %}
+
+<h1 class="text-3xl font-bold mb-8">
+    Gestión Auth
+</h1>
+
+<div class="bg-white rounded-2xl p-6 mb-8">
+
+    <h2 class="text-xl font-bold mb-4">
+        Usuarios
+    </h2>
+
+    <table class="w-full">
+
+        <thead>
+
+            <tr class="border-b">
+
+                <th class="text-left py-3">
+                    Nombre
+                </th>
+
+                <th class="text-left py-3">
+                    Correo
+                </th>
+
+                <th class="text-left py-3">
+                    Rol
+                </th>
+
+                <th class="text-left py-3">
+                    Estado
+                </th>
+
+            </tr>
+
+        </thead>
+
+        <tbody>
+
+            {% for user in users %}
+
+            <tr class="border-b border-gray-100">
+
+                <td class="py-4">
+                    {{ user.full_name }}
+                </td>
+
+                <td class="py-4">
+                    {{ user.email }}
+                </td>
+
+                <td class="py-4">
+
+                    {% if user.role %}
+
+                        {{ user.role.name }}
+
+                    {% else %}
+
+                        Sin rol
+
+                    {% endif %}
+
+                </td>
+
+                <td class="py-4">
+
+                    {% if user.is_active %}
+
+                        <span class="text-green-600">
+                            Activo
+                        </span>
+
+                    {% else %}
+
+                        <span class="text-red-600">
+                            Inactivo
+                        </span>
+
+                    {% endif %}
+
+                </td>
+
+            </tr>
+
+            {% endfor %}
+
+        </tbody>
+
+    </table>
+
+</div>
+
+<div class="bg-white rounded-2xl p-6 mb-8">
+
+    <h2 class="text-xl font-bold mb-4">
+        Roles
+    </h2>
+
+    <div class="flex gap-4 flex-wrap">
+
+        {% for role in roles %}
+
+        <div class="bg-gray-100 px-4 py-3 rounded-xl">
+
+            {{ role.name }}
+
+        </div>
+
+        {% endfor %}
+
+    </div>
+
+</div>
+
+
+<div class="bg-white rounded-2xl p-6">
+
+    <h2 class="text-xl font-bold mb-4">
+        Permisos
+    </h2>
+
+    <div class="flex gap-4 flex-wrap">
+
+        {% for permission in permissions %}
+
+        <div class="bg-blue-100 text-blue-700 px-4 py-3 rounded-xl">
+
+            {{ permission.code }}
+
+        </div>
+
+        {% endfor %}
+
+    </div>
+
+</div>
+
+{% endblock %}

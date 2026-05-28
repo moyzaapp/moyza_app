@@ -65,3 +65,9 @@ Thumbs.db
 storage/**
 !storage/.gitkeep
 !storage/**/.gitkeep
+
+# --- Ignore specific files .pdf
+*.pdf
+# --- Ignore .env files ---
+.env
+.env.*

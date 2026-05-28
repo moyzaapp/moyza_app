@@ -1,0 +1,170 @@
+<div
+    id="propertyModal"
+    class="fixed inset-0 bg-black/50 hidden items-center justify-center"
+>
+
+    <div class="bg-white rounded-2xl w-[700px] p-8">
+
+        <div class="flex items-center justify-between mb-6">
+
+            <h2 class="text-2xl font-bold">
+                Nueva Propiedad
+            </h2>
+
+            <button onclick="closeModal()">
+                ✕
+            </button>
+
+        </div>
+
+        <form id="propertyForm" action="/properties/create" method="POST">
+            <input
+                type="hidden"
+                name="property_id"
+                id="property_id"
+            >
+
+            <div class="grid grid-cols-2 gap-4">
+
+                <input
+                    type="text"
+                    name="title"
+                    placeholder="Título"
+                    class="border rounded-xl p-3"
+                    id="title"
+                >
+
+                <input
+                    type="text"
+                    name="city"
+                    placeholder="Ciudad"
+                    class="border rounded-xl p-3"
+                    id="city"
+                >
+
+                <input
+                    type="text"
+                    name="address"
+                    placeholder="Dirección"
+                    class="border rounded-xl p-3"
+                    id="address"
+                >
+
+                <input
+                    type="number"
+                    name="price"
+                    placeholder="Valor"
+                    class="border rounded-xl p-3"
+                    id="price"
+                >
+
+                <select
+                    name="client_id"
+                    class="border rounded-xl p-3"
+                    id="client_id"
+                >
+
+                    <option value="">
+                        Cliente
+                    </option>
+
+                    {% for client in clients %}
+
+                    <option value="{{ client.id }}">
+                        {{ client.name }}
+                    </option>
+
+                    {% endfor %}
+
+                </select>
+
+                <select
+                    name="agent_id"
+                    class="border rounded-xl p-3"
+                    id="agent_id"
+                >
+
+                    <option value="">
+                        Agente
+                    </option>
+
+                    {% for agent in agents %}
+
+                    <option value="{{ agent.id }}">
+                        {{ agent.name }}
+                    </option>
+
+                    {% endfor %}
+
+                </select>
+
+            </div>
+
+            <textarea
+                name="description"
+                placeholder="Descripción"
+                class="w-full border rounded-xl p-3 mt-4"
+            ></textarea>
+
+            <div class="flex justify-end gap-3 mt-6">
+
+                <button
+                    type="button"
+                    onclick="closeModal()"
+                    class="bg-gray-100 px-5 py-3 rounded-xl"
+                >
+                    Cancelar
+                </button>
+
+                <button
+                    class="bg-black text-white px-5 py-3 rounded-xl"
+                >
+                    Guardar
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+<script>
+
+function openModal() {
+
+    const modal = document.getElementById("propertyModal")
+
+    modal.classList.remove("hidden")
+    modal.classList.add("flex")
+}
+
+function editProperty(id, title, price, client_id, city, agent_id, status) {
+
+    openModal()
+
+    document.getElementById("property_id").value = id
+
+    document.getElementById("title").value = title
+
+    document.getElementById("price").value = price
+
+    document.getElementById("client_id").value = client_id
+
+    document.getElementById("city").value = city
+
+    document.getElementById("agent_id").value = agent_id
+    
+    document.getElementById("propertyForm").action = "/properties/update"
+}
+
+function closeModal() {
+
+    const modal = document.getElementById("propertyModal")
+
+    modal.classList.remove("flex")
+    modal.classList.add("hidden")
+}
+
+</script>
