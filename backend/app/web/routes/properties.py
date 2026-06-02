@@ -15,6 +15,7 @@ from app.db.deps import get_db
 from app.models.property import Property
 from app.models.client import Client
 from app.models.agent import Agent
+from app.models.property_price_history import PropertyPriceHistory
 
 
 router = APIRouter()
@@ -113,12 +114,25 @@ async def update_property(
 
     if property:
 
+        old_price = property.price
+
         property.title = title
         property.price = price
         property.client_id = client_id
         property.agent_id = agent_id
         property.address = address
         property.status = status
+
+        if old_price != price:
+
+            history = PropertyPriceHistory(
+                property_id=property_id,
+                old_price=old_price,
+                new_price=price,
+                reason="Actualización manual"
+            )
+
+            db.add(history)
 
         db.commit()
 

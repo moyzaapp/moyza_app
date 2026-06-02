@@ -1,9 +1,12 @@
+import datetime
+
 from sqlalchemy import Column
 from sqlalchemy import Integer
 from sqlalchemy import String
 from sqlalchemy import ForeignKey
 from sqlalchemy import Text
 from sqlalchemy import Numeric
+from sqlalchemy import DateTime
 
 from sqlalchemy.orm import relationship
 
@@ -31,6 +34,10 @@ class Property(Base):
     status = Column(String, default="Activa")
 
     description = Column(Text)
+
+    fair_price = Column(float, nullable=True)
+
+    market_entry_date = Column(DateTime, default=datetime.utcnow)
 
     client_id = Column(
         Integer,
