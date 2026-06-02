@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter
 from fastapi import Request
 from fastapi import Depends
@@ -16,6 +18,7 @@ from app.models.property import Property
 from app.models.client import Client
 from app.models.agent import Agent
 from app.models.property_price_history import PropertyPriceHistory
+from app.models.property_interaction import PropertyInteraction
 
 
 router = APIRouter()
@@ -158,5 +161,152 @@ async def delete_property(
 
     return RedirectResponse(
         url="/properties",
+        status_code=302
+    )
+
+@router.get("/properties/{property_id}")
+async def property_detail(
+        property_id: int,
+        request: Request,
+        db: Session = Depends(get_db)
+    ):
+
+    property_item = (
+        db.query(Property)
+        .filter(Property.id == property_id)
+        .first()
+    )
+
+    if not property_item:
+        return RedirectResponse(
+            url="/properties",
+            status_code=302
+        )
+
+    history = (
+        db.query(PropertyPriceHistory)
+        .filter(
+            PropertyPriceHistory.property_id == property_id
+        )
+        .order_by(
+            PropertyPriceHistory.created_at.desc()
+        )
+        .all()
+    )
+
+    reductions_count = len(history)
+
+    days_on_market = 0
+    if property_item.market_entry_date:
+        days_on_market = (
+                datetime.utcnow()
+                - property_item.market_entry_date
+            ).days
+
+    interactions = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id
+        )
+        .order_by(
+            PropertyInteraction.created_at.desc()
+        )
+        .all()
+    )
+
+    consultas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "CONSULTA"
+        )
+        .count()
+    )
+
+    visitas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "VISITA"
+        )
+        .count()
+    )
+
+    interesados = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "INTERESADO"
+        )
+        .count()
+    )
+
+    ofertas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "OFERTA"
+        )
+        .count()
+    )
+
+    price_gap = None
+
+    if property_item.fair_price:
+
+        price_gap = (
+            float(property_item.price)
+            - float(property_item.fair_price)
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="properties/detail.html",
+        context={
+            "request": request,
+            "property": property_item,
+            "history": history,
+            "reductions": reductions_count,
+            "days_on_market": days_on_market,
+            "interactions": interactions,
+            "current_user": request.state.user,
+            "price_gap": price_gap,
+            "consultas": consultas,
+            "visitas": visitas,
+            "interesados": interesados,
+            "ofertas": ofertas
+        }
+    )
+
+
+@router.post("/properties/{property_id}/interactions/create")
+async def create_interaction(
+        property_id: int,
+        request: Request,
+        interaction_type: str = Form(...),
+        contact_name: str = Form(""),
+        phone: str = Form(""),
+        source: str = Form(""),
+        notes: str = Form(""),
+        db: Session = Depends(get_db)
+    ):
+
+    current_user = request.state.user
+
+    interaction = PropertyInteraction(
+        property_id=property_id,
+        interaction_type=interaction_type,
+        contact_name=contact_name,
+        phone=phone,
+        source=source,
+        notes=notes,
+        created_by=current_user.id
+    )
+
+    db.add(interaction)
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/properties/{property_id}",
         status_code=302
     )

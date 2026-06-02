@@ -35,9 +35,9 @@ class Property(Base):
 
     description = Column(Text)
 
-    fair_price = Column(float, nullable=True)
+    fair_price = Column(Numeric, nullable=True)
 
-    market_entry_date = Column(DateTime, default=datetime.utcnow)
+    market_entry_date = Column(DateTime, default=datetime.datetime.utcnow)
 
     client_id = Column(
         Integer,
@@ -57,4 +57,9 @@ class Property(Base):
     agent = relationship(
         "Agent",
         back_populates="properties"
+    )
+
+    interactions = relationship(
+        "PropertyInteraction",
+        backref="property"
     )

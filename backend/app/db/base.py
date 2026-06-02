@@ -10,3 +10,4 @@ from app.models.agent import Agent
 from app.models.property import Property
 from app.models.report import Report
 from app.models.property_price_history import PropertyPriceHistory
+from app.models.property_interaction import PropertyInteraction
