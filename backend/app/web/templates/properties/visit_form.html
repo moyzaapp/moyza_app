@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}
+Registrar visita
+{% endblock %}
+
+{% block content %}
+
+<h1 class="text-3xl font-bold mb-6">
+    Registrar visita
+</h1>
+
+<div class="bg-white rounded-2xl border p-6">
+
+    <form
+        action="/properties/{{ property.id }}/visits/create"
+        method="POST"
+        class="grid grid-cols-2 gap-4"
+    >
+
+        <input
+            type="text"
+            name="visitor_name"
+            placeholder="Nombre visitante"
+            required
+            class="border p-3 rounded-lg"
+        >
+
+        <input
+            type="text"
+            name="phone"
+            placeholder="Teléfono"
+            class="border p-3 rounded-lg"
+        >
+
+        <select
+            name="interest_level"
+            class="border p-3 rounded-lg"
+        >
+            <option value="1">1 - Muy bajo</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5 - Muy alto</option>
+        </select>
+
+        <select
+            name="price_feedback"
+            class="border p-3 rounded-lg"
+        >
+            <option value="ALTO">Precio alto</option>
+            <option value="ADECUADO">Precio adecuado</option>
+            <option value="BAJO">Precio bajo</option>
+        </select>
+
+        <select
+            name="location_feedback"
+            class="border p-3 rounded-lg"
+        >
+            <option value="MALA">Ubicación mala</option>
+            <option value="REGULAR">Ubicación regular</option>
+            <option value="BUENA">Ubicación buena</option>
+        </select>
+
+        <select
+            name="condition_feedback"
+            class="border p-3 rounded-lg"
+        >
+            <option value="MALO">Estado malo</option>
+            <option value="REGULAR">Estado regular</option>
+            <option value="BUENO">Estado bueno</option>
+        </select>
+
+        <select
+            name="lighting_feedback"
+            class="border p-3 rounded-lg"
+        >
+            <option value="MALA">Luminosidad mala</option>
+            <option value="REGULAR">Luminosidad regular</option>
+            <option value="BUENA">Luminosidad buena</option>
+        </select>
+
+        <select
+            name="elevator_feedback"
+            class="border p-3 rounded-lg"
+        >
+            <option value="SI">Tiene ascensor</option>
+            <option value="NO">No tiene ascensor</option>
+        </select>
+
+        <select
+            name="garage_feedback"
+            class="border p-3 rounded-lg"
+        >
+            <option value="SI">Tiene garaje</option>
+            <option value="NO">No tiene garaje</option>
+        </select>
+
+        <textarea
+            name="notes"
+            rows="5"
+            class="border p-3 rounded-lg col-span-2"
+            placeholder="Observaciones"
+        ></textarea>
+
+        <button
+            class="bg-black text-white py-3 rounded-xl col-span-2"
+        >
+            Guardar visita
+        </button>
+
+    </form>
+
+</div>
+
+{% endblock %}

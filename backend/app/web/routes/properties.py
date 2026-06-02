@@ -20,6 +20,7 @@ from app.models.agent import Agent
 from app.models.property_price_history import PropertyPriceHistory
 from app.models.property_interaction import PropertyInteraction
 from app.models.property_status_history import PropertyStatusHistory
+from app.models.property_visit import PropertyVisit
 
 
 router = APIRouter()
@@ -339,6 +340,62 @@ async def create_interaction(
     )
 
     db.add(interaction)
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/properties/{property_id}",
+        status_code=302
+    )
+
+@router.get("/properties/{property_id}/visits/new")
+async def new_visit(
+        property_id: int,
+        request: Request,
+        db: Session = Depends(get_db)
+    ):
+
+    property_item = (
+        db.query(Property)
+        .filter(Property.id == property_id)
+        .first()
+    )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="properties/visit_form.html",
+        context={
+            "request": request,
+            "property": property_item,
+            "current_user": request.state.user
+        }
+    )
+
+@router.post("/properties/{property_id}/visits/create")
+async def create_visit(
+        property_id: int,
+        request: Request,
+        db: Session = Depends(get_db)
+    ):
+
+    form = await request.form()
+
+    visit = PropertyVisit(
+        property_id=property_id,
+        visitor_name=form.get("visitor_name"),
+        phone=form.get("phone"),
+        interest_level=form.get("interest_level"),
+        price_feedback=form.get("price_feedback"),
+        location_feedback=form.get("location_feedback"),
+        condition_feedback=form.get("condition_feedback"),
+        lighting_feedback=form.get("lighting_feedback"),
+        elevator_feedback=form.get("elevator_feedback"),
+        garage_feedback=form.get("garage_feedback"),
+        notes=form.get("notes"),
+        created_by=request.state.user.id
+    )
+
+    db.add(visit)
+
     db.commit()
 
     return RedirectResponse(
