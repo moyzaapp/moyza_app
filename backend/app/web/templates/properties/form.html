@@ -3,7 +3,7 @@
     class="fixed inset-0 bg-black/50 hidden items-center justify-center"
 >
 
-    <div class="bg-white rounded-2xl w-[700px] p-8">
+    <div class="bg-white rounded-2xl w-[700px] p-8 border border-gray-200">
 
         <div class="flex items-center justify-between mb-6">
 
@@ -27,43 +27,81 @@
                 id="property_id"
             >
 
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                <div>
+
+                    <label class="block mb-2 text-sm font-medium text-gray-700">
+                        Título
+                    </label>
 
                 <input
                     type="text"
                     name="title"
                     placeholder="Título"
-                    class="border rounded-xl p-3"
+                    class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-gray-200"
                     id="title"
                 >
+
+                </div>
+
+                <div>
+
+                    <label class="block mb-2 text-sm font-medium text-gray-700">
+                        Ciudad
+                    </label>
 
                 <input
                     type="text"
                     name="city"
                     placeholder="Ciudad"
-                    class="border rounded-xl p-3"
+                    class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-gray-200"
                     id="city"
                 >
+
+                </div>
+
+                <div>
+
+                    <label class="block mb-2 text-sm font-medium text-gray-700">
+                        Dirección
+                    </label>
 
                 <input
                     type="text"
                     name="address"
                     placeholder="Dirección"
-                    class="border rounded-xl p-3"
+                    class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-gray-200"
                     id="address"
                 >
+
+                </div>
+
+                <div>
+
+                    <label class="block mb-2 text-sm font-medium text-gray-700">
+                        Valor
+                    </label>
 
                 <input
                     type="number"
                     name="price"
                     placeholder="Valor"
-                    class="border rounded-xl p-3"
+                    class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-gray-200"
                     id="price"
                 >
 
+                </div>
+
+                <div>
+
+                    <label class="block mb-2 text-sm font-medium text-gray-700">
+                        Cliente
+                    </label>
+
                 <select
                     name="client_id"
-                    class="border rounded-xl p-3"
+                    class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-gray-200"
                     id="client_id"
                 >
 
@@ -81,9 +119,17 @@
 
                 </select>
 
+                </div>
+
+                <div>
+
+                    <label class="block mb-2 text-sm font-medium text-gray-700">
+                        Agente
+                    </label>
+
                 <select
                     name="agent_id"
-                    class="border rounded-xl p-3"
+                    class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-gray-200"
                     id="agent_id"
                 >
 
@@ -101,15 +147,17 @@
 
                 </select>
 
+                </div>
+
             </div>
 
             <textarea
                 name="description"
                 placeholder="Descripción"
-                class="w-full border rounded-xl p-3 mt-4"
+                class="w-full border border-gray-300 rounded-xl p-3 mt-4 focus:outline-none focus:ring-2 focus:ring-gray-200"
             ></textarea>
 
-            <div id="statusContainer" class="mb-4 hidden">
+            <div id="statusContainer" class="mt-4 hidden">
 
                 <label class="block mb-2 text-sm font-medium">
                     Estado
@@ -118,7 +166,7 @@
                 <select
                     id="status"
                     name="status"
-                    class="w-full border border-gray-300 rounded-xl p-3"
+                    class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-gray-200"
                 >
                     <option value="Activa">
                         Activa
@@ -197,6 +245,24 @@ function editProperty(id, title, price, client_id, city, agent_id, address, stat
     document.getElementById("status").value = status
     
     document.getElementById("propertyForm").action = "/properties/update"
+}
+
+function editPropertyFromButton(button) {
+
+    if (!button || !button.dataset) {
+        return
+    }
+
+    editProperty(
+        button.dataset.id,
+        button.dataset.title || "",
+        button.dataset.price || "",
+        button.dataset.clientId || "",
+        button.dataset.city || "",
+        button.dataset.agentId || "",
+        button.dataset.address || "",
+        button.dataset.status || "Activa"
+    )
 }
 
 function closeModal() {

@@ -1,20 +1,22 @@
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
-    <div class="bg-white rounded-2xl p-4 mb-6 shadow">
+    <div class="p-4 border-b border-gray-200 bg-white">
 
-        <form method="GET" action="/properties">
+        <form method="GET" action="/properties" class="flex items-center gap-3">
 
             <input
                 type="text"
                 name="search"
                 placeholder="Buscar propiedad..."
                 value="{{ request.query_params.get('search', '') }}"
-                class="w-full border border-gray-300 rounded-xl p-3"
+                class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-gray-200"
             >
 
         </form>
 
     </div>
+
+    <div class="overflow-x-auto">
 
     <table class="w-full">
 
@@ -58,26 +60,30 @@
 
             {% for property in properties %}
 
-            <tr class="border-b border-gray-100">
+            <tr class="border-b border-gray-100 hover:bg-gray-50">
 
                 <td class="px-6 py-4">
                     {{ property.title }}
                 </td>
 
                 <td class="px-6 py-4">
-                    {{ property.client.name }}
+                    {{ property.client.name if property.client else '-' }}
                 </td>
 
                 <td class="px-6 py-4">
-                    {{ property.agent.name }}
+                    {{ property.agent.name if property.agent else '-' }}
                 </td>
 
                 <td class="px-6 py-4">
-                    {{ property.city }}
+                    {{ property.city or '-' }}
                 </td>
 
                 <td class="px-6 py-4">
-                    $ {{ property.price }}
+                    {% if property.price is not none %}
+                        $ {{ "{:,.0f}".format(property.price) }}
+                    {% else %}
+                        -
+                    {% endif %}
                 </td>
 
                 <td class="px-6 py-4">
@@ -103,19 +109,20 @@
 
                 </td>
 
-                <td class="flex justify-end gap-2">
+                <td class="px-6 py-4">
 
-                    <button 
-                        onclick="editProperty(
-                            '{{ property.id }}',
-                            '{{ property.title }}',
-                            '{{ property.price }}',
-                            '{{ property.client_id }}',
-                            '{{ property.city }}',
-                            '{{ property.agent_id }}',
-                            '{{ property.address }}',
-                            '{{ property.status }}'
-                        )"
+                    <div class="flex justify-end gap-2">
+
+                    <button
+                        data-id="{{ property.id }}"
+                        data-title="{{ (property.title or '')|e }}"
+                        data-price="{{ property.price if property.price is not none else '' }}"
+                        data-client-id="{{ property.client_id if property.client_id is not none else '' }}"
+                        data-city="{{ (property.city or '')|e }}"
+                        data-agent-id="{{ property.agent_id if property.agent_id is not none else '' }}"
+                        data-address="{{ (property.address or '')|e }}"
+                        data-status="{{ (property.status or 'Activa')|e }}"
+                        onclick="editPropertyFromButton(this)"
                         class="bg-blue-100 px-4 py-2 rounded-lg text-sm text-blue-700"
                     >
                         Editar
@@ -142,6 +149,8 @@
                         Ver
                     </a>
 
+                    </div>
+
                 </td>
 
             </tr>
@@ -151,5 +160,7 @@
         </tbody>
 
     </table>
+
+    </div>
 
 </div>
