@@ -25,23 +25,18 @@ Detalle Propiedad
             {{ property.address or 'Sin dirección' }}{% if property.city %} · {{ property.city }}{% endif %}
         </p>
 
-        <a
-            href="/properties/{{ property.id }}/visits/new"
-            class="bg-blue-600 text-white px-4 py-2 rounded-xl"
-        >
-            Registrar visita
-        </a>
-
-        <a
-            href="/properties/{{ property.id }}/visits/new"
-            class="bg-blue-600 text-white px-4 py-2 rounded-xl"
-        >
-            Registrar visita
-        </a>
+        
 
     </div>
 
     <div class="flex items-center gap-3">
+
+        <a
+            href="/properties/{{ property.id }}/visits/new"
+            class="bg-black text-white px-5 py-3 rounded-xl"
+        >
+            Registrar visita
+        </a>
 
         {% if property.status == 'Activa' %}
             <span class="px-3 py-1 rounded-full text-sm font-medium bg-green-50 text-green-700 border border-green-200">
