@@ -19,6 +19,7 @@ from app.models.client import Client
 from app.models.agent import Agent
 from app.models.property_price_history import PropertyPriceHistory
 from app.models.property_interaction import PropertyInteraction
+from app.models.property_status_history import PropertyStatusHistory
 
 
 router = APIRouter()
@@ -33,7 +34,7 @@ async def properties_page(
     db: Session = Depends(get_db)
 ):
 
-    properties = db.query(Property).all()
+    properties = db.query(Property).filter(Property.status != "Archivada").all()
 
     clients = db.query(Client).all()
 
@@ -118,6 +119,7 @@ async def update_property(
     if property:
 
         old_price = property.price
+        old_status = property.status
 
         property.title = title
         property.price = price
@@ -133,6 +135,17 @@ async def update_property(
                 old_price=old_price,
                 new_price=price,
                 reason="Actualización manual"
+            )
+
+            db.add(history)
+
+        if old_status != status:
+
+            history = PropertyStatusHistory(
+                property_id=property_id,
+                old_status=old_status,
+                new_status=status,
+                changed_by=request.state.user.id
             )
 
             db.add(history)
@@ -156,7 +169,17 @@ async def delete_property(
 
     if property:
 
-        db.delete(property)
+        property.status = "Archivada"
+
+        history = PropertyStatusHistory(
+            property_id=property_id,
+            old_status=property.status,
+            new_status="Archivada",
+            changed_by=None
+        )
+
+        db.add(history)
+        
         db.commit()
 
     return RedirectResponse(
@@ -259,6 +282,17 @@ async def property_detail(
             - float(property_item.fair_price)
         )
 
+    status_history = (
+        db.query(PropertyStatusHistory)
+        .filter(
+            PropertyStatusHistory.property_id == property_id
+        )
+        .order_by(
+            PropertyStatusHistory.created_at.desc()
+        )
+        .all()
+    )
+
     return templates.TemplateResponse(
         request=request,
         name="properties/detail.html",
@@ -274,7 +308,8 @@ async def property_detail(
             "consultas": consultas,
             "visitas": visitas,
             "interesados": interesados,
-            "ofertas": ofertas
+            "ofertas": ofertas,
+            "status_history": status_history
         }
     )
 

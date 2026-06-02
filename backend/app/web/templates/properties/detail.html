@@ -422,4 +422,65 @@ Detalle Propiedad
 
 </div>
 
+<div class="mt-6">
+
+    <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-bold">Historial de estados</h3>
+        <p class="text-sm text-gray-500">{{ status_history|length }} cambio(s)</p>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+
+        <div class="overflow-x-auto">
+
+            <table class="w-full">
+
+                <thead class="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Fecha</th>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Antes</th>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Después</th>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Usuario</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for item in status_history %}
+
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="px-6 py-4 text-sm text-gray-700">
+                            {{ item.created_at.strftime('%d/%m/%Y') }}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-700">
+                            {{ item.old_status or '-' }}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-700">
+                            {{ item.new_status or '-' }}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-700">
+                            {{ item.changed_by or '-' }}
+                        </td>
+                    </tr>
+
+                    {% else %}
+
+                    <tr>
+                        <td class="px-6 py-8 text-sm text-gray-500" colspan="4">
+                            Sin cambios de estado registrados.
+                        </td>
+                    </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+</div>
+
 {% endblock %}
