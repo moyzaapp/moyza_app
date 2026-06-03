@@ -23,6 +23,7 @@ from app.db.deps import get_db
 from app.models.report import Report
 from app.models.property import Property
 from app.services.whatsapp import send_report
+from app.web.utils.flash import set_flash
 
 
 router = APIRouter()
@@ -99,25 +100,36 @@ async def upload_report(
 
     db.commit()
 
+    response = RedirectResponse(url="/reports", status_code=302)
+
     if send_whatsapp:
-        property_item = db.query(Property).filter(Property.id == property_id).first()
-        client_phone = property_item.client.phone
+        try:
+            property_item = db.query(Property).filter(Property.id == property_id).first()
 
-        print(report.filepath, report.filename, client_phone)
+            if not property_item or not property_item.client or not property_item.client.phone:
+                set_flash(response, "warning", "Informe subido, pero no se pudo enviar por WhatsApp: cliente sin teléfono")
+                return response
 
-        file_url = f"https://moyza.duckdns.org/{report.filepath}"
-        # file_url = f"https://moyza.duckdns.org/storage/reports/fc6d4a93-78e7-424b-8110-90e1e4761121.pdf"
+            client_phone = property_item.client.phone
 
-        send_report(
-            phone=client_phone,
-            file_url=file_url,
-            caption="Reporte generado automáticamente"
-        )
+            print(report.filepath, report.filename, client_phone)
 
-    return RedirectResponse(
-        url="/reports",
-        status_code=302
-    )
+            file_url = f"https://moyza.duckdns.org/{report.filepath}"
+
+            send_report(
+                phone=client_phone,
+                file_url=file_url,
+                caption="Reporte generado automáticamente"
+            )
+
+            set_flash(response, "success", "Informe subido y enviado por WhatsApp correctamente")
+        except Exception as e:
+            print(f"Error enviando WhatsApp: {e}")
+            set_flash(response, "warning", "Informe subido, pero ocurrió un error al enviar por WhatsApp")
+    else:
+        set_flash(response, "success", "Informe subido correctamente")
+
+    return response
 
 @router.get("/reports/download/{report_id}")
 async def download_report(
@@ -130,7 +142,14 @@ async def download_report(
     ).first()
 
     if not report:
-        return {"error": "Report not found"}
+        response = RedirectResponse(url="/reports", status_code=302)
+        set_flash(response, "error", "Informe no encontrado")
+        return response
+
+    if not os.path.exists(report.filepath):
+        response = RedirectResponse(url="/reports", status_code=302)
+        set_flash(response, "error", "Archivo del informe no encontrado en el servidor")
+        return response
 
     return FileResponse(
         path=report.filepath,
@@ -149,20 +168,25 @@ async def delete_report(
         Report.id == report_id
     ).first()
 
+    response = RedirectResponse(url="/reports", status_code=302)
+
     if not report:
-        return {"error": "Report not found"}
+        set_flash(response, "error", "Informe no encontrado")
+        return response
 
-    if os.path.exists(report.filepath):
-        os.remove(report.filepath)
+    try:
+        if os.path.exists(report.filepath):
+            os.remove(report.filepath)
 
-    db.delete(report)
+        db.delete(report)
+        db.commit()
 
-    db.commit()
+        set_flash(response, "success", "Informe eliminado correctamente")
+    except Exception as e:
+        print(f"Error eliminando informe: {e}")
+        set_flash(response, "error", "Ocurrió un error al eliminar el informe")
 
-    return RedirectResponse(
-        url="/reports",
-        status_code=302
-    )
+    return response
 
 
 @router.post("/reports/{report_id}/send-whatsapp")
@@ -172,26 +196,43 @@ async def send_report_whatsapp(
     db: Session = Depends(get_db)
 ):
 
+    redirect_url = request.headers.get("referer") or "/reports"
+    response = RedirectResponse(url=redirect_url, status_code=302)
+
     report = db.query(Report).filter(
         Report.id == report_id
     ).first()
 
     if not report:
-        return {"error": "Report not found"}
+        set_flash(response, "error", "Informe no encontrado")
+        return response
 
     property_item = db.query(Property).filter(Property.id == report.property_id).first()
+
+    if not property_item:
+        set_flash(response, "error", "Propiedad asociada no encontrada")
+        return response
+
+    if not property_item.client or not property_item.client.phone:
+        set_flash(response, "error", "El cliente no tiene un número de teléfono registrado")
+        return response
+
     client_phone = property_item.client.phone
 
     file_url = f"https://moyza.duckdns.org/{report.filepath}"
-    file_url = f"https://moyza.duckdns.org/storage/reports/b89da4b7-1407-4205-891a-c26faa33c746.pdf"
+    file_url = "https://moyza.duckdns.org/storage/reports/b89da4b7-1407-4205-891a-c26faa33c746.pdf"
 
     print(report.filepath, report.filename, client_phone, property_item.id)
 
-    send_report(
-        phone=client_phone,
-        file_url=file_url,
-        caption="Reporte generado automáticamente"
-    )
+    try:
+        send_report(
+            phone=client_phone,
+            file_url=file_url,
+            caption="Reporte generado automáticamente"
+        )
+        set_flash(response, "success", f"Informe enviado por WhatsApp a {client_phone}")
+    except Exception as e:
+        print(f"Error enviando WhatsApp: {e}")
+        set_flash(response, "error", "Ocurrió un error al enviar el informe por WhatsApp")
 
-    redirect_url = request.headers.get("referer") or "/reports"
-    return RedirectResponse(url=redirect_url, status_code=302)
+    return response

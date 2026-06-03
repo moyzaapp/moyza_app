@@ -86,25 +86,30 @@ async def create_property(
     db: Session = Depends(get_db)
 ):
 
-    property_item = Property(
-        title=title,
-        address=address,
-        city=city,
-        price=price,
-        description=description,
-        client_id=client_id,
-        agent_id=agent_id,
-        status="Activa"
-    )
+    try:
+        property_item = Property(
+            title=title,
+            address=address,
+            city=city,
+            price=price,
+            description=description,
+            client_id=client_id,
+            agent_id=agent_id,
+            status="Activa"
+        )
 
-    db.add(property_item)
+        db.add(property_item)
+        db.commit()
 
-    db.commit()
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "success", f"Propiedad '{title}' creada correctamente")
+        return response
 
-    return RedirectResponse(
-        url="/properties",
-        status_code=302
-    )
+    except Exception as e:
+        print(f"Error creando propiedad: {e}")
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Ocurrió un error al crear la propiedad")
+        return response
 
 @router.post("/properties/update")
 async def update_property(
@@ -388,23 +393,29 @@ async def create_interaction(
 
     current_user = request.state.user
 
-    interaction = PropertyInteraction(
-        property_id=property_id,
-        interaction_type=interaction_type,
-        contact_name=contact_name,
-        phone=phone,
-        source=source,
-        notes=notes,
-        created_by=current_user.id
-    )
+    try:
+        interaction = PropertyInteraction(
+            property_id=property_id,
+            interaction_type=interaction_type,
+            contact_name=contact_name,
+            phone=phone,
+            source=source,
+            notes=notes,
+            created_by=current_user.id
+        )
 
-    db.add(interaction)
-    db.commit()
+        db.add(interaction)
+        db.commit()
 
-    return RedirectResponse(
-        url=f"/properties/{property_id}",
-        status_code=302
-    )
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "success", f"Actividad de tipo '{interaction_type}' registrada correctamente")
+        return response
+
+    except Exception as e:
+        print(f"Error registrando interacción: {e}")
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "error", "Ocurrió un error al registrar la actividad")
+        return response
 
 @router.get("/properties/{property_id}/visits/new")
 async def new_visit(
