@@ -7,6 +7,7 @@ from sqlalchemy import ForeignKey
 from sqlalchemy import Text
 from sqlalchemy import Numeric
 from sqlalchemy import DateTime
+from sqlalchemy import Boolean
 
 from sqlalchemy.orm import relationship
 
@@ -47,6 +48,26 @@ class Property(Base):
     agent_id = Column(
         Integer,
         ForeignKey("agents.id")
+    )
+
+    auto_send_report = Column(
+        Boolean,
+        default=False
+    )
+
+    report_frequency = Column(
+        String,
+        nullable=True
+    )
+
+    report_day = Column(
+        Integer,
+        nullable=True
+    )
+
+    report_hour = Column(
+        Integer,
+        nullable=True
     )
 
     client = relationship(

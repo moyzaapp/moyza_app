@@ -121,6 +121,7 @@ async def update_property(
     agent_id: int = Form(...),
     address: str = Form(...),
     status: str = Form(...),
+    auto_send_report: bool = Form(False),
     db: Session = Depends(get_db)
 ):
 
@@ -142,6 +143,7 @@ async def update_property(
     property.agent_id = agent_id
     property.address = address
     property.status = status
+    property.auto_send_report = auto_send_report
 
     if old_price != price:
 
