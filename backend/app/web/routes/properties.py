@@ -332,6 +332,15 @@ async def property_detail(
         if v.price_feedback == "ALTO"
     )
 
+    property_reports = (
+        db.query(Report)
+        .filter(Report.property_id == property_id)
+        .order_by(Report.created_at.desc())
+        .all()
+    )
+
+    latest_report = property_reports[0] if property_reports else None
+
     return templates.TemplateResponse(
         request=request,
         name="properties/detail.html",
@@ -351,7 +360,9 @@ async def property_detail(
             "status_history": status_history,
             "visits_registered": visits_registered,
             "interest_avg": interest_avg,
-            "price_high_count": price_high_count
+            "price_high_count": price_high_count,
+            "property_reports": property_reports,
+            "latest_report": latest_report
         }
     )
 

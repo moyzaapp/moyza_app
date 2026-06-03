@@ -30,6 +30,12 @@ Detalle Propiedad
     </div>
 
     <div class="flex items-center gap-3">
+        <a
+            href="/properties/{{ property.id }}/visits/new"
+            class="bg-black text-white px-5 py-3 rounded-xl"
+        >
+            Registrar visita
+        </a>
 
         <form
             action="/properties/{{ property.id }}/generate-report"
@@ -44,12 +50,26 @@ Detalle Propiedad
 
         </form>
 
-        <a
-            href="/properties/{{ property.id }}/visits/new"
-            class="bg-black text-white px-5 py-3 rounded-xl"
-        >
-            Registrar visita
-        </a>
+        {% if latest_report %}
+            <form
+                action="/reports/{{ latest_report.id }}/send-whatsapp"
+                method="POST"
+            >
+                <button
+                    class="bg-green-600 text-white px-4 py-2 rounded-xl"
+                >
+                    Enviar último informe
+                </button>
+            </form>
+        {% else %}
+            <button
+                class="bg-gray-200 text-gray-500 px-4 py-2 rounded-xl cursor-not-allowed"
+                disabled
+                title="Primero genera o sube un informe"
+            >
+                Enviar informe
+            </button>
+        {% endif %}
 
         {% if property.status == 'Activa' %}
             <span class="px-3 py-1 rounded-full text-sm font-medium bg-green-50 text-green-700 border border-green-200">
@@ -392,7 +412,7 @@ Detalle Propiedad
 
                         <tr class="border-b border-gray-100 hover:bg-gray-50">
                             <td class="px-6 py-4 text-sm text-gray-700">
-                                {{ item.created_at.strftime('%d/%m/%Y') }}
+                                {{ item.created_at.strftime('%d/%m/%Y %H:%M') }}
                             </td>
                             <td class="px-6 py-4 text-sm text-gray-700">
                                 {{ item.interaction_type }}
@@ -453,7 +473,7 @@ Detalle Propiedad
 
                         <tr class="border-b border-gray-100 hover:bg-gray-50">
                             <td class="px-6 py-4 text-sm text-gray-700">
-                                {{ item.created_at.strftime('%d/%m/%Y') }}
+                                {{ item.created_at.strftime('%d/%m/%Y %H:%M') }}
                             </td>
                             <td class="px-6 py-4 text-sm text-gray-700">
                                 {% if item.old_price is not none %}{{ "{:,.0f}".format(item.old_price) }}{% else %}-{% endif %}
@@ -491,6 +511,86 @@ Detalle Propiedad
 <div class="mt-6">
 
     <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-bold">Historial de informes</h3>
+        <p class="text-sm text-gray-500">{{ property_reports|length }} informe(s)</p>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+
+        <div class="overflow-x-auto">
+
+            <table class="w-full">
+
+                <thead class="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Fecha</th>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Tipo</th>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Archivo</th>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Notas</th>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Acciones</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+
+                    {% for report in property_reports %}
+
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="px-6 py-4 text-sm text-gray-700">
+                            {{ report.created_at.strftime('%d/%m/%Y %H:%M') }}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-700">
+                            {{ report.report_type or '-' }}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-700">
+                            <a
+                                href="/reports/download/{{ report.id }}"
+                                class="text-sm text-gray-800 hover:underline"
+                                title="Descargar"
+                            >
+                                {{ report.filename }}
+                            </a>
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-700">
+                            {{ report.notes or '-' }}
+                        </td>
+                        <td class="px-6 py-4 text-sm">
+                            <div class="flex items-center gap-2">
+                                <form action="/reports/{{ report.id }}/send-whatsapp" method="POST">
+                                    <button class="bg-green-600 text-white px-3 py-2 rounded-xl">
+                                        Enviar
+                                    </button>
+                                </form>
+
+                                <a
+                                    href="/reports/download/{{ report.id }}"
+                                    class="bg-black text-white px-3 py-2 rounded-xl"
+                                >
+                                    Descargar
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    {% else %}
+
+                    <tr>
+                        <td class="px-6 py-8 text-sm text-gray-500" colspan="5">
+                            No hay informes asociados a esta propiedad.
+                        </td>
+                    </tr>
+
+                    {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+    <div class="flex items-center justify-between mb-3">
         <h3 class="text-lg font-bold">Historial de estados</h3>
         <p class="text-sm text-gray-500">{{ status_history|length }} cambio(s)</p>
     </div>
@@ -516,7 +616,7 @@ Detalle Propiedad
 
                     <tr class="border-b border-gray-100 hover:bg-gray-50">
                         <td class="px-6 py-4 text-sm text-gray-700">
-                            {{ item.created_at.strftime('%d/%m/%Y') }}
+                            {{ item.created_at.strftime('%d/%m/%Y %H:%M') }}
                         </td>
                         <td class="px-6 py-4 text-sm text-gray-700">
                             {{ item.old_status or '-' }}
