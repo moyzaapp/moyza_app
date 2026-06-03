@@ -420,58 +420,35 @@ Detalle Propiedad
 
         <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
-            <!-- Vista móvil: cards -->
-            <div class="block lg:hidden">
-                {% for item in interactions %}
-                <div class="border-b border-gray-100 p-4 hover:bg-gray-50">
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="font-semibold text-sm">{{ item.interaction_type }}</span>
-                        <span class="text-xs text-gray-500">{{ item.created_at.strftime('%d/%m/%Y') }}</span>
-                    </div>
-                    <div class="text-sm text-gray-700 mb-1">
-                        <span class="text-gray-500">Contacto:</span> {{ item.contact_name or '-' }}
-                    </div>
-                    <div class="text-sm text-gray-700">
-                        <span class="text-gray-500">Origen:</span> {{ item.source or '-' }}
-                    </div>
-                </div>
-                {% else %}
-                <div class="p-6 text-center text-sm text-gray-500">
-                    Sin actividad registrada.
-                </div>
-                {% endfor %}
-            </div>
-
-            <!-- Vista desktop: tabla -->
-            <div class="hidden lg:block overflow-x-auto">
+            <div class="overflow-x-auto">
                 <table class="w-full">
                     <thead class="bg-gray-50 border-b border-gray-200">
                         <tr>
-                            <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Fecha</th>
-                            <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Tipo</th>
-                            <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Contacto</th>
-                            <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Origen</th>
+                            <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Fecha</th>
+                            <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Tipo</th>
+                            <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Contacto</th>
+                            <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Origen</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for item in interactions %}
                         <tr class="border-b border-gray-100 hover:bg-gray-50">
-                            <td class="px-6 py-4 text-sm text-gray-700">
+                            <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                                 {{ item.created_at.strftime('%d/%m/%Y %H:%M') }}
                             </td>
-                            <td class="px-6 py-4 text-sm text-gray-700">
+                            <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                                 {{ item.interaction_type }}
                             </td>
-                            <td class="px-6 py-4 text-sm text-gray-700">
+                            <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                                 {{ item.contact_name or '-' }}
                             </td>
-                            <td class="px-6 py-4 text-sm text-gray-700">
+                            <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                                 {{ item.source or '-' }}
                             </td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td class="px-6 py-8 text-sm text-gray-500" colspan="4">
+                            <td class="px-4 sm:px-6 py-6 sm:py-8 text-xs sm:text-sm text-gray-500 text-center" colspan="4">
                                 Sin actividad registrada.
                             </td>
                         </tr>
@@ -493,67 +470,35 @@ Detalle Propiedad
 
         <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
-            <!-- Vista móvil: cards -->
-            <div class="block lg:hidden">
-                {% for item in history %}
-                <div class="border-b border-gray-100 p-4 hover:bg-gray-50">
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="text-xs text-gray-500">{{ item.created_at.strftime('%d/%m/%Y') }}</span>
-                    </div>
-                    <div class="flex justify-between items-center mb-2">
-                        <div>
-                            <span class="text-xs text-gray-500 block">Antes</span>
-                            <span class="font-semibold text-sm">{% if item.old_price is not none %}{{ "{:,.0f}".format(item.old_price) }}{% else %}-{% endif %}</span>
-                        </div>
-                        <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                        </svg>
-                        <div>
-                            <span class="text-xs text-gray-500 block">Después</span>
-                            <span class="font-semibold text-sm">{% if item.new_price is not none %}{{ "{:,.0f}".format(item.new_price) }}{% else %}-{% endif %}</span>
-                        </div>
-                    </div>
-                    <div class="text-sm text-gray-700">
-                        <span class="text-gray-500">Motivo:</span> {{ item.reason or '-' }}
-                    </div>
-                </div>
-                {% else %}
-                <div class="p-6 text-center text-sm text-gray-500">
-                    Sin cambios de precio registrados.
-                </div>
-                {% endfor %}
-            </div>
-
-            <!-- Vista desktop: tabla -->
-            <div class="hidden lg:block overflow-x-auto">
+            <div class="overflow-x-auto">
                 <table class="w-full">
                     <thead class="bg-gray-50 border-b border-gray-200">
                         <tr>
-                            <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Fecha</th>
-                            <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Antes</th>
-                            <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Después</th>
-                            <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Motivo</th>
+                            <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Fecha</th>
+                            <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Antes</th>
+                            <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Después</th>
+                            <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Motivo</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for item in history %}
                         <tr class="border-b border-gray-100 hover:bg-gray-50">
-                            <td class="px-6 py-4 text-sm text-gray-700">
+                            <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                                 {{ item.created_at.strftime('%d/%m/%Y %H:%M') }}
                             </td>
-                            <td class="px-6 py-4 text-sm text-gray-700">
+                            <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                                 {% if item.old_price is not none %}{{ "{:,.0f}".format(item.old_price) }}{% else %}-{% endif %}
                             </td>
-                            <td class="px-6 py-4 text-sm text-gray-700">
+                            <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                                 {% if item.new_price is not none %}{{ "{:,.0f}".format(item.new_price) }}{% else %}-{% endif %}
                             </td>
-                            <td class="px-6 py-4 text-sm text-gray-700">
+                            <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
                                 {{ item.reason or '-' }}
                             </td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td class="px-6 py-8 text-sm text-gray-500" colspan="4">
+                            <td class="px-4 sm:px-6 py-6 sm:py-8 text-xs sm:text-sm text-gray-500 text-center" colspan="4">
                                 Sin cambios de precio registrados.
                             </td>
                         </tr>
@@ -579,101 +524,45 @@ Detalle Propiedad
 
     <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
 
-        <!-- Vista móvil: cards -->
-        <div class="block lg:hidden">
-            {% for report in property_reports %}
-            <div class="border-b border-gray-100 p-4">
-                <div class="flex justify-between items-start mb-2">
-                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                        {{ report.report_type or 'General' }}
-                    </span>
-                    <span class="text-xs text-gray-500">{{ report.created_at.strftime('%d/%m/%Y') }}</span>
-                </div>
-                <div class="mb-3">
-                    <a
-                        href="/reports/download/{{ report.id }}"
-                        class="text-blue-600 hover:text-blue-800 font-medium text-sm break-all"
-                    >
-                        {{ report.filename }}
-                    </a>
-                    {% if report.notes %}
-                    <p class="text-xs text-gray-600 mt-1">{{ report.notes }}</p>
-                    {% endif %}
-                </div>
-                <div class="flex gap-2">
-                    <form action="/reports/{{ report.id }}/send-whatsapp" method="POST" class="flex-1">
-                        <button
-                            type="submit"
-                            class="w-full bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors text-sm font-medium flex items-center justify-center gap-1"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                            </svg>
-                            Enviar
-                        </button>
-                    </form>
-                    <a
-                        href="/reports/download/{{ report.id }}"
-                        class="flex-1 bg-gray-800 text-white px-3 py-2 rounded-lg hover:bg-gray-900 active:bg-black transition-colors text-sm font-medium flex items-center justify-center gap-1"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                        Descargar
-                    </a>
-                </div>
-            </div>
-            {% else %}
-            <div class="p-8 text-center text-gray-500">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <p class="text-sm font-medium">No hay informes asociados</p>
-                <p class="text-xs text-gray-400 mt-1">Usa "Generar informe"</p>
-            </div>
-            {% endfor %}
-        </div>
-
-        <!-- Vista desktop: tabla -->
-        <div class="hidden lg:block overflow-x-auto">
+        <div class="overflow-x-auto">
             <table class="w-full">
                 <thead class="bg-gray-50 border-b border-gray-200">
                     <tr>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Fecha creación</th>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Tipo</th>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Archivo</th>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Notas</th>
-                        <th class="text-center px-6 py-4 text-sm font-semibold text-gray-600">Acciones</th>
+                        <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Fecha creación</th>
+                        <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Tipo</th>
+                        <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Archivo</th>
+                        <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Notas</th>
+                        <th class="text-center px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for report in property_reports %}
                     <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                        <td class="px-6 py-4 text-sm text-gray-700 whitespace-nowrap">
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                             {{ report.created_at.strftime('%d/%m/%Y %H:%M') }}
                         </td>
-                        <td class="px-6 py-4 text-sm">
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 whitespace-nowrap">
                                 {{ report.report_type or 'General' }}
                             </span>
                         </td>
-                        <td class="px-6 py-4 text-sm text-gray-700">
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
                             <a
                                 href="/reports/download/{{ report.id }}"
-                                class="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                class="text-blue-600 hover:text-blue-800 hover:underline font-medium whitespace-nowrap"
                             >
                                 {{ report.filename }}
                             </a>
                         </td>
-                        <td class="px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title="{{ report.notes or '' }}">
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-600 max-w-xs">
                             {{ report.notes or '-' }}
                         </td>
-                        <td class="px-6 py-4 text-sm">
-                            <div class="flex items-center justify-center gap-2">
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
+                            <div class="flex items-center justify-center gap-2 whitespace-nowrap">
                                 <form action="/reports/{{ report.id }}/send-whatsapp" method="POST" class="inline-block">
                                     <button
                                         type="submit"
-                                        class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-1"
+                                        class="bg-green-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors text-xs sm:text-sm font-medium flex items-center gap-1"
                                     >
                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -683,7 +572,7 @@ Detalle Propiedad
                                 </form>
                                 <a
                                     href="/reports/download/{{ report.id }}"
-                                    class="bg-gray-800 text-white px-4 py-2 rounded-lg hover:bg-gray-900 transition-colors text-sm font-medium flex items-center gap-1"
+                                    class="bg-gray-800 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-gray-900 active:bg-black transition-colors text-xs sm:text-sm font-medium flex items-center gap-1"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -695,11 +584,11 @@ Detalle Propiedad
                     </tr>
                     {% else %}
                     <tr>
-                        <td class="px-6 py-12 text-center text-gray-500" colspan="5">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <td class="px-4 sm:px-6 py-8 sm:py-12 text-center text-gray-500" colspan="5">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-10 sm:h-12 w-10 sm:w-12 mx-auto mb-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                             </svg>
-                            <p class="text-sm font-medium">No hay informes asociados a esta propiedad</p>
+                            <p class="text-xs sm:text-sm font-medium">No hay informes asociados a esta propiedad</p>
                             <p class="text-xs text-gray-400 mt-1">Utiliza el botón "Generar informe" para crear uno</p>
                         </td>
                     </tr>
@@ -721,68 +610,39 @@ Detalle Propiedad
 
     <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
 
-        <!-- Vista móvil: cards -->
-        <div class="block lg:hidden">
-            {% for item in status_history %}
-            <div class="border-b border-gray-100 p-4 hover:bg-gray-50">
-                <div class="flex justify-between items-start mb-2">
-                    <span class="text-xs text-gray-500">{{ item.created_at.strftime('%d/%m/%Y') }}</span>
-                </div>
-                <div class="flex items-center gap-2 mb-2">
-                    <span class="text-sm font-medium text-gray-700">{{ item.old_status or '-' }}</span>
-                    <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                    </svg>
-                    <span class="text-sm font-medium text-gray-900">{{ item.new_status or '-' }}</span>
-                </div>
-                <div class="text-xs text-gray-600">
-                    <span class="text-gray-500">Usuario:</span> {{ item.changed_by or '-' }}
-                </div>
-            </div>
-            {% else %}
-            <div class="p-8 text-center text-gray-500">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-                <p class="text-sm font-medium">Sin cambios de estado</p>
-            </div>
-            {% endfor %}
-        </div>
-
-        <!-- Vista desktop: tabla -->
-        <div class="hidden lg:block overflow-x-auto">
+        <div class="overflow-x-auto">
             <table class="w-full">
                 <thead class="bg-gray-50 border-b border-gray-200">
                     <tr>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Fecha</th>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Estado anterior</th>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Estado nuevo</th>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Usuario</th>
+                        <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Fecha</th>
+                        <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Estado anterior</th>
+                        <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Estado nuevo</th>
+                        <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Usuario</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for item in status_history %}
                     <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                        <td class="px-6 py-4 text-sm text-gray-700 whitespace-nowrap">
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                             {{ item.created_at.strftime('%d/%m/%Y %H:%M') }}
                         </td>
-                        <td class="px-6 py-4 text-sm text-gray-700">
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                             {{ item.old_status or '-' }}
                         </td>
-                        <td class="px-6 py-4 text-sm text-gray-700">
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                             {{ item.new_status or '-' }}
                         </td>
-                        <td class="px-6 py-4 text-sm text-gray-700">
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                             {{ item.changed_by or '-' }}
                         </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td class="px-6 py-12 text-center text-gray-500" colspan="4">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <td class="px-4 sm:px-6 py-8 sm:py-12 text-center text-gray-500" colspan="4">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-10 sm:h-12 w-10 sm:w-12 mx-auto mb-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                             </svg>
-                            <p class="text-sm font-medium">Sin cambios de estado registrados</p>
+                            <p class="text-xs sm:text-sm font-medium">Sin cambios de estado registrados</p>
                         </td>
                     </tr>
                     {% endfor %}
