@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter
 from fastapi import Request
 from fastapi import Depends
@@ -15,6 +17,16 @@ from app.db.deps import get_db
 from app.models.property import Property
 from app.models.client import Client
 from app.models.agent import Agent
+from app.models.property_price_history import PropertyPriceHistory
+from app.models.property_interaction import PropertyInteraction
+from app.models.property_status_history import PropertyStatusHistory
+from app.models.property_visit import PropertyVisit
+from app.models.report import Report
+
+from pathlib import Path
+
+from app.services.report_generator import generate_property_report
+from app.web.utils.flash import set_flash
 
 
 router = APIRouter()
@@ -29,7 +41,7 @@ async def properties_page(
     db: Session = Depends(get_db)
 ):
 
-    properties = db.query(Property).all()
+    properties = db.query(Property).filter(Property.status != "Archivada").all()
 
     clients = db.query(Client).all()
 
@@ -74,25 +86,30 @@ async def create_property(
     db: Session = Depends(get_db)
 ):
 
-    property_item = Property(
-        title=title,
-        address=address,
-        city=city,
-        price=price,
-        description=description,
-        client_id=client_id,
-        agent_id=agent_id,
-        status="Activa"
-    )
+    try:
+        property_item = Property(
+            title=title,
+            address=address,
+            city=city,
+            price=price,
+            description=description,
+            client_id=client_id,
+            agent_id=agent_id,
+            status="Activa"
+        )
 
-    db.add(property_item)
+        db.add(property_item)
+        db.commit()
 
-    db.commit()
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "success", f"Propiedad '{title}' creada correctamente")
+        return response
 
-    return RedirectResponse(
-        url="/properties",
-        status_code=302
-    )
+    except Exception as e:
+        print(f"Error creando propiedad: {e}")
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Ocurrió un error al crear la propiedad")
+        return response
 
 @router.post("/properties/update")
 async def update_property(
@@ -104,6 +121,10 @@ async def update_property(
     agent_id: int = Form(...),
     address: str = Form(...),
     status: str = Form(...),
+    auto_send_report: bool = Form(False),
+    report_frequency: str = Form(None),
+    report_day: int = Form(None),
+    report_hour: int = Form(None),
     db: Session = Depends(get_db)
 ):
 
@@ -111,25 +132,60 @@ async def update_property(
         Property.id == property_id
     ).first()
 
-    if property:
+    if not property:
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
 
-        property.title = title
-        property.price = price
-        property.client_id = client_id
-        property.agent_id = agent_id
-        property.address = address
-        property.status = status
+    old_price = property.price
+    old_status = property.status
 
-        db.commit()
+    property.title = title
+    property.price = price
+    property.client_id = client_id
+    property.agent_id = agent_id
+    property.address = address
+    property.status = status
+    property.auto_send_report = auto_send_report
+    property.report_frequency = report_frequency
+    property.report_day = report_day
+    property.report_hour = report_hour
 
-    return RedirectResponse(
-        url="/properties",
-        status_code=302
-    )
+    if old_price != price:
+
+        history = PropertyPriceHistory(
+            property_id=property_id,
+            old_price=old_price,
+            new_price=price,
+            reason="Actualización manual"
+        )
+
+        db.add(history)
+
+    if old_status != status:
+
+        history = PropertyStatusHistory(
+            property_id=property_id,
+            old_status=old_status,
+            new_status=status,
+            changed_by=request.state.user.id
+        )
+
+        db.add(history)
+
+    db.commit()
+
+    response = RedirectResponse(url="/properties", status_code=302)
+    if old_price != price:
+        set_flash(response, "success", "Precio actualizado correctamente")
+    else:
+        set_flash(response, "success", "Propiedad actualizada correctamente")
+    return response
 
 @router.post("/properties/delete/{property_id}")
 async def delete_property(
     property_id: int,
+    request: Request,
     db: Session = Depends(get_db)
 ):
 
@@ -137,12 +193,421 @@ async def delete_property(
         Property.id == property_id
     ).first()
 
-    if property:
+    if not property:
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
 
-        db.delete(property)
+    old_status = property.status
+    property.status = "Archivada"
+
+    history = PropertyStatusHistory(
+        property_id=property_id,
+        old_status=old_status,
+        new_status="Archivada",
+        changed_by=request.state.user.id
+    )
+
+    db.add(history)
+    db.commit()
+
+    response = RedirectResponse(url="/properties", status_code=302)
+    set_flash(response, "success", "Propiedad archivada")
+    return response
+
+@router.get("/properties/{property_id}")
+async def property_detail(
+        property_id: int,
+        request: Request,
+        db: Session = Depends(get_db)
+    ):
+
+    property_item = (
+        db.query(Property)
+        .filter(Property.id == property_id)
+        .first()
+    )
+
+    if not property_item:
+        return RedirectResponse(
+            url="/properties",
+            status_code=302
+        )
+
+    history = (
+        db.query(PropertyPriceHistory)
+        .filter(
+            PropertyPriceHistory.property_id == property_id
+        )
+        .order_by(
+            PropertyPriceHistory.created_at.desc()
+        )
+        .all()
+    )
+
+    reductions_count = len(history)
+
+    days_on_market = 0
+    if property_item.market_entry_date:
+        days_on_market = (
+                datetime.utcnow()
+                - property_item.market_entry_date
+            ).days
+
+    interactions = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id
+        )
+        .order_by(
+            PropertyInteraction.created_at.desc()
+        )
+        .all()
+    )
+
+    consultas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "CONSULTA"
+        )
+        .count()
+    )
+
+    visitas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "VISITA"
+        )
+        .count()
+    )
+
+    interesados = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "INTERESADO"
+        )
+        .count()
+    )
+
+    ofertas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "OFERTA"
+        )
+        .count()
+    )
+
+    price_gap = None
+
+    if property_item.fair_price:
+
+        price_gap = (
+            float(property_item.price)
+            - float(property_item.fair_price)
+        )
+
+    status_history = (
+        db.query(PropertyStatusHistory)
+        .filter(
+            PropertyStatusHistory.property_id == property_id
+        )
+        .order_by(
+            PropertyStatusHistory.created_at.desc()
+        )
+        .all()
+    )
+
+    visits_registered = (
+        db.query(PropertyVisit)
+        .filter(
+            PropertyVisit.property_id == property_id
+        )
+        .order_by(
+            PropertyVisit.created_at.desc()
+        )
+        .all()
+    )
+
+    interest_avg = None
+
+    if visits_registered:
+        interest_values = []
+        for visit in visits_registered:
+            if visit.interest_level is None:
+                continue
+            try:
+                interest_values.append(int(visit.interest_level))
+            except (TypeError, ValueError):
+                continue
+        if interest_values:
+            interest_avg = round(sum(interest_values) / len(interest_values), 2)
+
+    price_high_count = sum(
+        1
+        for v in visits_registered
+        if v.price_feedback == "ALTO"
+    )
+
+    property_reports = (
+        db.query(Report)
+        .filter(Report.property_id == property_id)
+        .order_by(Report.created_at.desc())
+        .all()
+    )
+
+    latest_report = property_reports[0] if property_reports else None
+
+    return templates.TemplateResponse(
+        request=request,
+        name="properties/detail.html",
+        context={
+            "request": request,
+            "property": property_item,
+            "history": history,
+            "reductions": reductions_count,
+            "days_on_market": days_on_market,
+            "interactions": interactions,
+            "current_user": request.state.user,
+            "price_gap": price_gap,
+            "consultas": consultas,
+            "visitas": visitas,
+            "interesados": interesados,
+            "ofertas": ofertas,
+            "status_history": status_history,
+            "visits_registered": visits_registered,
+            "interest_avg": interest_avg,
+            "price_high_count": price_high_count,
+            "property_reports": property_reports,
+            "latest_report": latest_report
+        }
+    )
+
+
+@router.post("/properties/{property_id}/interactions/create")
+async def create_interaction(
+        property_id: int,
+        request: Request,
+        interaction_type: str = Form(...),
+        contact_name: str = Form(""),
+        phone: str = Form(""),
+        source: str = Form(""),
+        notes: str = Form(""),
+        db: Session = Depends(get_db)
+    ):
+
+    current_user = request.state.user
+
+    try:
+        interaction = PropertyInteraction(
+            property_id=property_id,
+            interaction_type=interaction_type,
+            contact_name=contact_name,
+            phone=phone,
+            source=source,
+            notes=notes,
+            created_by=current_user.id
+        )
+
+        db.add(interaction)
         db.commit()
 
-    return RedirectResponse(
-        url="/properties",
-        status_code=302
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "success", f"Actividad de tipo '{interaction_type}' registrada correctamente")
+        return response
+
+    except Exception as e:
+        print(f"Error registrando interacción: {e}")
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "error", "Ocurrió un error al registrar la actividad")
+        return response
+
+@router.get("/properties/{property_id}/visits/new")
+async def new_visit(
+        property_id: int,
+        request: Request,
+        db: Session = Depends(get_db)
+    ):
+
+    property_item = (
+        db.query(Property)
+        .filter(Property.id == property_id)
+        .first()
     )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="properties/visit_form.html",
+        context={
+            "request": request,
+            "property": property_item,
+            "current_user": request.state.user
+        }
+    )
+
+@router.post("/properties/{property_id}/visits/create")
+async def create_visit(
+        property_id: int,
+        request: Request,
+        db: Session = Depends(get_db)
+    ):
+
+    form = await request.form()
+
+    interest_level_raw = form.get("interest_level")
+    interest_level = None
+    if interest_level_raw not in (None, ""):
+        try:
+            interest_level = int(interest_level_raw)
+        except (TypeError, ValueError):
+            interest_level = None
+
+    visit = PropertyVisit(
+        property_id=property_id,
+        visitor_name=form.get("visitor_name"),
+        phone=form.get("phone"),
+        interest_level=interest_level,
+        price_feedback=form.get("price_feedback"),
+        location_feedback=form.get("location_feedback"),
+        condition_feedback=form.get("condition_feedback"),
+        lighting_feedback=form.get("lighting_feedback"),
+        elevator_feedback=form.get("elevator_feedback"),
+        garage_feedback=form.get("garage_feedback"),
+        notes=form.get("notes"),
+        created_by=request.state.user.id
+    )
+
+    db.add(visit)
+
+    db.commit()
+
+    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+    set_flash(response, "success", "Visita registrada")
+    return response
+
+@router.post("/properties/{property_id}/generate-report")
+async def generate_report(
+        property_id: int,
+    request: Request,
+        db: Session = Depends(get_db)
+    ):
+
+    property_item = (
+        db.query(Property)
+        .filter(Property.id == property_id)
+        .first()
+    )
+
+    if not property_item:
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
+
+    days_on_market = 0
+    if property_item.market_entry_date:
+        days_on_market = (
+                datetime.utcnow()
+                - property_item.market_entry_date
+            ).days
+
+    interactions = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id
+        )
+        .order_by(
+            PropertyInteraction.created_at.desc()
+        )
+        .all()
+    )
+
+    consultas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "CONSULTA"
+        )
+        .count()
+    )
+
+    visitas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "VISITA"
+        )
+        .count()
+    )
+
+    interesados = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "INTERESADO"
+        )
+        .count()
+    )
+
+    ofertas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "OFERTA"
+        )
+        .count()
+    )
+
+    history = (
+        db.query(PropertyPriceHistory)
+        .filter(
+            PropertyPriceHistory.property_id == property_id
+        )
+        .order_by(
+            PropertyPriceHistory.created_at.desc()
+        )
+        .all()
+    )
+
+    reductions_count = len(history)
+
+    report_data = {
+        "days_on_market": days_on_market,
+        "reductions": reductions_count,
+        "consultas": consultas,
+        "visitas": visitas,
+        "interesados": interesados,
+        "ofertas": ofertas
+    }
+
+    reports_dir = Path("storage/reports")
+
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"reporte_propiedad_{property_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.pdf"
+
+    output_path = reports_dir / filename
+
+    try:
+        generate_property_report(property_item, report_data, str(output_path))
+
+        report = Report(
+            property_id=property_id,
+            uploaded_by=None,
+            report_type="AUTOMATICO",
+            filename=filename,
+            filepath=str(output_path)
+        )
+
+        db.add(report)
+        db.commit()
+    except Exception:
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "error", "No se pudo generar el informe")
+        return response
+
+    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+    set_flash(response, "success", "Informe generado")
+    return response

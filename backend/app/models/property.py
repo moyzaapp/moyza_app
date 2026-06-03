@@ -1,9 +1,13 @@
+import datetime
+
 from sqlalchemy import Column
 from sqlalchemy import Integer
 from sqlalchemy import String
 from sqlalchemy import ForeignKey
 from sqlalchemy import Text
 from sqlalchemy import Numeric
+from sqlalchemy import DateTime
+from sqlalchemy import Boolean
 
 from sqlalchemy.orm import relationship
 
@@ -32,6 +36,10 @@ class Property(Base):
 
     description = Column(Text)
 
+    fair_price = Column(Numeric, nullable=True)
+
+    market_entry_date = Column(DateTime, default=datetime.datetime.utcnow)
+
     client_id = Column(
         Integer,
         ForeignKey("clients.id")
@@ -42,6 +50,26 @@ class Property(Base):
         ForeignKey("agents.id")
     )
 
+    auto_send_report = Column(
+        Boolean,
+        default=False
+    )
+
+    report_frequency = Column(
+        String,
+        nullable=True
+    )
+
+    report_day = Column(
+        Integer,
+        nullable=True
+    )
+
+    report_hour = Column(
+        Integer,
+        nullable=True
+    )
+
     client = relationship(
         "Client",
         back_populates="properties"
@@ -50,4 +78,9 @@ class Property(Base):
     agent = relationship(
         "Agent",
         back_populates="properties"
+    )
+
+    interactions = relationship(
+        "PropertyInteraction",
+        backref="property"
     )

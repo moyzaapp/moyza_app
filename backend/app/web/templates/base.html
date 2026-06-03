@@ -5,6 +5,14 @@
 
     <meta charset="UTF-8">
 
+    <!-- Meta tags para móviles -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MOYZA">
+    <meta name="theme-color" content="#000000">
+
     <title>
         {% block title %}
         MOYZA
@@ -13,17 +21,131 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
 
+    <style>
+        /* Smooth transitions */
+        * {
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Estilos para el overlay del sidebar en móvil */
+        .sidebar-overlay {
+            transition: opacity 0.3s ease;
+        }
+
+        /* Animación del sidebar */
+        .sidebar-mobile {
+            transition: transform 0.3s ease;
+        }
+    </style>
+
 </head>
 
-<body class="bg-gray-50">
+<body class="bg-gray-50 overflow-x-hidden">
 
     {% include 'components/sidebar.html' %}
 
-    <div class="ml-64">
+    <!-- Main content con responsive margin -->
+    <div class="lg:ml-64 min-h-screen">
 
         {% include 'components/navbar.html' %}
 
-        <main class="p-8">
+        <main class="p-4 sm:p-6 lg:p-8">
+
+            {% if request.state.flash_messages %}
+                <div class="space-y-3 mb-6" id="flash-messages">
+                    {% for m in request.state.flash_messages %}
+                        {% set category = m.get('category', 'info') %}
+                        {% set message = m.get('message', '') %}
+
+                        {% if category == 'success' %}
+                            <div class="flash-message bg-green-50 border-l-4 border-green-500 text-green-800 px-6 py-4 rounded-r-xl shadow-sm flex items-start gap-3 animate-slide-in">
+                                <svg class="w-6 h-6 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="flex-1">
+                                    <p class="font-medium">{{ message }}</p>
+                                </div>
+                                <button onclick="this.parentElement.remove()" class="text-green-600 hover:text-green-800 transition-colors">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        {% elif category == 'error' %}
+                            <div class="flash-message bg-red-50 border-l-4 border-red-500 text-red-800 px-6 py-4 rounded-r-xl shadow-sm flex items-start gap-3 animate-slide-in">
+                                <svg class="w-6 h-6 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="flex-1">
+                                    <p class="font-medium">{{ message }}</p>
+                                </div>
+                                <button onclick="this.parentElement.remove()" class="text-red-600 hover:text-red-800 transition-colors">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        {% elif category == 'warning' %}
+                            <div class="flash-message bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 px-6 py-4 rounded-r-xl shadow-sm flex items-start gap-3 animate-slide-in">
+                                <svg class="w-6 h-6 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                                </svg>
+                                <div class="flex-1">
+                                    <p class="font-medium">{{ message }}</p>
+                                </div>
+                                <button onclick="this.parentElement.remove()" class="text-yellow-600 hover:text-yellow-800 transition-colors">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        {% else %}
+                            <div class="flash-message bg-blue-50 border-l-4 border-blue-500 text-blue-800 px-6 py-4 rounded-r-xl shadow-sm flex items-start gap-3 animate-slide-in">
+                                <svg class="w-6 h-6 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <div class="flex-1">
+                                    <p class="font-medium">{{ message }}</p>
+                                </div>
+                                <button onclick="this.parentElement.remove()" class="text-blue-600 hover:text-blue-800 transition-colors">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+
+                <style>
+                    @keyframes slide-in {
+                        from {
+                            transform: translateY(-1rem);
+                            opacity: 0;
+                        }
+                        to {
+                            transform: translateY(0);
+                            opacity: 1;
+                        }
+                    }
+                    .animate-slide-in {
+                        animation: slide-in 0.3s ease-out;
+                    }
+                </style>
+
+                <script>
+                    // Auto-dismiss flash messages after 5 seconds
+                    setTimeout(() => {
+                        const messages = document.querySelectorAll('.flash-message');
+                        messages.forEach(msg => {
+                            msg.style.transition = 'opacity 0.5s, transform 0.5s';
+                            msg.style.opacity = '0';
+                            msg.style.transform = 'translateX(100%)';
+                            setTimeout(() => msg.remove(), 500);
+                        });
+                    }, 5000);
+                </script>
+            {% endif %}
 
             {% block content %}
             {% endblock %}
