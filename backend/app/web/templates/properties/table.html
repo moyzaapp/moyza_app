@@ -138,8 +138,13 @@
                         data-agent-id="{{ property.agent_id if property.agent_id is not none else '' }}"
                         data-address="{{ (property.address or '')|e }}"
                         data-status="{{ (property.status or 'Activa')|e }}"
+                        data-description="{{ (property.description or '')|e }}"
+                        data-auto-send-report="{{ 'true' if property.auto_send_report else 'false' }}"
+                        data-report-frequency="{{ (property.report_frequency or '')|e }}"
+                        data-report-day="{{ property.report_day if property.report_day is not none else '' }}"
+                        data-report-hour="{{ property.report_hour if property.report_hour is not none else '' }}"
                         onclick="editPropertyFromButton(this)"
-                        class="bg-blue-100 px-4 py-2 rounded-lg text-sm text-blue-700"
+                        class="bg-blue-100 hover:bg-blue-200 px-4 py-2 rounded-lg text-sm text-blue-700 transition-colors"
                     >
                         Editar
                     </button>

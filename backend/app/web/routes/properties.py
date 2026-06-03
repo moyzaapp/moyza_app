@@ -122,6 +122,9 @@ async def update_property(
     address: str = Form(...),
     status: str = Form(...),
     auto_send_report: bool = Form(False),
+    report_frequency: str = Form(None),
+    report_day: int = Form(None),
+    report_hour: int = Form(None),
     db: Session = Depends(get_db)
 ):
 
@@ -144,6 +147,9 @@ async def update_property(
     property.address = address
     property.status = status
     property.auto_send_report = auto_send_report
+    property.report_frequency = report_frequency
+    property.report_day = report_day
+    property.report_hour = report_hour
 
     if old_price != price:
 
