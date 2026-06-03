@@ -31,6 +31,19 @@ Detalle Propiedad
 
     <div class="flex items-center gap-3">
 
+        <form
+            action="/properties/{{ property.id }}/generate-report"
+            method="POST"
+        >
+
+            <button
+                class="bg-green-600 text-white px-4 py-2 rounded-xl"
+            >
+                Generar informe PDF
+            </button>
+
+        </form>
+
         <a
             href="/properties/{{ property.id }}/visits/new"
             class="bg-black text-white px-5 py-3 rounded-xl"
@@ -110,6 +123,50 @@ Detalle Propiedad
         <p class="text-sm text-gray-500">Tiempo en mercado</p>
         <p class="text-2xl font-bold mt-2">{{ days_on_market }}</p>
         <p class="text-sm text-gray-500">días</p>
+    </div>
+
+</div>
+
+<h2 class="text-xl font-bold mb-4">
+    Indicadores
+</h2>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+
+    <div class="bg-white p-5 rounded-2xl border border-gray-200">
+        <p class="text-sm text-gray-500">Visitas registradas</p>
+        <p class="text-2xl font-bold mt-2">{{ visits_registered|length }}</p>
+        <p class="text-sm text-gray-500">formulario de visita</p>
+    </div>
+
+    <div class="bg-white p-5 rounded-2xl border border-gray-200">
+        <p class="text-sm text-gray-500">Interés promedio</p>
+
+        {% if interest_avg is not none %}
+            <p class="text-2xl font-bold mt-2">{{ interest_avg }}</p>
+            <p class="text-sm text-gray-500">(1 a 5)</p>
+        {% else %}
+            <p class="text-gray-400 mt-2">Sin datos</p>
+        {% endif %}
+    </div>
+
+    <div class="bg-white p-5 rounded-2xl border border-gray-200">
+        <p class="text-sm text-gray-500">Precio alto</p>
+        <p class="text-2xl font-bold mt-2">{{ price_high_count }}</p>
+
+        {% if visits_registered|length > 0 %}
+            <p class="text-sm text-gray-500">
+                {{ price_high_count }} / {{ visits_registered|length }}
+                ({{ ((price_high_count * 100) / (visits_registered|length))|round(0) }}%)
+            </p>
+        {% else %}
+            <p class="text-sm text-gray-500">0 / 0</p>
+        {% endif %}
+    </div>
+
+    <div class="bg-white p-5 rounded-2xl border border-gray-200">
+        <p class="text-sm text-gray-500">Cambios de estado</p>
+        <p class="text-2xl font-bold mt-2">{{ status_history|length }}</p>
     </div>
 
 </div>

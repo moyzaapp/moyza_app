@@ -21,6 +21,11 @@ from app.models.property_price_history import PropertyPriceHistory
 from app.models.property_interaction import PropertyInteraction
 from app.models.property_status_history import PropertyStatusHistory
 from app.models.property_visit import PropertyVisit
+from app.models.report import Report
+
+from pathlib import Path
+
+from app.services.report_generator import generate_property_report
 
 
 router = APIRouter()
@@ -161,6 +166,7 @@ async def update_property(
 @router.post("/properties/delete/{property_id}")
 async def delete_property(
     property_id: int,
+    request: Request,
     db: Session = Depends(get_db)
 ):
 
@@ -170,13 +176,14 @@ async def delete_property(
 
     if property:
 
+        old_status = property.status
         property.status = "Archivada"
 
         history = PropertyStatusHistory(
             property_id=property_id,
-            old_status=property.status,
+            old_status=old_status,
             new_status="Archivada",
-            changed_by=None
+            changed_by=request.state.user.id
         )
 
         db.add(history)
@@ -294,6 +301,37 @@ async def property_detail(
         .all()
     )
 
+    visits_registered = (
+        db.query(PropertyVisit)
+        .filter(
+            PropertyVisit.property_id == property_id
+        )
+        .order_by(
+            PropertyVisit.created_at.desc()
+        )
+        .all()
+    )
+
+    interest_avg = None
+
+    if visits_registered:
+        interest_values = []
+        for visit in visits_registered:
+            if visit.interest_level is None:
+                continue
+            try:
+                interest_values.append(int(visit.interest_level))
+            except (TypeError, ValueError):
+                continue
+        if interest_values:
+            interest_avg = round(sum(interest_values) / len(interest_values), 2)
+
+    price_high_count = sum(
+        1
+        for v in visits_registered
+        if v.price_feedback == "ALTO"
+    )
+
     return templates.TemplateResponse(
         request=request,
         name="properties/detail.html",
@@ -310,7 +348,10 @@ async def property_detail(
             "visitas": visitas,
             "interesados": interesados,
             "ofertas": ofertas,
-            "status_history": status_history
+            "status_history": status_history,
+            "visits_registered": visits_registered,
+            "interest_avg": interest_avg,
+            "price_high_count": price_high_count
         }
     )
 
@@ -379,11 +420,19 @@ async def create_visit(
 
     form = await request.form()
 
+    interest_level_raw = form.get("interest_level")
+    interest_level = None
+    if interest_level_raw not in (None, ""):
+        try:
+            interest_level = int(interest_level_raw)
+        except (TypeError, ValueError):
+            interest_level = None
+
     visit = PropertyVisit(
         property_id=property_id,
         visitor_name=form.get("visitor_name"),
         phone=form.get("phone"),
-        interest_level=form.get("interest_level"),
+        interest_level=interest_level,
         price_feedback=form.get("price_feedback"),
         location_feedback=form.get("location_feedback"),
         condition_feedback=form.get("condition_feedback"),
@@ -396,6 +445,120 @@ async def create_visit(
 
     db.add(visit)
 
+    db.commit()
+
+    return RedirectResponse(
+        url=f"/properties/{property_id}",
+        status_code=302
+    )
+
+@router.post("/properties/{property_id}/generate-report")
+async def generate_report(
+        property_id: int,
+        db: Session = Depends(get_db)
+    ):
+
+    property_item = (
+        db.query(Property)
+        .filter(Property.id == property_id)
+        .first()
+    )
+
+    days_on_market = 0
+    if property_item.market_entry_date:
+        days_on_market = (
+                datetime.utcnow()
+                - property_item.market_entry_date
+            ).days
+
+    interactions = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id
+        )
+        .order_by(
+            PropertyInteraction.created_at.desc()
+        )
+        .all()
+    )
+
+    consultas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "CONSULTA"
+        )
+        .count()
+    )
+
+    visitas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "VISITA"
+        )
+        .count()
+    )
+
+    interesados = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "INTERESADO"
+        )
+        .count()
+    )
+
+    ofertas = (
+        db.query(PropertyInteraction)
+        .filter(
+            PropertyInteraction.property_id == property_id,
+            PropertyInteraction.interaction_type == "OFERTA"
+        )
+        .count()
+    )
+
+    history = (
+        db.query(PropertyPriceHistory)
+        .filter(
+            PropertyPriceHistory.property_id == property_id
+        )
+        .order_by(
+            PropertyPriceHistory.created_at.desc()
+        )
+        .all()
+    )
+
+    reductions_count = len(history)
+
+    report_data = {
+        "days_on_market": days_on_market,
+        "reductions": reductions_count,
+        "consultas": consultas,
+        "visitas": visitas,
+        "interesados": interesados,
+        "ofertas": ofertas
+    }
+
+    reports_dir = Path("storage/reports")
+
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"reporte_propiedad_{property_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.pdf"
+
+    output_path = reports_dir / filename
+
+    generate_property_report(property_item, report_data, str(output_path))
+
+    report = Report(
+        property_id=property_id,
+        uploaded_by=None,
+        report_type="AUTOMATICO",
+        filename=filename,
+        filepath=str(output_path)
+    )
+
+    db.add(report)
     db.commit()
 
     return RedirectResponse(
