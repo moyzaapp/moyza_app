@@ -30,47 +30,67 @@ Detalle Propiedad
     </div>
 
     <div class="flex items-center gap-3">
+        <!-- Botón de registrar visita -->
         <a
             href="/properties/{{ property.id }}/visits/new"
-            class="bg-black text-white px-5 py-3 rounded-xl"
+            class="bg-black text-white px-5 py-3 rounded-xl hover:bg-gray-800 transition-colors"
         >
             Registrar visita
         </a>
 
+        <!-- Separador visual -->
+        <div class="h-8 w-px bg-gray-300"></div>
+
+        <!-- Botón de generar informe -->
         <form
             action="/properties/{{ property.id }}/generate-report"
             method="POST"
+            class="inline-block"
         >
-
             <button
-                class="bg-green-600 text-white px-4 py-2 rounded-xl"
+                class="bg-blue-600 text-white px-5 py-3 rounded-xl hover:bg-blue-700 transition-colors flex items-center gap-2"
             >
-                Generar informe PDF
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Generar informe
             </button>
-
         </form>
 
+        <!-- Botón de enviar último informe -->
         {% if latest_report %}
             <form
                 action="/reports/{{ latest_report.id }}/send-whatsapp"
                 method="POST"
+                class="inline-block"
             >
                 <button
-                    class="bg-green-600 text-white px-4 py-2 rounded-xl"
+                    class="bg-green-600 text-white px-5 py-3 rounded-xl hover:bg-green-700 transition-colors flex items-center gap-2"
+                    title="Enviar último informe generado"
                 >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
                     Enviar último informe
                 </button>
             </form>
         {% else %}
             <button
-                class="bg-gray-200 text-gray-500 px-4 py-2 rounded-xl cursor-not-allowed"
+                class="bg-gray-300 text-gray-500 px-5 py-3 rounded-xl cursor-not-allowed flex items-center gap-2"
                 disabled
-                title="Primero genera o sube un informe"
+                title="Primero genera un informe"
             >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
                 Enviar informe
             </button>
         {% endif %}
 
+        <!-- Separador visual -->
+        <div class="h-8 w-px bg-gray-300"></div>
+
+        <!-- Badge de estado -->
         {% if property.status == 'Activa' %}
             <span class="px-3 py-1 rounded-full text-sm font-medium bg-green-50 text-green-700 border border-green-200">
                 {{ property.status }}
@@ -508,64 +528,73 @@ Detalle Propiedad
 
 </div>
 
-<div class="mt-6">
-
-    <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-bold">Historial de informes</h3>
-        <p class="text-sm text-gray-500">{{ property_reports|length }} informe(s)</p>
+<!-- Historial de informes -->
+<div class="mt-8">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold">Historial de informes</h2>
+        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+            {{ property_reports|length }} informe(s)
+        </span>
     </div>
 
-    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-
+    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
         <div class="overflow-x-auto">
-
             <table class="w-full">
-
                 <thead class="bg-gray-50 border-b border-gray-200">
                     <tr>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Fecha</th>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Fecha creación</th>
                         <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Tipo</th>
                         <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Archivo</th>
                         <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Notas</th>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Acciones</th>
+                        <th class="text-center px-6 py-4 text-sm font-semibold text-gray-600">Acciones</th>
                     </tr>
                 </thead>
 
                 <tbody>
-
                     {% for report in property_reports %}
-
-                    <tr class="border-b border-gray-100 hover:bg-gray-50">
-                        <td class="px-6 py-4 text-sm text-gray-700">
+                    <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                        <td class="px-6 py-4 text-sm text-gray-700 whitespace-nowrap">
                             {{ report.created_at.strftime('%d/%m/%Y %H:%M') }}
                         </td>
-                        <td class="px-6 py-4 text-sm text-gray-700">
-                            {{ report.report_type or '-' }}
+                        <td class="px-6 py-4 text-sm">
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                {{ report.report_type or 'General' }}
+                            </span>
                         </td>
                         <td class="px-6 py-4 text-sm text-gray-700">
                             <a
                                 href="/reports/download/{{ report.id }}"
-                                class="text-sm text-gray-800 hover:underline"
-                                title="Descargar"
+                                class="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                title="Ver archivo"
                             >
                                 {{ report.filename }}
                             </a>
                         </td>
-                        <td class="px-6 py-4 text-sm text-gray-700">
+                        <td class="px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title="{{ report.notes or '' }}">
                             {{ report.notes or '-' }}
                         </td>
                         <td class="px-6 py-4 text-sm">
-                            <div class="flex items-center gap-2">
-                                <form action="/reports/{{ report.id }}/send-whatsapp" method="POST">
-                                    <button class="bg-green-600 text-white px-3 py-2 rounded-xl">
+                            <div class="flex items-center justify-center gap-2">
+                                <form action="/reports/{{ report.id }}/send-whatsapp" method="POST" class="inline-block">
+                                    <button
+                                        class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-1"
+                                        title="Enviar por WhatsApp"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                        </svg>
                                         Enviar
                                     </button>
                                 </form>
 
                                 <a
                                     href="/reports/download/{{ report.id }}"
-                                    class="bg-black text-white px-3 py-2 rounded-xl"
+                                    class="bg-gray-800 text-white px-4 py-2 rounded-lg hover:bg-gray-900 transition-colors text-sm font-medium flex items-center gap-1"
+                                    title="Descargar PDF"
                                 >
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
                                     Descargar
                                 </a>
                             </div>
@@ -575,47 +604,47 @@ Detalle Propiedad
                     {% else %}
 
                     <tr>
-                        <td class="px-6 py-8 text-sm text-gray-500" colspan="5">
-                            No hay informes asociados a esta propiedad.
+                        <td class="px-6 py-12 text-center text-gray-500" colspan="5">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <p class="text-sm font-medium">No hay informes asociados a esta propiedad</p>
+                            <p class="text-xs text-gray-400 mt-1">Utiliza el botón "Generar informe" para crear uno</p>
                         </td>
                     </tr>
 
                     {% endfor %}
-
                 </tbody>
-
             </table>
-
         </div>
+    </div>
+</div>
 
+<!-- Historial de estados -->
+<div class="mt-8">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold">Historial de estados</h2>
+        <span class="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-sm font-medium">
+            {{ status_history|length }} cambio(s)
+        </span>
     </div>
 
-    <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-bold">Historial de estados</h3>
-        <p class="text-sm text-gray-500">{{ status_history|length }} cambio(s)</p>
-    </div>
-
-    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-
+    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
         <div class="overflow-x-auto">
-
             <table class="w-full">
-
                 <thead class="bg-gray-50 border-b border-gray-200">
                     <tr>
                         <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Fecha</th>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Antes</th>
-                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Después</th>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Estado anterior</th>
+                        <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Estado nuevo</th>
                         <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Usuario</th>
                     </tr>
                 </thead>
 
                 <tbody>
-
                     {% for item in status_history %}
-
-                    <tr class="border-b border-gray-100 hover:bg-gray-50">
-                        <td class="px-6 py-4 text-sm text-gray-700">
+                    <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                        <td class="px-6 py-4 text-sm text-gray-700 whitespace-nowrap">
                             {{ item.created_at.strftime('%d/%m/%Y %H:%M') }}
                         </td>
                         <td class="px-6 py-4 text-sm text-gray-700">
@@ -632,21 +661,19 @@ Detalle Propiedad
                     {% else %}
 
                     <tr>
-                        <td class="px-6 py-8 text-sm text-gray-500" colspan="4">
-                            Sin cambios de estado registrados.
+                        <td class="px-6 py-12 text-center text-gray-500" colspan="4">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                            </svg>
+                            <p class="text-sm font-medium">Sin cambios de estado registrados</p>
                         </td>
                     </tr>
 
                     {% endfor %}
-
                 </tbody>
-
             </table>
-
         </div>
-
     </div>
-
 </div>
 
 {% endblock %}

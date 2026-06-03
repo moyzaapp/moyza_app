@@ -26,6 +26,7 @@ from app.models.report import Report
 from pathlib import Path
 
 from app.services.report_generator import generate_property_report
+from app.web.utils.flash import set_flash
 
 
 router = APIRouter()
@@ -122,46 +123,51 @@ async def update_property(
         Property.id == property_id
     ).first()
 
-    if property:
+    if not property:
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
 
-        old_price = property.price
-        old_status = property.status
+    old_price = property.price
+    old_status = property.status
 
-        property.title = title
-        property.price = price
-        property.client_id = client_id
-        property.agent_id = agent_id
-        property.address = address
-        property.status = status
+    property.title = title
+    property.price = price
+    property.client_id = client_id
+    property.agent_id = agent_id
+    property.address = address
+    property.status = status
 
-        if old_price != price:
+    if old_price != price:
 
-            history = PropertyPriceHistory(
-                property_id=property_id,
-                old_price=old_price,
-                new_price=price,
-                reason="Actualización manual"
-            )
+        history = PropertyPriceHistory(
+            property_id=property_id,
+            old_price=old_price,
+            new_price=price,
+            reason="Actualización manual"
+        )
 
-            db.add(history)
+        db.add(history)
 
-        if old_status != status:
+    if old_status != status:
 
-            history = PropertyStatusHistory(
-                property_id=property_id,
-                old_status=old_status,
-                new_status=status,
-                changed_by=request.state.user.id
-            )
+        history = PropertyStatusHistory(
+            property_id=property_id,
+            old_status=old_status,
+            new_status=status,
+            changed_by=request.state.user.id
+        )
 
-            db.add(history)
+        db.add(history)
 
-        db.commit()
+    db.commit()
 
-    return RedirectResponse(
-        url="/properties",
-        status_code=302
-    )
+    response = RedirectResponse(url="/properties", status_code=302)
+    if old_price != price:
+        set_flash(response, "success", "Precio actualizado correctamente")
+    else:
+        set_flash(response, "success", "Propiedad actualizada correctamente")
+    return response
 
 @router.post("/properties/delete/{property_id}")
 async def delete_property(
@@ -174,26 +180,27 @@ async def delete_property(
         Property.id == property_id
     ).first()
 
-    if property:
+    if not property:
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
 
-        old_status = property.status
-        property.status = "Archivada"
+    old_status = property.status
+    property.status = "Archivada"
 
-        history = PropertyStatusHistory(
-            property_id=property_id,
-            old_status=old_status,
-            new_status="Archivada",
-            changed_by=request.state.user.id
-        )
-
-        db.add(history)
-        
-        db.commit()
-
-    return RedirectResponse(
-        url="/properties",
-        status_code=302
+    history = PropertyStatusHistory(
+        property_id=property_id,
+        old_status=old_status,
+        new_status="Archivada",
+        changed_by=request.state.user.id
     )
+
+    db.add(history)
+    db.commit()
+
+    response = RedirectResponse(url="/properties", status_code=302)
+    set_flash(response, "success", "Propiedad archivada")
+    return response
 
 @router.get("/properties/{property_id}")
 async def property_detail(
@@ -458,14 +465,14 @@ async def create_visit(
 
     db.commit()
 
-    return RedirectResponse(
-        url=f"/properties/{property_id}",
-        status_code=302
-    )
+    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+    set_flash(response, "success", "Visita registrada")
+    return response
 
 @router.post("/properties/{property_id}/generate-report")
 async def generate_report(
         property_id: int,
+    request: Request,
         db: Session = Depends(get_db)
     ):
 
@@ -474,6 +481,11 @@ async def generate_report(
         .filter(Property.id == property_id)
         .first()
     )
+
+    if not property_item:
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
 
     days_on_market = 0
     if property_item.market_entry_date:
@@ -559,20 +571,24 @@ async def generate_report(
 
     output_path = reports_dir / filename
 
-    generate_property_report(property_item, report_data, str(output_path))
+    try:
+        generate_property_report(property_item, report_data, str(output_path))
 
-    report = Report(
-        property_id=property_id,
-        uploaded_by=None,
-        report_type="AUTOMATICO",
-        filename=filename,
-        filepath=str(output_path)
-    )
+        report = Report(
+            property_id=property_id,
+            uploaded_by=None,
+            report_type="AUTOMATICO",
+            filename=filename,
+            filepath=str(output_path)
+        )
 
-    db.add(report)
-    db.commit()
+        db.add(report)
+        db.commit()
+    except Exception:
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "error", "No se pudo generar el informe")
+        return response
 
-    return RedirectResponse(
-        url=f"/properties/{property_id}",
-        status_code=302
-    )
+    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+    set_flash(response, "success", "Informe generado")
+    return response

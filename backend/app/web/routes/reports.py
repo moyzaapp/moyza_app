@@ -195,38 +195,3 @@ async def send_report_whatsapp(
 
     redirect_url = request.headers.get("referer") or "/reports"
     return RedirectResponse(url=redirect_url, status_code=302)
-
-
-@router.post("/reports/{property_id}/send-whatsapp_property")
-async def send_report_whatsapp(
-    request: Request,
-    property_id: int,
-    db: Session = Depends(get_db)
-):
-
-    report = (
-        db.query(Report)
-        .filter(Report.property_id == property_id)
-        .order_by(Report.created_at.desc())
-        .first()
-    )
-
-    if not report:
-        return {"error": "Report not found"}
-
-    property_item = db.query(Property).filter(Property.id == report.property_id).first()
-    client_phone = property_item.client.phone
-
-    file_url = f"https://moyza.duckdns.org/{report.filepath}"
-    file_url = f"https://moyza.duckdns.org/storage/reports/b89da4b7-1407-4205-891a-c26faa33c746.pdf"
-
-    print(report.filepath, report.filename, client_phone, property_item.id)
-
-    send_report(
-        phone=client_phone,
-        file_url=file_url,
-        caption="Reporte generado automáticamente"
-    )
-
-    redirect_url = request.headers.get("referer") or f"/properties/{property_id}"
-    return RedirectResponse(url=redirect_url, status_code=302)
