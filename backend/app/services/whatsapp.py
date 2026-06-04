@@ -9,7 +9,7 @@ from requests.exceptions import RequestException, Timeout, ConnectionError
 logger = logging.getLogger(__name__)
 
 EVOLUTION_URL_SENDMEDIA = "https://evomoyza.duckdns.org/message/sendMedia/jobany"
-EVOLUTION_URL_SENDPRESENCE = "https://evomoyza.duckdns.org/message/sendPresence/jobany"
+EVOLUTION_URL_SENDPRESENCE = "https://evomoyza.duckdns.org/chat/sendPresence/jobany"
 API_KEY = "MOYZA_SUPER_KEY"
 
 REQUEST_TIMEOUT = 30
