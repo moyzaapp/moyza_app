@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block title %}
+Registrar visita
+{% endblock %}
+
+{% block content %}
+
+<div class="flex items-start justify-between gap-6 mb-8">
+
+    <div>
+
+        <a
+            href="/properties/{{ property.id }}"
+            class="text-sm text-gray-500 hover:text-gray-700"
+        >
+            ← Volver al detalle
+        </a>
+
+        <h1 class="text-3xl font-bold text-gray-800 mt-2">
+            Registrar visita
+        </h1>
+
+        <p class="text-gray-500 mt-1">
+            {{ property.title }}
+        </p>
+
+    </div>
+
+</div>
+
+<div class="bg-white rounded-2xl border border-gray-200 p-6">
+
+    <form
+        action="/properties/{{ property.id }}/visits/create"
+        method="POST"
+        class="grid grid-cols-1 md:grid-cols-2 gap-4"
+    >
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Nombre visitante
+            </label>
+
+            <input
+                type="text"
+                name="visitor_name"
+                placeholder="Nombre visitante"
+                required
+                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+            >
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Teléfono
+            </label>
+
+            <input
+                type="text"
+                name="phone"
+                placeholder="Teléfono"
+                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+            >
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Nivel de interés
+            </label>
+
+            <select
+                name="interest_level"
+                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+            >
+            <option value="1">1 - Muy bajo</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5 - Muy alto</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Feedback precio
+            </label>
+
+            <select
+                name="price_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+            >
+            <option value="ALTO">Precio alto</option>
+            <option value="ADECUADO">Precio adecuado</option>
+            <option value="BAJO">Precio bajo</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Feedback ubicación
+            </label>
+
+            <select
+                name="location_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+            >
+            <option value="MALA">Ubicación mala</option>
+            <option value="REGULAR">Ubicación regular</option>
+            <option value="BUENA">Ubicación buena</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Feedback estado
+            </label>
+
+            <select
+                name="condition_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+            >
+            <option value="MALO">Estado malo</option>
+            <option value="REGULAR">Estado regular</option>
+            <option value="BUENO">Estado bueno</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Feedback luminosidad
+            </label>
+
+            <select
+                name="lighting_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+            >
+            <option value="MALA">Luminosidad mala</option>
+            <option value="REGULAR">Luminosidad regular</option>
+            <option value="BUENA">Luminosidad buena</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Ascensor
+            </label>
+
+            <select
+                name="elevator_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+            >
+            <option value="SI">Tiene ascensor</option>
+            <option value="NO">No tiene ascensor</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Garaje
+            </label>
+
+            <select
+                name="garage_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+            >
+            <option value="SI">Tiene garaje</option>
+            <option value="NO">No tiene garaje</option>
+            </select>
+
+        </div>
+
+        <textarea
+            name="notes"
+            rows="5"
+            class="border border-gray-300 p-3 rounded-xl md:col-span-2 focus:outline-none focus:ring-2 focus:ring-gray-200"
+            placeholder="Observaciones"
+        ></textarea>
+
+        <div class="md:col-span-2 flex justify-end">
+
+            <button class="bg-black text-white px-5 py-3 rounded-xl">
+                Guardar visita
+            </button>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

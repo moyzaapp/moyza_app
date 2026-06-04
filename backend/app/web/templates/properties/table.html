@@ -1,52 +1,59 @@
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
-    <div class="bg-white rounded-2xl p-4 mb-6 shadow">
+    <div class="p-3 sm:p-4 border-b border-gray-200 bg-white">
 
-        <form method="GET" action="/properties">
+        <form method="GET" action="/properties" class="flex items-center gap-3">
 
             <input
                 type="text"
                 name="search"
                 placeholder="Buscar propiedad..."
                 value="{{ request.query_params.get('search', '') }}"
-                class="w-full border border-gray-300 rounded-xl p-3"
+                class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
 
         </form>
 
     </div>
 
-    <table class="w-full">
+    <!-- Tabla con scroll horizontal en móvil -->
+    <div class="overflow-x-auto -mx-px">
+
+    <table class="w-full min-w-[800px]">
 
         <thead class="bg-gray-50 border-b border-gray-200">
 
             <tr>
 
-                <th class="px-6 py-4 text-left">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Propiedad
                 </th>
 
-                <th class="px-6 py-4 text-left">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Cliente
                 </th>
 
-                <th class="px-6 py-4 text-left">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Agente
                 </th>
 
-                <th class="px-6 py-4 text-left">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Ciudad
                 </th>
 
-                <th class="px-6 py-4 text-left">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Valor
                 </th>
 
-                <th class="px-6 py-4 text-left">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Estado
                 </th>
 
-                <th class="px-6 py-4 text-right">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
+                    Envío Auto
+                </th>
+
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Acciones
                 </th>
 
@@ -58,29 +65,33 @@
 
             {% for property in properties %}
 
-            <tr class="border-b border-gray-100">
+            <tr class="border-b border-gray-100 hover:bg-gray-50">
 
-                <td class="px-6 py-4">
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
                     {{ property.title }}
                 </td>
 
-                <td class="px-6 py-4">
-                    {{ property.client.name }}
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
+                    {{ property.client.name if property.client else '-' }}
                 </td>
 
-                <td class="px-6 py-4">
-                    {{ property.agent.name }}
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
+                    {{ property.agent.name if property.agent else '-' }}
                 </td>
 
-                <td class="px-6 py-4">
-                    {{ property.city }}
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
+                    {{ property.city or '-' }}
                 </td>
 
-                <td class="px-6 py-4">
-                    $ {{ property.price }}
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm whitespace-nowrap">
+                    {% if property.price is not none %}
+                        $ {{ "{:,.0f}".format(property.price) }}
+                    {% else %}
+                        -
+                    {% endif %}
                 </td>
 
-                <td class="px-6 py-4">
+                <td class="px-3 sm:px-6 py-3 sm:py-4">
 
                     <span class="
                         px-3 py-1 rounded-full text-sm
@@ -103,37 +114,74 @@
 
                 </td>
 
-                <td class="flex justify-end gap-2">
+                <td class="px-3 sm:px-6 py-3 sm:py-4">
+                    {% if property.auto_send_report %}
+                        <span class="px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm bg-blue-100 text-blue-700 whitespace-nowrap">
+                            Sí
+                        </span>
+                    {% else %}
+                        <span class="px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm bg-gray-100 text-gray-700 whitespace-nowrap">
+                            No
+                        </span>
+                    {% endif %}
+                </td>
 
-                    <button 
-                        onclick="editProperty(
-                            '{{ property.id }}',
-                            '{{ property.title }}',
-                            '{{ property.price }}',
-                            '{{ property.client_id }}',
-                            '{{ property.city }}',
-                            '{{ property.agent_id }}',
-                            '{{ property.address }}',
-                            '{{ property.status }}'
-                        )"
-                        class="bg-blue-100 px-4 py-2 rounded-lg text-sm text-blue-700"
+                <td class="px-3 sm:px-6 py-3 sm:py-4">
+
+                    <div class="flex justify-end gap-1 sm:gap-2">
+
+                    <button
+                        data-id="{{ property.id }}"
+                        data-title="{{ (property.title or '')|e }}"
+                        data-price="{{ property.price if property.price is not none else '' }}"
+                        data-client-id="{{ property.client_id if property.client_id is not none else '' }}"
+                        data-city="{{ (property.city or '')|e }}"
+                        data-agent-id="{{ property.agent_id if property.agent_id is not none else '' }}"
+                        data-address="{{ (property.address or '')|e }}"
+                        data-status="{{ (property.status or 'Activa')|e }}"
+                        data-description="{{ (property.description or '')|e }}"
+                        data-auto-send-report="{{ 'true' if property.auto_send_report else 'false' }}"
+                        data-report-frequency="{{ (property.report_frequency or '')|e }}"
+                        data-report-day="{{ property.report_day if property.report_day is not none else '' }}"
+                        data-report-hour="{{ property.report_hour if property.report_hour is not none else '' }}"
+                        onclick="editPropertyFromButton(this)"
+                        class="bg-blue-100 hover:bg-blue-200 px-2 sm:px-4 py-2 rounded-lg text-xs sm:text-sm text-blue-700 transition-colors whitespace-nowrap"
                     >
-                        Editar
+                        <span class="hidden sm:inline">Editar</span>
+                        <svg class="w-4 h-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                        </svg>
                     </button>
 
-                    <form 
+                    <form
                         action="/properties/delete/{{ property.id }}"
                         method="POST"
                         onsubmit="return confirm('¿Estás seguro de eliminar esta propiedad?');"
+                        class="inline-block"
                     >
-                        <button 
-                            type="submit" 
-                            class="bg-red-100 px-4 py-2 rounded-lg text-sm text-red-700"
+                        <button
+                            type="submit"
+                            class="bg-red-100 hover:bg-red-200 px-2 sm:px-4 py-2 rounded-lg text-xs sm:text-sm text-red-700 transition-colors whitespace-nowrap"
                         >
-                            Eliminar
+                            <span class="hidden sm:inline">Eliminar</span>
+                            <svg class="w-4 h-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                            </svg>
                         </button>
-
                     </form>
+
+                    <a
+                        href="/properties/{{ property.id }}"
+                        class="bg-gray-100 hover:bg-gray-200 px-2 sm:px-4 py-2 rounded-lg text-xs sm:text-sm transition-colors whitespace-nowrap inline-flex items-center"
+                    >
+                        <span class="hidden sm:inline">Ver</span>
+                        <svg class="w-4 h-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                        </svg>
+                    </a>
+
+                    </div>
 
                 </td>
 
@@ -144,5 +192,7 @@
         </tbody>
 
     </table>
+
+    </div>
 
 </div>

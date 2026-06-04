@@ -6,15 +6,15 @@ Propiedades
 
 {% block content %}
 
-<div class="flex items-center justify-between mb-8">
+<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 sm:mb-8">
 
     <div>
 
-        <h1 class="text-3xl font-bold text-gray-800">
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">
             Propiedades
         </h1>
 
-        <p class="text-gray-500 mt-1">
+        <p class="text-gray-500 mt-1 text-sm sm:text-base">
             Gestión de inmuebles
         </p>
 
@@ -22,48 +22,81 @@ Propiedades
 
     <button
         onclick="openModal()"
-        class="bg-black text-white px-5 py-3 rounded-xl"
+        class="w-full sm:w-auto bg-black hover:bg-gray-800 text-white px-5 py-3 rounded-xl transition-colors font-medium flex items-center justify-center gap-2"
     >
-        Nueva Propiedad
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+        </svg>
+        <span>Nueva Propiedad</span>
     </button>
 
 </div>
 
-<div class="grid grid-cols-3 gap-6 mb-8">
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
 
-    <div class="bg-white rounded-2xl p-6 shadow">
+    <div class="bg-white rounded-2xl p-4 sm:p-6 border border-gray-200 hover:shadow-lg transition-shadow">
 
-        <p class="text-gray-500 text-sm">
-            Activas
-        </p>
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-gray-500 text-xs sm:text-sm">
+                    Activas
+                </p>
 
-        <h2 class="text-3xl font-bold text-green-600 mt-2">
-            {{ active_count }}
-        </h2>
+                <h2 class="text-2xl sm:text-3xl font-bold text-green-600 mt-1 sm:mt-2">
+                    {{ active_count }}
+                </h2>
+            </div>
 
-    </div>
-
-    <div class="bg-white rounded-2xl p-6 shadow">
-
-        <p class="text-gray-500 text-sm">
-            Pausadas
-        </p>
-
-        <h2 class="text-3xl font-bold text-yellow-600 mt-2">
-            {{ paused_count }}
-        </h2>
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-green-100 flex items-center justify-center">
+                <svg class="w-5 h-5 sm:w-6 sm:h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+            </div>
+        </div>
 
     </div>
 
-    <div class="bg-white rounded-2xl p-6 shadow">
+    <div class="bg-white rounded-2xl p-4 sm:p-6 border border-gray-200 hover:shadow-lg transition-shadow">
 
-        <p class="text-gray-500 text-sm">
-            Vendidas
-        </p>
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-gray-500 text-xs sm:text-sm">
+                    Pausadas
+                </p>
 
-        <h2 class="text-3xl font-bold text-red-600 mt-2">
-            {{ sold_count }}
-        </h2>
+                <h2 class="text-2xl sm:text-3xl font-bold text-yellow-600 mt-1 sm:mt-2">
+                    {{ paused_count }}
+                </h2>
+            </div>
+
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-yellow-100 flex items-center justify-center">
+                <svg class="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="bg-white rounded-2xl p-4 sm:p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+
+        <div class="flex items-center justify-between">
+            <div>
+                <p class="text-gray-500 text-xs sm:text-sm">
+                    Vendidas
+                </p>
+
+                <h2 class="text-2xl sm:text-3xl font-bold text-red-600 mt-1 sm:mt-2">
+                    {{ sold_count }}
+                </h2>
+            </div>
+
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-red-100 flex items-center justify-center">
+                <svg class="w-5 h-5 sm:w-6 sm:h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+            </div>
+        </div>
 
     </div>
 

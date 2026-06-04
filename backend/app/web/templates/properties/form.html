@@ -1,20 +1,23 @@
 <div
     id="propertyModal"
-    class="fixed inset-0 bg-black/50 hidden items-center justify-center"
+    class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4"
 >
 
-    <div class="bg-white rounded-2xl w-[700px] p-8">
+    <div class="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-4 sm:p-6 lg:p-8 border border-gray-200 shadow-2xl">
 
         <div class="flex items-center justify-between mb-6">
 
             <h2
                 id="modalTitle"
-                class="text-2xl font-bold"
+                class="text-2xl font-bold text-gray-800"
             >
                 Nueva Propiedad
             </h2>
 
-            <button onclick="closeModal()">
+            <button
+                onclick="closeModal()"
+                class="text-gray-400 hover:text-gray-600 transition-colors text-2xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100"
+            >
                 ✕
             </button>
 
@@ -27,131 +30,250 @@
                 id="property_id"
             >
 
-            <div class="grid grid-cols-2 gap-4">
+            <!-- Información Básica -->
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+                    </svg>
+                    Información Básica
+                </h3>
 
-                <input
-                    type="text"
-                    name="title"
-                    placeholder="Título"
-                    class="border rounded-xl p-3"
-                    id="title"
-                >
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-                <input
-                    type="text"
-                    name="city"
-                    placeholder="Ciudad"
-                    class="border rounded-xl p-3"
-                    id="city"
-                >
+                    <div>
+                        <label class="block mb-2 text-sm font-medium text-gray-700">
+                            Título <span class="text-red-500">*</span>
+                        </label>
+                        <input
+                            type="text"
+                            name="title"
+                            placeholder="Ej: Casa en zona norte"
+                            class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                            id="title"
+                            required
+                        >
+                    </div>
 
-                <input
-                    type="text"
-                    name="address"
-                    placeholder="Dirección"
-                    class="border rounded-xl p-3"
-                    id="address"
-                >
+                    <div>
+                        <label class="block mb-2 text-sm font-medium text-gray-700">
+                            Valor <span class="text-red-500">*</span>
+                        </label>
+                        <input
+                            type="number"
+                            name="price"
+                            placeholder="Ej: 150000000"
+                            class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                            id="price"
+                            required
+                        >
+                    </div>
 
-                <input
-                    type="number"
-                    name="price"
-                    placeholder="Valor"
-                    class="border rounded-xl p-3"
-                    id="price"
-                >
+                    <div>
+                        <label class="block mb-2 text-sm font-medium text-gray-700">
+                            Ciudad <span class="text-red-500">*</span>
+                        </label>
+                        <input
+                            type="text"
+                            name="city"
+                            placeholder="Ej: Bogotá"
+                            class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                            id="city"
+                            required
+                        >
+                    </div>
 
-                <select
-                    name="client_id"
-                    class="border rounded-xl p-3"
-                    id="client_id"
-                >
+                    <div>
+                        <label class="block mb-2 text-sm font-medium text-gray-700">
+                            Dirección <span class="text-red-500">*</span>
+                        </label>
+                        <input
+                            type="text"
+                            name="address"
+                            placeholder="Ej: Calle 123 #45-67"
+                            class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                            id="address"
+                            required
+                        >
+                    </div>
 
-                    <option value="">
-                        Cliente
-                    </option>
+                    <div>
+                        <label class="block mb-2 text-sm font-medium text-gray-700">
+                            Cliente <span class="text-red-500">*</span>
+                        </label>
+                        <select
+                            name="client_id"
+                            class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                            id="client_id"
+                            required
+                        >
+                            <option value="">Seleccionar cliente</option>
+                            {% for client in clients %}
+                            <option value="{{ client.id }}">{{ client.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
 
-                    {% for client in clients %}
+                    <div>
+                        <label class="block mb-2 text-sm font-medium text-gray-700">
+                            Agente <span class="text-red-500">*</span>
+                        </label>
+                        <select
+                            name="agent_id"
+                            class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                            id="agent_id"
+                            required
+                        >
+                            <option value="">Seleccionar agente</option>
+                            {% for agent in agents %}
+                            <option value="{{ agent.id }}">{{ agent.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
 
-                    <option value="{{ client.id }}">
-                        {{ client.name }}
-                    </option>
-
-                    {% endfor %}
-
-                </select>
-
-                <select
-                    name="agent_id"
-                    class="border rounded-xl p-3"
-                    id="agent_id"
-                >
-
-                    <option value="">
-                        Agente
-                    </option>
-
-                    {% for agent in agents %}
-
-                    <option value="{{ agent.id }}">
-                        {{ agent.name }}
-                    </option>
-
-                    {% endfor %}
-
-                </select>
-
+                <div class="mt-4">
+                    <label class="block mb-2 text-sm font-medium text-gray-700">
+                        Descripción
+                    </label>
+                    <textarea
+                        name="description"
+                        placeholder="Descripción detallada de la propiedad..."
+                        class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                        id="description"
+                        rows="3"
+                    ></textarea>
+                </div>
             </div>
 
-            <textarea
-                name="description"
-                placeholder="Descripción"
-                class="w-full border rounded-xl p-3 mt-4"
-            ></textarea>
-
-            <div id="statusContainer" class="mb-4 hidden">
-
-                <label class="block mb-2 text-sm font-medium">
+            <!-- Estado (solo en modo edición) -->
+            <div id="statusContainer" class="mb-6 hidden">
+                <h3 class="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
                     Estado
-                </label>
+                </h3>
 
                 <select
                     id="status"
                     name="status"
-                    class="w-full border border-gray-300 rounded-xl p-3"
+                    class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
                 >
-                    <option value="Activa">
-                        Activa
-                    </option>
-
-                    <option value="Pausada">
-                        Pausada
-                    </option>
-
-                    <option value="Vendida">
-                        Vendida
-                    </option>
-
+                    <option value="Activa">Activa</option>
+                    <option value="Reservada">Reservada</option>
+                    <option value="Pausada">Pausada</option>
+                    <option value="Vendida">Vendida</option>
+                    <option value="Retirada">Retirada</option>
+                    <option value="Archivada">Archivada</option>
                 </select>
-
             </div>
-            
-            <div class="flex justify-end gap-3 mt-6">
 
+            <!-- Configuración de Informes Automáticos -->
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    Informes Automáticos
+                </h3>
+
+                <div class="space-y-4">
+                    <!-- Checkbox principal -->
+                    <label class="flex items-start gap-3 p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors cursor-pointer">
+                        <input
+                            type="checkbox"
+                            name="auto_send_report"
+                            id="auto_send_report"
+                            class="mt-1 w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-200"
+                            onchange="toggleReportSchedule()"
+                        >
+                        <div class="flex-1">
+                            <span class="font-medium text-gray-800">Enviar informes automáticamente</span>
+                            <p class="text-sm text-gray-500 mt-1">Genera y envía informes periódicos al cliente de forma automática</p>
+                        </div>
+                    </label>
+
+                    <!-- Configuración de horario -->
+                    <div id="reportScheduleContainer" class="pl-8 space-y-4 hidden">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block mb-2 text-sm font-medium text-gray-700">
+                                    Frecuencia
+                                </label>
+                                <select
+                                    name="report_frequency"
+                                    id="report_frequency"
+                                    class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                                >
+                                    <option value="">Seleccionar</option>
+                                    <option value="MONTHLY">Mensual</option>
+                                    <option value="WEEKLY">Semanal</option>
+                                    <option value="BIWEEKLY">Quincenal</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="block mb-2 text-sm font-medium text-gray-700">
+                                    Día del mes
+                                </label>
+                                <input
+                                    type="number"
+                                    name="report_day"
+                                    id="report_day"
+                                    min="1"
+                                    max="31"
+                                    placeholder="Ej: 15"
+                                    class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                                >
+                                <p class="text-xs text-gray-500 mt-1">1-31</p>
+                            </div>
+
+                            <div>
+                                <label class="block mb-2 text-sm font-medium text-gray-700">
+                                    Hora de envío
+                                </label>
+                                <input
+                                    type="number"
+                                    name="report_hour"
+                                    id="report_hour"
+                                    min="0"
+                                    max="23"
+                                    placeholder="Ej: 9"
+                                    class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                                >
+                                <p class="text-xs text-gray-500 mt-1">0-23 (24h)</p>
+                            </div>
+                        </div>
+
+                        <div class="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                            <p class="text-sm text-blue-800">
+                                <strong>Ejemplo:</strong> Si seleccionas "Mensual", día "15" y hora "9",
+                                el sistema generará y enviará el informe el día 15 de cada mes a las 9:00 AM.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-3 mt-6 pt-6 border-t border-gray-200">
                 <button
                     type="button"
                     onclick="closeModal()"
-                    class="bg-gray-100 px-5 py-3 rounded-xl"
+                    class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-3 rounded-xl transition-colors font-medium"
                 >
                     Cancelar
                 </button>
 
                 <button
-                    class="bg-black text-white px-5 py-3 rounded-xl"
+                    type="submit"
+                    class="bg-black hover:bg-gray-800 text-white px-6 py-3 rounded-xl transition-colors font-medium flex items-center gap-2"
                 >
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
                     Guardar
                 </button>
-
             </div>
 
         </form>
@@ -162,49 +284,100 @@
 
 <script>
 
-function openModal() {
+function toggleReportSchedule() {
+    const checkbox = document.getElementById('auto_send_report');
+    const container = document.getElementById('reportScheduleContainer');
 
-    const modal = document.getElementById("propertyModal")
-    document.getElementById("modalTitle").innerText = "Nueva Propiedad"
-    document.getElementById("statusContainer").classList.add("hidden")
-
-    modal.classList.remove("hidden")
-    modal.classList.add("flex")
+    if (checkbox.checked) {
+        container.classList.remove('hidden');
+    } else {
+        container.classList.add('hidden');
+    }
 }
 
-function editProperty(id, title, price, client_id, city, agent_id, address, status) {
+function openModal() {
+    const modal = document.getElementById("propertyModal");
+    document.getElementById("modalTitle").innerText = "Nueva Propiedad";
+    document.getElementById("statusContainer").classList.add("hidden");
+    document.getElementById("propertyForm").reset();
+    document.getElementById("propertyForm").action = "/properties/create";
 
-    openModal()
+    // Resetear campos de auto_send_report
+    document.getElementById("auto_send_report").checked = false;
+    document.getElementById("reportScheduleContainer").classList.add("hidden");
 
-    document.getElementById("modalTitle").innerText = "Actualizar Propiedad"
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+}
 
-    document.getElementById("statusContainer").classList.remove("hidden")
+function editProperty(id, title, price, client_id, city, agent_id, address, status, description, auto_send_report, report_frequency, report_day, report_hour) {
+    openModal();
 
-    document.getElementById("property_id").value = id
+    document.getElementById("modalTitle").innerText = "Actualizar Propiedad";
+    document.getElementById("statusContainer").classList.remove("hidden");
+    document.getElementById("property_id").value = id;
+    document.getElementById("title").value = title;
+    document.getElementById("price").value = price;
+    document.getElementById("client_id").value = client_id;
+    document.getElementById("city").value = city;
+    document.getElementById("agent_id").value = agent_id;
+    document.getElementById("address").value = address;
+    document.getElementById("status").value = status;
+    document.getElementById("description").value = description || "";
 
-    document.getElementById("title").value = title
+    // Configurar auto_send_report
+    const autoSendCheckbox = document.getElementById("auto_send_report");
+    autoSendCheckbox.checked = auto_send_report === 'true' || auto_send_report === true;
 
-    document.getElementById("price").value = price
+    // Mostrar/ocultar configuración de horario
+    const scheduleContainer = document.getElementById("reportScheduleContainer");
+    if (autoSendCheckbox.checked) {
+        scheduleContainer.classList.remove("hidden");
 
-    document.getElementById("client_id").value = client_id
+        // Llenar los campos de horario
+        if (report_frequency) {
+            document.getElementById("report_frequency").value = report_frequency;
+        }
+        if (report_day) {
+            document.getElementById("report_day").value = report_day;
+        }
+        if (report_hour) {
+            document.getElementById("report_hour").value = report_hour;
+        }
+    } else {
+        scheduleContainer.classList.add("hidden");
+    }
 
-    document.getElementById("city").value = city
+    document.getElementById("propertyForm").action = "/properties/update";
+}
 
-    document.getElementById("agent_id").value = agent_id
+function editPropertyFromButton(button) {
+    if (!button || !button.dataset) {
+        return;
+    }
 
-    document.getElementById("address").value = address
-
-    document.getElementById("status").value = status
-    
-    document.getElementById("propertyForm").action = "/properties/update"
+    editProperty(
+        button.dataset.id,
+        button.dataset.title || "",
+        button.dataset.price || "",
+        button.dataset.clientId || "",
+        button.dataset.city || "",
+        button.dataset.agentId || "",
+        button.dataset.address || "",
+        button.dataset.status || "Activa",
+        button.dataset.description || "",
+        button.dataset.autoSendReport || "false",
+        button.dataset.reportFrequency || "",
+        button.dataset.reportDay || "",
+        button.dataset.reportHour || ""
+    );
 }
 
 function closeModal() {
-
-    const modal = document.getElementById("propertyModal")
-
-    modal.classList.remove("flex")
-    modal.classList.add("hidden")
+    const modal = document.getElementById("propertyModal");
+    modal.classList.remove("flex");
+    modal.classList.add("hidden");
+    document.getElementById("propertyForm").reset();
 }
 
 </script>
