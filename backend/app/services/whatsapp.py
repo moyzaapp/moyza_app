@@ -3,8 +3,8 @@ import time
 import random
 
 
-EVOLUTION_URL_SENDMEDIA = "http://178.104.2.25:8080/message/sendMedia/jobany"
-EVOLUTION_URL_SENDPRESENCE = "http://178.104.2.25:8080/message/sendPresence/jobany"
+EVOLUTION_URL_SENDMEDIA = "http://evomoyza.duckdns.org/message/sendMedia/jobany"
+EVOLUTION_URL_SENDPRESENCE = "http://evomoyza.duckdns.org/message/sendPresence/jobany"
 API_KEY = "MOYZA_SUPER_KEY"
 
 def human_delay():
