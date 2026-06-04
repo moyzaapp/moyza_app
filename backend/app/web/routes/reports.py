@@ -114,7 +114,7 @@ async def upload_report(
 
             print(report.filepath, report.filename, client_phone)
 
-            file_url = f"https://evomoyza.duckdns.org/{report.filepath}"
+            file_url = f"https://moyza.duckdns.org/{report.filepath}"
 
             send_report(
                 phone=client_phone,
@@ -219,7 +219,7 @@ async def send_report_whatsapp(
 
     client_phone = property_item.client.phone
 
-    file_url = f"https://evomoyza.duckdns.org/{report.filepath}"
+    file_url = f"https://moyza.duckdns.org/{report.filepath}"
     # file_url = "https://moyza.duckdns.org/storage/reports/b89da4b7-1407-4205-891a-c26faa33c746.pdf"
 
     print(report.filepath, report.filename, client_phone, property_item.id)
