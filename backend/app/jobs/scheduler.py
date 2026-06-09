@@ -30,7 +30,7 @@ def check_automatic_reports():
             db.query(Property)
             .filter(
                 Property.auto_send_report == True,
-                Property.status == "ACTIVA"
+                Property.status == "Activa"
             )
             .all()
         )
@@ -81,7 +81,7 @@ def start_scheduler():
     scheduler.add_job(
         check_automatic_reports,
         "interval",
-        hours=0.015,
+        hours=1,
         id="check_automatic_reports",
         replace_existing=True
     )

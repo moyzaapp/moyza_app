@@ -8,7 +8,7 @@ from app.jobs.scheduler import scheduler
 router = APIRouter()
 
 
-@router.get("/health")
+@router.get("/")
 def health_check():
     """Health check básico."""
     return {
@@ -18,7 +18,7 @@ def health_check():
     }
 
 
-@router.get("/health/scheduler")
+@router.get("/scheduler")
 def scheduler_status():
     """Estado detallado del scheduler."""
     worker_id = os.getenv("WORKER_ID", "unknown")

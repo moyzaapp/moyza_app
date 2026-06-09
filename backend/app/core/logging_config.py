@@ -23,7 +23,7 @@ def setup_logging():
     )
 
     # Reducir verbosidad de librerías externas
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("apscheduler.scheduler").setLevel(logging.INFO)
     logging.getLogger("apscheduler.executors").setLevel(logging.WARNING)
 
