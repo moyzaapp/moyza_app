@@ -6,6 +6,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.db.session import SessionLocal
 from app.models.property import Property
+from app.services.report_job_service import ReportJobService
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +47,20 @@ def check_automatic_reports():
                 ):
                     logger.info(
                         f"Generando informe automático para propiedad {property_item.id} "
-                        f"({property_item.name})"
+                        f"({property_item.title})"
                     )
-                    # TODO: Implementar lógica de generación y envío de informe
+
+                    report_service = ReportJobService(db)
+                    success = report_service.execute(property_item)
+
+                    if success:
+                        logger.info(
+                            f"Informe generado exitosamente para propiedad {property_item.id}"
+                        )
+                    else:
+                        logger.warning(
+                            f"No se pudo generar informe para propiedad {property_item.id}"
+                        )
 
             except Exception as e:
                 logger.error(
@@ -80,8 +92,9 @@ def start_scheduler():
     # Ejecutar cada hora (los informes tienen precisión horaria)
     scheduler.add_job(
         check_automatic_reports,
-        "interval",
-        hours=1,
+        "cron",
+        hour="*",
+        minute=5,
         id="check_automatic_reports",
         replace_existing=True
     )

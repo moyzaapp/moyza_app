@@ -14,7 +14,7 @@ def setup_logging():
 
     # Configuración del root logger
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format=log_format,
         datefmt=date_format,
         handlers=[
