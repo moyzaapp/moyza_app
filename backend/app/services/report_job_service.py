@@ -6,6 +6,7 @@ from typing import Optional, Dict
 from uuid import uuid4
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.property import Property
 from app.models.report import Report
 from app.models.report_job_log import ReportJobLog
@@ -254,7 +255,7 @@ class ReportJobService:
             return
 
         client_phone = property_item.client.phone
-        file_url = f"https://moyza.duckdns.org/{report.filepath}"
+        file_url = settings.public_url(report.filepath)
 
         caption = (
             f"Hola! Te enviamos el reporte automático de tu propiedad: {property_item.title}\n"

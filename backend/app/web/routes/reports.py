@@ -18,6 +18,7 @@ from uuid import uuid4
 import shutil
 import os
 
+from app.core.config import settings
 from app.db.deps import get_db
 
 from app.models.report import Report
@@ -114,7 +115,7 @@ async def upload_report(
 
             print(report.filepath, report.filename, client_phone)
 
-            file_url = f"https://moyza.duckdns.org/{report.filepath}"
+            file_url = settings.public_url(report.filepath)
 
             send_report(
                 phone=client_phone,
@@ -219,8 +220,7 @@ async def send_report_whatsapp(
 
     client_phone = property_item.client.phone
 
-    file_url = f"https://moyza.duckdns.org/{report.filepath}"
-    # file_url = "https://moyza.duckdns.org/storage/reports/b89da4b7-1407-4205-891a-c26faa33c746.pdf"
+    file_url = settings.public_url(report.filepath)
 
     print(report.filepath, report.filename, client_phone, property_item.id)
 

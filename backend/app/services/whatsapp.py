@@ -6,11 +6,9 @@ from typing import Dict, Optional
 import requests
 from requests.exceptions import RequestException, Timeout, ConnectionError
 
-logger = logging.getLogger(__name__)
+from app.core.config import settings
 
-EVOLUTION_URL_SENDMEDIA = "https://evomoyza.duckdns.org/message/sendMedia/jobany"
-EVOLUTION_URL_SENDPRESENCE = "https://evomoyza.duckdns.org/chat/sendPresence/jobany"
-API_KEY = "MOYZA_SUPER_KEY"
+logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 30
 MAX_RETRIES = 3
@@ -30,6 +28,34 @@ class WhatsAppValidationError(WhatsAppServiceError):
 class WhatsAppConnectionError(WhatsAppServiceError):
     """Excepción para errores de conexión con la API."""
     pass
+
+
+class WhatsAppConfigurationError(WhatsAppServiceError):
+    """Excepción para errores de configuración del servicio."""
+    pass
+
+
+def _get_whatsapp_config() -> Dict[str, str]:
+    """Obtiene y valida la configuración requerida para enviar mensajes."""
+    config = {
+        "send_media_url": settings.EVOLUTION_URL_SENDMEDIA,
+        "send_presence_url": settings.EVOLUTION_URL_SENDPRESENCE,
+        "api_key": settings.WHATSAPP_API_KEY,
+    }
+
+    missing_values = [
+        name
+        for name, value in config.items()
+        if not value or not value.strip()
+    ]
+
+    if missing_values:
+        missing = ", ".join(missing_values)
+        raise WhatsAppConfigurationError(
+            f"Configuración incompleta de WhatsApp: faltan {missing}"
+        )
+
+    return config
 
 
 def human_delay(min_seconds: float = 2.0, max_seconds: float = 6.0) -> None:
@@ -80,7 +106,7 @@ def _validate_file_url(file_url: str) -> None:
         raise WhatsAppValidationError("La URL del archivo debe comenzar con http:// o https://")
 
 
-def _send_presence(phone: str, headers: Dict[str, str]) -> bool:
+def _send_presence(phone: str, send_presence_url: str, headers: Dict[str, str]) -> bool:
     """
     Envía el estado de 'escribiendo' al chat de WhatsApp.
 
@@ -99,7 +125,7 @@ def _send_presence(phone: str, headers: Dict[str, str]) -> bool:
         }
 
         response = requests.post(
-            EVOLUTION_URL_SENDPRESENCE,
+            send_presence_url,
             json=payload,
             headers=headers,
             timeout=REQUEST_TIMEOUT
@@ -122,7 +148,13 @@ def _send_presence(phone: str, headers: Dict[str, str]) -> bool:
         return False
 
 
-def _send_media_request(phone: str, file_url: str, caption: str, headers: Dict[str, str]) -> requests.Response:
+def _send_media_request(
+    phone: str,
+    file_url: str,
+    caption: str,
+    send_media_url: str,
+    headers: Dict[str, str]
+) -> requests.Response:
     """
     Realiza la petición HTTP para enviar el archivo.
 
@@ -149,7 +181,7 @@ def _send_media_request(phone: str, file_url: str, caption: str, headers: Dict[s
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             response = requests.post(
-                EVOLUTION_URL_SENDMEDIA,
+                send_media_url,
                 json=payload,
                 headers=headers,
                 timeout=REQUEST_TIMEOUT
@@ -206,17 +238,25 @@ def send_report(phone: str, file_url: str, caption: str) -> Optional[Dict]:
         if caption is None:
             caption = ""
 
+        config = _get_whatsapp_config()
+
         headers = {
             "Content-Type": "application/json",
-            "apikey": API_KEY
+            "apikey": config["api_key"]
         }
 
         logger.info(f"Iniciando envío de reporte a {phone}")
 
-        _send_presence(phone, headers)
+        _send_presence(phone, config["send_presence_url"], headers)
         human_delay()
 
-        response = _send_media_request(phone, file_url, caption, headers)
+        response = _send_media_request(
+            phone,
+            file_url,
+            caption,
+            config["send_media_url"],
+            headers
+        )
 
         try:
             response_data = response.json()
@@ -232,6 +272,10 @@ def send_report(phone: str, file_url: str, caption: str) -> Optional[Dict]:
 
     except WhatsAppConnectionError as e:
         logger.error(f"Error de conexión: {str(e)}")
+        raise
+
+    except WhatsAppConfigurationError as e:
+        logger.error(f"Error de configuración: {str(e)}")
         raise
 
     except Exception as e:

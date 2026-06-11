@@ -12,6 +12,11 @@ class Settings:
     DB_PASSWORD: str = os.getenv("DB_PASSWORD")
     DB_NAME: str = os.getenv("DB_NAME")
 
+    EVOLUTION_URL_SENDMEDIA: str = os.getenv("EVOLUTION_URL_SENDMEDIA")
+    EVOLUTION_URL_SENDPRESENCE: str = os.getenv("EVOLUTION_URL_SENDPRESENCE")
+    WHATSAPP_API_KEY: str = os.getenv("WHATSAPP_API_KEY") or os.getenv("API_KEY")
+    PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "https://moyza.duckdns.org")
+
     @property
     def DATABASE_URL(self):
         return (
@@ -19,5 +24,8 @@ class Settings:
             f"{self.DB_USER}:{self.DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
+
+    def public_url(self, path: str) -> str:
+        return f"{self.PUBLIC_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
 
 settings = Settings()
