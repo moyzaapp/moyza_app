@@ -6,12 +6,12 @@ from typing import Optional, Dict
 from uuid import uuid4
 from sqlalchemy.orm import Session
 
-from app.core.constants import PropertyInteractionType
 from app.core.constants import ReportType
 from app.core.config import settings
 from app.models.property import Property
 from app.models.report import Report
 from app.models.report_job_log import ReportJobLog
+from app.services.property_metrics import PropertyMetricsService
 from app.services.report_generator import generate_property_report
 from app.services.whatsapp import send_report, WhatsAppServiceError
 
@@ -182,30 +182,7 @@ class ReportJobService:
         Returns:
             Diccionario con los datos del reporte
         """
-        days_on_market = 0
-        if property_item.market_entry_date:
-            days_on_market = (datetime.utcnow() - property_item.market_entry_date).days
-
-        return {
-            "days_on_market": days_on_market,
-            "reductions": 0,
-            "consultas": len([
-                i for i in property_item.interactions
-                if i.interaction_type == PropertyInteractionType.INQUIRY
-            ]),
-            "visitas": len([
-                i for i in property_item.interactions
-                if i.interaction_type == PropertyInteractionType.VISIT
-            ]),
-            "interesados": len([
-                i for i in property_item.interactions
-                if i.interaction_type == PropertyInteractionType.INTERESTED
-            ]),
-            "ofertas": len([
-                i for i in property_item.interactions
-                if i.interaction_type == PropertyInteractionType.OFFER
-            ]),
-        }
+        return PropertyMetricsService(self.db).report_data(property_item)
 
     def _generate_pdf(self, property_item: Property, report_data: Dict) -> str:
         """

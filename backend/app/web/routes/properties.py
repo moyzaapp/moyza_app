@@ -29,6 +29,7 @@ from app.models.report import Report
 
 from pathlib import Path
 
+from app.services.property_metrics import PropertyMetricsService
 from app.services.report_generator import generate_property_report
 from app.web.utils.flash import set_flash
 
@@ -277,14 +278,11 @@ async def property_detail(
         .all()
     )
 
-    reductions_count = len(history)
-
-    days_on_market = 0
-    if property_item.market_entry_date:
-        days_on_market = (
-                datetime.utcnow()
-                - property_item.market_entry_date
-            ).days
+    metrics_service = PropertyMetricsService(db)
+    report_data = metrics_service.report_data(
+        property_item,
+        reductions_count=len(history)
+    )
 
     interactions = (
         db.query(PropertyInteraction)
@@ -297,50 +295,7 @@ async def property_detail(
         .all()
     )
 
-    consultas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == PropertyInteractionType.INQUIRY
-        )
-        .count()
-    )
-
-    visitas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == PropertyInteractionType.VISIT
-        )
-        .count()
-    )
-
-    interesados = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == PropertyInteractionType.INTERESTED
-        )
-        .count()
-    )
-
-    ofertas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == PropertyInteractionType.OFFER
-        )
-        .count()
-    )
-
-    price_gap = None
-
-    if property_item.fair_price:
-
-        price_gap = (
-            float(property_item.price)
-            - float(property_item.fair_price)
-        )
+    price_gap = metrics_service.price_gap(property_item)
 
     status_history = (
         db.query(PropertyStatusHistory)
@@ -364,25 +319,7 @@ async def property_detail(
         .all()
     )
 
-    interest_avg = None
-
-    if visits_registered:
-        interest_values = []
-        for visit in visits_registered:
-            if visit.interest_level is None:
-                continue
-            try:
-                interest_values.append(int(visit.interest_level))
-            except (TypeError, ValueError):
-                continue
-        if interest_values:
-            interest_avg = round(sum(interest_values) / len(interest_values), 2)
-
-    price_high_count = sum(
-        1
-        for v in visits_registered
-        if v.price_feedback == "ALTO"
-    )
+    visit_summary = metrics_service.visit_summary(visits_registered)
 
     property_reports = (
         db.query(Report)
@@ -400,19 +337,19 @@ async def property_detail(
             "request": request,
             "property": property_item,
             "history": history,
-            "reductions": reductions_count,
-            "days_on_market": days_on_market,
+            "reductions": report_data["reductions"],
+            "days_on_market": report_data["days_on_market"],
             "interactions": interactions,
             "current_user": request.state.user,
             "price_gap": price_gap,
-            "consultas": consultas,
-            "visitas": visitas,
-            "interesados": interesados,
-            "ofertas": ofertas,
+            "consultas": report_data["consultas"],
+            "visitas": report_data["visitas"],
+            "interesados": report_data["interesados"],
+            "ofertas": report_data["ofertas"],
             "status_history": status_history,
             "visits_registered": visits_registered,
-            "interest_avg": interest_avg,
-            "price_high_count": price_high_count,
+            "interest_avg": visit_summary["interest_avg"],
+            "price_high_count": visit_summary["price_high_count"],
             "property_reports": property_reports,
             "latest_report": latest_report
         }
@@ -561,81 +498,7 @@ async def generate_report(
         set_flash(response, "error", "Propiedad no encontrada")
         return response
 
-    days_on_market = 0
-    if property_item.market_entry_date:
-        days_on_market = (
-                datetime.utcnow()
-                - property_item.market_entry_date
-            ).days
-
-    interactions = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id
-        )
-        .order_by(
-            PropertyInteraction.created_at.desc()
-        )
-        .all()
-    )
-
-    consultas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == PropertyInteractionType.INQUIRY
-        )
-        .count()
-    )
-
-    visitas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == PropertyInteractionType.VISIT
-        )
-        .count()
-    )
-
-    interesados = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == PropertyInteractionType.INTERESTED
-        )
-        .count()
-    )
-
-    ofertas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == PropertyInteractionType.OFFER
-        )
-        .count()
-    )
-
-    history = (
-        db.query(PropertyPriceHistory)
-        .filter(
-            PropertyPriceHistory.property_id == property_id
-        )
-        .order_by(
-            PropertyPriceHistory.created_at.desc()
-        )
-        .all()
-    )
-
-    reductions_count = len(history)
-
-    report_data = {
-        "days_on_market": days_on_market,
-        "reductions": reductions_count,
-        "consultas": consultas,
-        "visitas": visitas,
-        "interesados": interesados,
-        "ofertas": ofertas
-    }
+    report_data = PropertyMetricsService(db).report_data(property_item)
 
     reports_dir = Path("storage/reports")
 
