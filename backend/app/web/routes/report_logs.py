@@ -87,7 +87,7 @@ async def get_report_logs_api(
                 "error_message": log.error_message,
                 "retry_count": log.retry_count,
                 "duration_seconds": float(log.duration_seconds) if log.duration_seconds else None,
-                "metadata": log.metadata,
+                "metadata": log.metadatas,
                 "created_at": log.created_at.isoformat() if log.created_at else None
             }
             for log in logs

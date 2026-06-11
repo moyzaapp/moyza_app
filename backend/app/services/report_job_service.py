@@ -130,7 +130,7 @@ class ReportJobService:
         if duration_seconds is not None:
             log_entry.duration_seconds = duration_seconds
         if metadata:
-            log_entry.metadata = json.dumps(metadata)
+            log_entry.metadatas = json.dumps(metadata)
 
         log_entry.updated_at = datetime.utcnow()
         self.db.commit()
