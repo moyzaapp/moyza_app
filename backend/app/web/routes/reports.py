@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from uuid import uuid4
 
+import logging
 import shutil
 import os
 
@@ -28,6 +29,7 @@ from app.web.utils.flash import set_flash
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 templates = Jinja2Templates(
     directory="app/web/templates"
@@ -113,7 +115,11 @@ async def upload_report(
 
             client_phone = property_item.client.phone
 
-            print(report.filepath, report.filename, client_phone)
+            logger.info(
+                "Enviando informe subido por WhatsApp: report_id=%s property_id=%s",
+                report.id,
+                property_id
+            )
 
             file_url = settings.public_url(report.filepath)
 
@@ -124,8 +130,12 @@ async def upload_report(
             )
 
             set_flash(response, "success", "Informe subido y enviado por WhatsApp correctamente")
-        except Exception as e:
-            print(f"Error enviando WhatsApp: {e}")
+        except Exception:
+            logger.exception(
+                "Error enviando informe subido por WhatsApp: report_id=%s property_id=%s",
+                report.id,
+                property_id
+            )
             set_flash(response, "warning", "Informe subido, pero ocurrió un error al enviar por WhatsApp")
     else:
         set_flash(response, "success", "Informe subido correctamente")
@@ -183,8 +193,8 @@ async def delete_report(
         db.commit()
 
         set_flash(response, "success", "Informe eliminado correctamente")
-    except Exception as e:
-        print(f"Error eliminando informe: {e}")
+    except Exception:
+        logger.exception("Error eliminando informe: report_id=%s", report_id)
         set_flash(response, "error", "Ocurrió un error al eliminar el informe")
 
     return response
@@ -222,7 +232,11 @@ async def send_report_whatsapp(
 
     file_url = settings.public_url(report.filepath)
 
-    print(report.filepath, report.filename, client_phone, property_item.id)
+    logger.info(
+        "Enviando informe existente por WhatsApp: report_id=%s property_id=%s",
+        report.id,
+        property_item.id
+    )
 
     try:
         send_report(
@@ -231,8 +245,12 @@ async def send_report_whatsapp(
             caption="Reporte generado automáticamente"
         )
         set_flash(response, "success", f"Informe enviado por WhatsApp a {client_phone}")
-    except Exception as e:
-        print(f"Error enviando WhatsApp: {e}")
+    except Exception:
+        logger.exception(
+            "Error enviando informe existente por WhatsApp: report_id=%s property_id=%s",
+            report.id,
+            property_item.id
+        )
         set_flash(response, "error", "Ocurrió un error al enviar el informe por WhatsApp")
 
     return response

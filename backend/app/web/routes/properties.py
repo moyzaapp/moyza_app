@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -30,6 +31,7 @@ from app.web.utils.flash import set_flash
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 templates = Jinja2Templates(
     directory="app/web/templates"
@@ -105,8 +107,8 @@ async def create_property(
         set_flash(response, "success", f"Propiedad '{title}' creada correctamente")
         return response
 
-    except Exception as e:
-        print(f"Error creando propiedad: {e}")
+    except Exception:
+        logger.exception("Error creando propiedad: title=%s", title)
         response = RedirectResponse(url="/properties", status_code=302)
         set_flash(response, "error", "Ocurrió un error al crear la propiedad")
         return response
@@ -419,8 +421,12 @@ async def create_interaction(
         set_flash(response, "success", f"Actividad de tipo '{interaction_type}' registrada correctamente")
         return response
 
-    except Exception as e:
-        print(f"Error registrando interacción: {e}")
+    except Exception:
+        logger.exception(
+            "Error registrando interacción: property_id=%s interaction_type=%s",
+            property_id,
+            interaction_type
+        )
         response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
         set_flash(response, "error", "Ocurrió un error al registrar la actividad")
         return response
@@ -604,6 +610,7 @@ async def generate_report(
         db.add(report)
         db.commit()
     except Exception:
+        logger.exception("Error generando informe manual: property_id=%s", property_id)
         response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
         set_flash(response, "error", "No se pudo generar el informe")
         return response

@@ -14,7 +14,7 @@ class Settings:
 
     EVOLUTION_URL_SENDMEDIA: str = os.getenv("EVOLUTION_URL_SENDMEDIA")
     EVOLUTION_URL_SENDPRESENCE: str = os.getenv("EVOLUTION_URL_SENDPRESENCE")
-    WHATSAPP_API_KEY: str = os.getenv("WHATSAPP_API_KEY") or os.getenv("API_KEY")
+    WHATSAPP_API_KEY: str = os.getenv("WHATSAPP_API_KEY")
     PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "https://moyza.duckdns.org")
 
     @property
