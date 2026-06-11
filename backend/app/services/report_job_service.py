@@ -14,6 +14,7 @@ from app.models.report_job_log import ReportJobLog
 from app.services.property_metrics import PropertyMetricsService
 from app.services.report_generator import generate_property_report
 from app.services.whatsapp import send_report, WhatsAppServiceError
+from app.services.ai_valuation import AIValuationService
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,17 @@ class ReportJobService:
             self._update_log(log_entry, stage="validation", status="pending")
 
             report_data = self._collect_report_data(property_item)
+
+            # Generar análisis con IA
+            self._update_log(log_entry, stage="ai_analysis", status="pending")
+            ai_analysis = self._generate_ai_analysis(property_item, report_data)
+            if ai_analysis:
+                report_data["ai_valuation"] = ai_analysis.get("valuation")
+                report_data["ai_observations"] = ai_analysis.get("observations")
+                logger.info(f"Análisis de IA generado para propiedad {property_item.id}")
+            else:
+                logger.warning(f"No se pudo generar análisis de IA para propiedad {property_item.id}")
+
             self._update_log(log_entry, stage="generation", status="pending")
 
             file_path = self._generate_pdf(property_item, report_data)
@@ -183,6 +195,24 @@ class ReportJobService:
             Diccionario con los datos del reporte
         """
         return PropertyMetricsService(self.db).report_data(property_item)
+
+    def _generate_ai_analysis(self, property_item: Property, metrics_data: Dict) -> Optional[Dict]:
+        """
+        Genera análisis con IA (valuación + observaciones).
+
+        Args:
+            property_item: Propiedad a analizar
+            metrics_data: Métricas calculadas de la propiedad
+
+        Returns:
+            Diccionario con análisis de IA o None si no está disponible
+        """
+        try:
+            ai_service = AIValuationService(self.db)
+            return ai_service.generate_analysis(property_item, metrics_data)
+        except Exception as e:
+            logger.error(f"Error generando análisis de IA para propiedad {property_item.id}: {e}")
+            return None
 
     def _generate_pdf(self, property_item: Property, report_data: Dict) -> str:
         """
