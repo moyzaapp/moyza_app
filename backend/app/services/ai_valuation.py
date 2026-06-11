@@ -2,7 +2,6 @@ import logging
 import json
 import time
 from typing import Dict, Optional
-from openai import OpenAI, OpenAIError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -12,24 +11,19 @@ from app.models.ai_analysis_log import AIAnalysisLog
 logger = logging.getLogger(__name__)
 
 
-# Pricing de OpenAI (USD por 1M tokens) - Actualizado a Junio 2026
+# Pricing de OpenAI (USD por 1M tokens)
 OPENAI_PRICING = {
-    "gpt-4o": {
-        "input": 2.50,
-        "output": 10.00
-    },
-    "gpt-4o-mini": {
-        "input": 0.15,
-        "output": 0.60
-    },
-    "gpt-4-turbo": {
-        "input": 10.00,
-        "output": 30.00
-    },
-    "gpt-3.5-turbo": {
-        "input": 0.50,
-        "output": 1.50
-    }
+    "gpt-4o": {"input": 2.50, "output": 10.00},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "gpt-4-turbo": {"input": 10.00, "output": 30.00},
+    "gpt-3.5-turbo": {"input": 0.50, "output": 1.50}
+}
+
+# Pricing de Gemini (USD por 1M tokens)
+GEMINI_PRICING = {
+    "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
+    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
+    "gemini-2.0-flash-exp": {"input": 0.0, "output": 0.0}  # Gratis en preview
 }
 
 
@@ -44,15 +38,44 @@ class AIValuationService:
     def __init__(self, db: Session):
         self.db = db
         self.client = None
+        self.provider = settings.AI_PROVIDER.lower()
 
+        if self.provider == "openai":
+            self._init_openai()
+        elif self.provider == "gemini":
+            self._init_gemini()
+        else:
+            logger.error(f"AI_PROVIDER inválido: {settings.AI_PROVIDER}. Usa 'openai' o 'gemini'.")
+
+    def _init_openai(self):
+        """Inicializa el cliente de OpenAI."""
         if settings.OPENAI_API_KEY:
             try:
+                from openai import OpenAI
                 self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+                logger.info(f"OpenAI inicializado: modelo {settings.OPENAI_MODEL}")
             except Exception as e:
                 logger.error(f"Error inicializando cliente OpenAI: {e}")
                 self.client = None
         else:
-            logger.warning("OPENAI_API_KEY no configurada. El servicio de IA no estará disponible.")
+            logger.warning("OPENAI_API_KEY no configurada.")
+
+    def _init_gemini(self):
+        """Inicializa el cliente de Gemini."""
+        if settings.GEMINI_API_KEY:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=settings.GEMINI_API_KEY)
+                self.client = genai
+                logger.info(f"Gemini inicializado: modelo {settings.GEMINI_MODEL}")
+            except ImportError:
+                logger.error("No se pudo importar google-generativeai. Instala: pip install google-generativeai")
+                self.client = None
+            except Exception as e:
+                logger.error(f"Error inicializando cliente Gemini: {e}")
+                self.client = None
+        else:
+            logger.warning("GEMINI_API_KEY no configurada.")
 
     def is_available(self) -> bool:
         """Verifica si el servicio de IA está disponible."""
@@ -133,28 +156,23 @@ class AIValuationService:
 
         start_time = time.time()
 
+        system_prompt = (
+            "Eres un experto tasador inmobiliario con 15 años de experiencia en Argentina. "
+            "Tu especialidad es analizar propiedades y estimar valores de mercado realistas "
+            "basándose en ubicación, características, actividad comercial y tendencias del mercado. "
+            "Siempre respondes en formato JSON válido y tus análisis son precisos y fundamentados."
+        )
+
         try:
-            response = self.client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Eres un experto tasador inmobiliario con 15 años de experiencia en Argentina. "
-                            "Tu especialidad es analizar propiedades y estimar valores de mercado realistas "
-                            "basándose en ubicación, características, actividad comercial y tendencias del mercado. "
-                            "Siempre respondes en formato JSON válido y tus análisis son precisos y fundamentados."
-                        )
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=settings.OPENAI_TEMPERATURE,
-                max_tokens=settings.OPENAI_MAX_TOKENS,
-                response_format={"type": "json_object"}
-            )
+            if self.provider == "openai":
+                response = self._call_openai(prompt, system_prompt)
+            elif self.provider == "gemini":
+                response = self._call_gemini(prompt, system_prompt)
+            else:
+                raise Exception(f"Proveedor no soportado: {self.provider}")
 
             response_time = time.time() - start_time
-            content = response.choices[0].message.content
+            content = response["content"]
             result = json.loads(content)
 
             # Registrar log de auditoría
@@ -163,7 +181,7 @@ class AIValuationService:
                 analysis_type="valuation",
                 prompt=prompt,
                 response=content,
-                response_obj=response,
+                response_dict=response,
                 response_time=response_time,
                 status="success"
             )
@@ -181,7 +199,7 @@ class AIValuationService:
                 analysis_type="valuation",
                 prompt=prompt,
                 response=None,
-                response_obj=None,
+                response_dict=None,
                 response_time=response_time,
                 status="error",
                 error_message=str(e)
@@ -212,29 +230,24 @@ class AIValuationService:
 
         start_time = time.time()
 
+        system_prompt = (
+            "Eres un asesor comercial inmobiliario estratégico. "
+            "Tu trabajo es analizar el comportamiento de mercado de propiedades, "
+            "identificar oportunidades de mejora y dar recomendaciones accionables "
+            "para optimizar la comercialización. Siempre respondes en formato JSON válido "
+            "con análisis concretos y recomendaciones específicas."
+        )
+
         try:
-            response = self.client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Eres un asesor comercial inmobiliario estratégico. "
-                            "Tu trabajo es analizar el comportamiento de mercado de propiedades, "
-                            "identificar oportunidades de mejora y dar recomendaciones accionables "
-                            "para optimizar la comercialización. Siempre respondes en formato JSON válido "
-                            "con análisis concretos y recomendaciones específicas."
-                        )
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=settings.OPENAI_TEMPERATURE,
-                max_tokens=settings.OPENAI_MAX_TOKENS,
-                response_format={"type": "json_object"}
-            )
+            if self.provider == "openai":
+                response = self._call_openai(prompt, system_prompt)
+            elif self.provider == "gemini":
+                response = self._call_gemini(prompt, system_prompt)
+            else:
+                raise Exception(f"Proveedor no soportado: {self.provider}")
 
             response_time = time.time() - start_time
-            content = response.choices[0].message.content
+            content = response["content"]
             result = json.loads(content)
 
             # Registrar log de auditoría
@@ -243,7 +256,7 @@ class AIValuationService:
                 analysis_type="observations",
                 prompt=prompt,
                 response=content,
-                response_obj=response,
+                response_dict=response,
                 response_time=response_time,
                 status="success"
             )
@@ -261,7 +274,7 @@ class AIValuationService:
                 analysis_type="observations",
                 prompt=prompt,
                 response=None,
-                response_obj=None,
+                response_dict=None,
                 response_time=response_time,
                 status="error",
                 error_message=str(e)
@@ -374,13 +387,56 @@ IMPORTANTE:
 - El análisis debe ser profesional y orientado a acción
 """
 
+    def _call_openai(self, prompt: str, system_prompt: str) -> Dict:
+        """Llama a OpenAI y retorna respuesta normalizada."""
+        response = self.client.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=settings.OPENAI_TEMPERATURE,
+            max_tokens=settings.OPENAI_MAX_TOKENS,
+            response_format={"type": "json_object"}
+        )
+
+        return {
+            "content": response.choices[0].message.content,
+            "prompt_tokens": response.usage.prompt_tokens,
+            "completion_tokens": response.usage.completion_tokens,
+            "total_tokens": response.usage.total_tokens,
+            "model": settings.OPENAI_MODEL
+        }
+
+    def _call_gemini(self, prompt: str, system_prompt: str) -> Dict:
+        """Llama a Gemini y retorna respuesta normalizada."""
+        model = self.client.GenerativeModel(
+            model_name=settings.GEMINI_MODEL,
+            generation_config={
+                "temperature": settings.OPENAI_TEMPERATURE,
+                "max_output_tokens": settings.OPENAI_MAX_TOKENS,
+                "response_mime_type": "application/json"
+            },
+            system_instruction=system_prompt
+        )
+
+        response = model.generate_content(prompt)
+
+        return {
+            "content": response.text,
+            "prompt_tokens": response.usage_metadata.prompt_token_count,
+            "completion_tokens": response.usage_metadata.candidates_token_count,
+            "total_tokens": response.usage_metadata.total_token_count,
+            "model": settings.GEMINI_MODEL
+        }
+
     def _log_analysis(
         self,
         property_id: int,
         analysis_type: str,
         prompt: str,
         response: Optional[str],
-        response_obj: Optional[object],
+        response_dict: Optional[Dict],
         response_time: float,
         status: str,
         error_message: Optional[str] = None,
@@ -406,28 +462,26 @@ IMPORTANTE:
             completion_tokens = None
             total_tokens = None
             estimated_cost = None
+            model_used = None
 
-            if response_obj and hasattr(response_obj, 'usage'):
-                usage = response_obj.usage
-                prompt_tokens = usage.prompt_tokens
-                completion_tokens = usage.completion_tokens
-                total_tokens = usage.total_tokens
+            if response_dict:
+                prompt_tokens = response_dict.get("prompt_tokens")
+                completion_tokens = response_dict.get("completion_tokens")
+                total_tokens = response_dict.get("total_tokens")
+                model_used = response_dict.get("model")
 
-                # Calcular costo estimado
-                model_name = settings.OPENAI_MODEL.lower()
-                pricing = OPENAI_PRICING.get(model_name, OPENAI_PRICING.get("gpt-4o"))
-
-                if pricing and prompt_tokens and completion_tokens:
-                    cost_input = (prompt_tokens / 1_000_000) * pricing["input"]
-                    cost_output = (completion_tokens / 1_000_000) * pricing["output"]
-                    estimated_cost = cost_input + cost_output
+                # Calcular costo estimado según proveedor
+                if self.provider == "openai":
+                    estimated_cost = self._calculate_cost_openai(prompt_tokens, completion_tokens, model_used)
+                elif self.provider == "gemini":
+                    estimated_cost = self._calculate_cost_gemini(prompt_tokens, completion_tokens, model_used)
 
             # Crear registro de log
             log_entry = AIAnalysisLog(
                 property_id=property_id,
                 report_id=report_id,
                 analysis_type=analysis_type,
-                model_name=settings.OPENAI_MODEL,
+                model_name=model_used or (settings.OPENAI_MODEL if self.provider == "openai" else settings.GEMINI_MODEL),
                 temperature=float(settings.OPENAI_TEMPERATURE),
                 max_tokens=settings.OPENAI_MAX_TOKENS,
                 prompt=prompt,
@@ -462,24 +516,31 @@ IMPORTANTE:
             logger.error(f"Error registrando log de IA para propiedad {property_id}: {e}")
             self.db.rollback()
 
-    def _calculate_cost(self, prompt_tokens: int, completion_tokens: int, model: str) -> float:
-        """
-        Calcula el costo estimado de una llamada a OpenAI.
-
-        Args:
-            prompt_tokens: Tokens del prompt
-            completion_tokens: Tokens de la respuesta
-            model: Nombre del modelo usado
-
-        Returns:
-            Costo en USD
-        """
-        pricing = OPENAI_PRICING.get(model.lower(), OPENAI_PRICING.get("gpt-4o"))
-
-        if not pricing:
+    def _calculate_cost_openai(self, prompt_tokens: int, completion_tokens: int, model: str) -> float:
+        """Calcula costo para OpenAI."""
+        if not prompt_tokens or not completion_tokens:
             return 0.0
 
+        pricing = OPENAI_PRICING.get(model.lower(), OPENAI_PRICING.get("gpt-4o"))
         cost_input = (prompt_tokens / 1_000_000) * pricing["input"]
         cost_output = (completion_tokens / 1_000_000) * pricing["output"]
+        return cost_input + cost_output
 
+    def _calculate_cost_gemini(self, prompt_tokens: int, completion_tokens: int, model: str) -> float:
+        """Calcula costo para Gemini."""
+        if not prompt_tokens or not completion_tokens:
+            return 0.0
+
+        # Normalizar nombre del modelo
+        model_key = model.lower()
+        if "pro" in model_key and "1.5" in model_key:
+            model_key = "gemini-1.5-pro"
+        elif "flash" in model_key and "2.0" in model_key:
+            model_key = "gemini-2.0-flash-exp"
+        elif "flash" in model_key:
+            model_key = "gemini-1.5-flash"
+
+        pricing = GEMINI_PRICING.get(model_key, GEMINI_PRICING["gemini-1.5-flash"])
+        cost_input = (prompt_tokens / 1_000_000) * pricing["input"]
+        cost_output = (completion_tokens / 1_000_000) * pricing["output"]
         return cost_input + cost_output

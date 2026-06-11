@@ -16,3 +16,4 @@ requests
 reportlab
 apscheduler
 openai>=1.50.0
+google-generativeai>=0.8.0

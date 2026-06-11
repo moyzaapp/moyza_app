@@ -37,24 +37,47 @@ ReportJobService (orquestador)
 
 ### 1. Variables de Entorno
 
-Copia `.env.example` a `.env` y configura:
+Copia `.env.example` a `.env` y configura según el proveedor que quieras usar:
+
+#### **Opción A: Usar OpenAI (default)**
 
 ```bash
+AI_PROVIDER=openai
+
 # OpenAI API Configuration
 OPENAI_API_KEY=sk-proj-tu-api-key-aqui
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-4o  # Opciones: gpt-4o, gpt-4o-mini, gpt-4-turbo
 OPENAI_MAX_TOKENS=2000
 OPENAI_TEMPERATURE=0.3
 ```
 
-### 2. Obtener API Key de OpenAI
-
+**Obtener API Key de OpenAI:**
 1. Ve a [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 2. Inicia sesión o crea una cuenta
 3. Click en "Create new secret key"
-4. Copia la key y agrégala a tu archivo `.env`
+4. Copia la key y agrégala a tu `.env`
 
 ⚠️ **IMPORTANTE**: Necesitas tener créditos en tu cuenta de OpenAI. La API es de pago.
+
+#### **Opción B: Usar Gemini (más económico)**
+
+```bash
+AI_PROVIDER=gemini
+
+# Gemini API Configuration
+GEMINI_API_KEY=AIza-tu-api-key-aqui
+GEMINI_MODEL=gemini-1.5-flash  # Opciones: gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp
+OPENAI_MAX_TOKENS=2000  # Gemini usa la misma config para max tokens y temperature
+OPENAI_TEMPERATURE=0.3
+```
+
+**Obtener API Key de Gemini:**
+1. Ve a [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+2. Inicia sesión con tu cuenta de Google
+3. Click en "Create API key"
+4. Copia la key y agrégala a tu `.env`
+
+✅ **VENTAJA**: Gemini tiene un tier **gratuito generoso** (15 RPM) para desarrollo/pruebas.
 
 ### 3. Instalar Dependencias
 
@@ -154,27 +177,43 @@ ERROR: Error de OpenAI generando análisis para propiedad 42: RateLimitError
 
 ## Costos Estimados
 
-### Modelo: GPT-4o
+### Comparación de Proveedores
 
-- **Input**: ~$2.50 por 1M tokens
-- **Output**: ~$10 por 1M tokens
+#### **OpenAI GPT-4o**
 
-### Por Reporte
+- **Input**: $2.50 por 1M tokens
+- **Output**: $10 por 1M tokens
+- **Por reporte**: ~$0.012 USD
+- **100 reportes/mes**: ~$36 USD
 
-- Tokens de input: ~1,500 tokens (~$0.00375)
-- Tokens de output: ~800 tokens (~$0.008)
-- **Total por reporte: ~$0.012**
+#### **Gemini 1.5 Flash (Recomendado para producción económica)**
 
-### Proyecciones Mensuales
+- **Input**: $0.075 por 1M tokens
+- **Output**: $0.30 por 1M tokens
+- **Por reporte**: ~$0.0007 USD
+- **100 reportes/mes**: ~$2.10 USD
+- **🎉 Tier gratuito**: 15 RPM (suficiente para desarrollo/staging)
 
-| Reportes/día | Reportes/mes | Costo mensual estimado |
-|--------------|--------------|------------------------|
-| 10           | 300          | $3.60                  |
-| 50           | 1,500        | $18.00                 |
-| 100          | 3,000        | $36.00                 |
-| 500          | 15,000       | $180.00                |
+#### **Gemini 1.5 Pro (Balance calidad/precio)**
 
-💡 **Tip**: Implementa el sistema de cache (ver sección siguiente) para reducir costos en 60-80%.
+- **Input**: $1.25 por 1M tokens
+- **Output**: $5.00 por 1M tokens
+- **Por reporte**: ~$0.006 USD
+- **100 reportes/mes**: ~$18 USD
+
+### Proyecciones Mensuales Comparadas
+
+| Reportes/mes | GPT-4o (OpenAI) | Gemini 1.5 Flash | Ahorro |
+|--------------|-----------------|------------------|--------|
+| 300          | $36.00          | $2.10            | 94%    |
+| 1,500        | $180.00         | $10.50           | 94%    |
+| 3,000        | $360.00         | $21.00           | 94%    |
+| 15,000       | $1,800.00       | $105.00          | 94%    |
+
+💡 **Recomendación**: 
+- **Desarrollo/Staging**: Gemini con tier gratuito
+- **Producción bajo volumen**: Gemini 1.5 Flash
+- **Producción alta calidad**: GPT-4o o Gemini 1.5 Pro
 
 ## Optimizaciones Futuras
 
