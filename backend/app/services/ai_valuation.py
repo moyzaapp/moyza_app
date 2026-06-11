@@ -3,6 +3,7 @@ import json
 import time
 from typing import Dict, Optional
 from sqlalchemy.orm import Session
+from openai import OpenAIError
 
 from app.core.config import settings
 from app.models.property import Property
