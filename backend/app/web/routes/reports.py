@@ -83,27 +83,34 @@ async def upload_report(
         exist_ok=True
     )
 
-    with open(file_path, "wb") as buffer:
+    response = RedirectResponse(url="/reports", status_code=302)
 
-        shutil.copyfileobj(
-            report_file.file,
-            buffer
+    try:
+        with open(file_path, "wb") as buffer:
+
+            shutil.copyfileobj(
+                report_file.file,
+                buffer
+            )
+
+        report = Report(
+            property_id=property_id,
+            uploaded_by=current_user.id,
+            report_type=report_type,
+            filename=report_file.filename,
+            filepath=file_path,
+            notes=notes
         )
 
-    report = Report(
-        property_id=property_id,
-        uploaded_by=current_user.id,
-        report_type=report_type,
-        filename=report_file.filename,
-        filepath=file_path,
-        notes=notes
-    )
+        db.add(report)
 
-    db.add(report)
+        db.commit()
 
-    db.commit()
-
-    response = RedirectResponse(url="/reports", status_code=302)
+    except Exception:
+        db.rollback()
+        logger.exception("Error subiendo informe: property_id=%s", property_id)
+        set_flash(response, "error", "Ocurrió un error al subir el informe")
+        return response
 
     if send_whatsapp:
         try:
@@ -194,6 +201,7 @@ async def delete_report(
 
         set_flash(response, "success", "Informe eliminado correctamente")
     except Exception:
+        db.rollback()
         logger.exception("Error eliminando informe: report_id=%s", report_id)
         set_flash(response, "error", "Ocurrió un error al eliminar el informe")
 

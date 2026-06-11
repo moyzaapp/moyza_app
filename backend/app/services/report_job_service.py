@@ -6,6 +6,8 @@ from typing import Optional, Dict
 from uuid import uuid4
 from sqlalchemy.orm import Session
 
+from app.core.constants import PropertyInteractionType
+from app.core.constants import ReportType
 from app.core.config import settings
 from app.models.property import Property
 from app.models.report import Report
@@ -85,13 +87,22 @@ class ReportJobService:
             duration = (datetime.utcnow() - start_time).total_seconds()
             error_message = str(e)
 
+            self.db.rollback()
+
             if log_entry:
-                self._update_log(
-                    log_entry,
-                    status="failed",
-                    error_message=error_message,
-                    duration_seconds=duration
-                )
+                try:
+                    self._update_log(
+                        log_entry,
+                        status="failed",
+                        error_message=error_message,
+                        duration_seconds=duration
+                    )
+                except Exception:
+                    self.db.rollback()
+                    logger.exception(
+                        "Error actualizando log fallido para propiedad %s",
+                        property_item.id
+                    )
 
             logger.error(
                 f"Error procesando reporte para propiedad {property_item.id}: {error_message}",
@@ -178,10 +189,22 @@ class ReportJobService:
         return {
             "days_on_market": days_on_market,
             "reductions": 0,
-            "consultas": len([i for i in property_item.interactions if i.interaction_type == "Consulta"]),
-            "visitas": len([i for i in property_item.interactions if i.interaction_type == "Visita"]),
-            "interesados": len([i for i in property_item.interactions if i.interaction_type == "Interesado"]),
-            "ofertas": len([i for i in property_item.interactions if i.interaction_type == "Oferta"]),
+            "consultas": len([
+                i for i in property_item.interactions
+                if i.interaction_type == PropertyInteractionType.INQUIRY
+            ]),
+            "visitas": len([
+                i for i in property_item.interactions
+                if i.interaction_type == PropertyInteractionType.VISIT
+            ]),
+            "interesados": len([
+                i for i in property_item.interactions
+                if i.interaction_type == PropertyInteractionType.INTERESTED
+            ]),
+            "ofertas": len([
+                i for i in property_item.interactions
+                if i.interaction_type == PropertyInteractionType.OFFER
+            ]),
         }
 
     def _generate_pdf(self, property_item: Property, report_data: Dict) -> str:
@@ -223,7 +246,7 @@ class ReportJobService:
         report = Report(
             property_id=property_item.id,
             # uploaded_by=property_item.agent_id,
-            report_type="Automático",
+            report_type=ReportType.AUTOMATIC,
             filename=os.path.basename(file_path),
             filepath=file_path,
             notes="Reporte generado automáticamente por el sistema"
@@ -306,7 +329,12 @@ class ReportJobService:
             return False
 
         log_entry.retry_count += 1
-        self.db.commit()
+        try:
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            logger.exception("Error actualizando contador de reintentos: log_id=%s", log_id)
+            return False
 
         logger.info(
             f"Reintentando job para propiedad {property_item.id} "

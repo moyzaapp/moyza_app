@@ -4,6 +4,7 @@ import os
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from app.core.constants import PropertyStatus
 from app.db.session import SessionLocal
 from app.models.property import Property
 from app.services.report_job_service import ReportJobService
@@ -31,7 +32,7 @@ def check_automatic_reports():
             db.query(Property)
             .filter(
                 Property.auto_send_report == True,
-                Property.status == "Activa"
+                Property.status == PropertyStatus.ACTIVE
             )
             .all()
         )
