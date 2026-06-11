@@ -42,12 +42,27 @@
 
             </select>
 
-            <input
-                type="text"
+            <select
                 name="report_type"
-                placeholder="Tipo de informe"
                 class="w-full border rounded-xl p-3 mb-4"
+                required
             >
+                <option value="">
+                    Seleccionar tipo de informe
+                </option>
+
+                <option value="GENERAL">
+                    General
+                </option>
+
+                <option value="SEGUIMIENTO">
+                    Seguimiento
+                </option>
+
+                <option value="VALORACION">
+                    Valoración
+                </option>
+            </select>
 
             <textarea
                 name="notes"

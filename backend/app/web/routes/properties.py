@@ -134,6 +134,16 @@ async def update_property(
     db: Session = Depends(get_db)
 ):
 
+    if not PropertyStatus.is_valid(status):
+        logger.warning(
+            "Estado inválido al actualizar propiedad: property_id=%s status=%s",
+            property_id,
+            status
+        )
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Estado de propiedad inválido")
+        return response
+
     property = db.query(Property).filter(
         Property.id == property_id
     ).first()
@@ -422,6 +432,16 @@ async def create_interaction(
     ):
 
     current_user = request.state.user
+
+    if not PropertyInteractionType.is_valid(interaction_type):
+        logger.warning(
+            "Tipo de interacción inválido: property_id=%s interaction_type=%s",
+            property_id,
+            interaction_type
+        )
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "error", "Tipo de actividad inválido")
+        return response
 
     try:
         interaction = PropertyInteraction(

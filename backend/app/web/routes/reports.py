@@ -20,6 +20,7 @@ import shutil
 import os
 
 from app.core.config import settings
+from app.core.constants import ReportType
 from app.db.deps import get_db
 
 from app.models.report import Report
@@ -71,6 +72,16 @@ async def upload_report(
 ):
 
     current_user = request.state.user
+    response = RedirectResponse(url="/reports", status_code=302)
+
+    if not ReportType.is_valid_upload(report_type):
+        logger.warning(
+            "Tipo de informe inválido al subir reporte: property_id=%s report_type=%s",
+            property_id,
+            report_type
+        )
+        set_flash(response, "error", "Tipo de informe inválido")
+        return response
 
     extension = report_file.filename.split(".")[-1]
 
@@ -82,8 +93,6 @@ async def upload_report(
         "storage/reports",
         exist_ok=True
     )
-
-    response = RedirectResponse(url="/reports", status_code=302)
 
     try:
         with open(file_path, "wb") as buffer:
