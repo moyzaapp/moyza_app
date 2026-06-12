@@ -285,6 +285,15 @@ class AIValuationService:
 
     def _build_valuation_prompt(self, property_item: Property, metrics_data: Dict) -> str:
         """Construye el prompt para valuación."""
+        current_price = self._format_money(property_item.price)
+        fair_price = self._format_money(property_item.fair_price)
+        fair_price_context = (
+            "No disponible. No uses un precio justo previo como referencia; "
+            "basa la estimación en el precio actual, ubicación y métricas comerciales."
+            if property_item.fair_price is None
+            else f"{fair_price}. Úsalo solo como referencia interna, no como verdad absoluta."
+        )
+
         return f"""
 Analiza esta propiedad inmobiliaria en Argentina y estima su valor de mercado realista:
 
@@ -294,8 +303,8 @@ DATOS DE LA PROPIEDAD:
 - Ciudad: {property_item.city}
 - Tipo de propiedad: {property_item.property_type}
 - Tipo de negocio: {property_item.business_type}
-- Precio actual listado: ${float(property_item.price):,.2f}
-- Precio justo estimado inicial: ${float(property_item.fair_price):,.2f} (si disponible)
+- Precio actual listado: {current_price}
+- Precio justo estimado inicial: {fair_price_context}
 - Estado: {property_item.status}
 
 MÉTRICAS DE COMERCIALIZACIÓN:
@@ -345,6 +354,12 @@ IMPORTANTE:
         valuation: Dict
     ) -> str:
         """Construye el prompt para observaciones."""
+        current_price = self._format_money(property_item.price)
+        estimated_value = self._format_money(valuation.get("estimated_value"))
+        price_range = valuation.get("price_range") or {}
+        range_min = self._format_money(price_range.get("min"))
+        range_max = self._format_money(price_range.get("max"))
+
         return f"""
 Eres un asesor comercial inmobiliario. Analiza el comportamiento de mercado de esta propiedad y genera observaciones estratégicas:
 
@@ -352,9 +367,9 @@ CONTEXTO DE LA PROPIEDAD:
 - Título: {property_item.title}
 - Ubicación: {property_item.address}, {property_item.city}
 - Tipo: {property_item.property_type} - {property_item.business_type}
-- Precio actual: ${float(property_item.price):,.2f}
-- Valor estimado por IA: ${valuation.get('estimated_value', 0):,.2f}
-- Rango de precio sugerido: ${valuation.get('price_range', {}).get('min', 0):,.2f} - ${valuation.get('price_range', {}).get('max', 0):,.2f}
+- Precio actual: {current_price}
+- Valor estimado por IA: {estimated_value}
+- Rango de precio sugerido: {range_min} - {range_max}
 
 ACTIVIDAD COMERCIAL:
 - Días en mercado: {metrics_data.get('days_on_market', 0)}
@@ -387,6 +402,16 @@ IMPORTANTE:
 - Las recomendaciones deben ser específicas, no genéricas
 - El análisis debe ser profesional y orientado a acción
 """
+
+    def _format_money(self, value) -> str:
+        """Formatea montos opcionales sin romper cuando el dato no existe."""
+        if value is None:
+            return "No disponible"
+
+        try:
+            return f"${float(value):,.2f}"
+        except (TypeError, ValueError):
+            return "No disponible"
 
     def _call_openai(self, prompt: str, system_prompt: str) -> Dict:
         """Llama a OpenAI y retorna respuesta normalizada."""
