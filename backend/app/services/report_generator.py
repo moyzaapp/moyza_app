@@ -1,5 +1,8 @@
+import os
+
 from reportlab.platypus import (
     SimpleDocTemplate,
+    Image,
     Paragraph,
     Spacer,
     Table,
@@ -31,6 +34,14 @@ def _money(value, default="$0.00"):
         return f"${float(value):,.2f}"
     except (TypeError, ValueError):
         return default
+
+
+def _first_existing_path(*paths):
+    for path in paths:
+        if os.path.exists(path):
+            return path
+
+    return None
 
 
 def generate_property_report(
@@ -97,6 +108,20 @@ def generate_property_report(
     # =========================
     # HEADER
     # =========================
+
+    logo_path = _first_existing_path(
+        "app/static/logo_moyza.png",
+        "backend/app/static/logo_moyza.png"
+    )
+    if logo_path:
+        logo = Image(logo_path)
+        logo_height = 2.5 * cm
+        logo_width = logo.drawWidth * (logo_height / logo.drawHeight)
+        logo.drawWidth = logo_width
+        logo.drawHeight = logo_height
+        logo.hAlign = "LEFT"
+        elements.append(logo)
+        elements.append(Spacer(1, 8))
 
     elements.append(
         Paragraph(

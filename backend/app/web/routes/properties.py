@@ -507,6 +507,10 @@ async def generate_report(
         if ai_analysis:
             report_data["ai_valuation"] = ai_analysis.get("valuation")
             report_data["ai_observations"] = ai_analysis.get("observations")
+            ai_service.update_property_fair_price(
+                property_item,
+                ai_analysis.get("valuation")
+            )
             logger.info("Análisis de IA generado para propiedad %s", property_item.id)
         else:
             logger.warning(

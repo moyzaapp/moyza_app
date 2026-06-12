@@ -209,7 +209,14 @@ class ReportJobService:
         """
         try:
             ai_service = AIValuationService(self.db)
-            return ai_service.generate_analysis(property_item, metrics_data)
+            ai_analysis = ai_service.generate_analysis(property_item, metrics_data)
+            if ai_analysis:
+                ai_service.update_property_fair_price(
+                    property_item,
+                    ai_analysis.get("valuation")
+                )
+
+            return ai_analysis
         except Exception as e:
             logger.error(f"Error generando análisis de IA para propiedad {property_item.id}: {e}")
             return None

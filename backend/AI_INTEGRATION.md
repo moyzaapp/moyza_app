@@ -39,9 +39,13 @@ ReportJobService (orquestador)
 
 Copia `.env.example` a `.env` y configura según el proveedor que quieras usar:
 
+`AI_ENABLED=false` desactiva las llamadas a IA sin remover API keys ni cambiar el proveedor configurado.
+Cuando la IA genera una valuación válida, el último `estimated_value` se guarda como `fair_price` de la propiedad.
+
 #### **Opción A: Usar OpenAI (default)**
 
 ```bash
+AI_ENABLED=true
 AI_PROVIDER=openai
 
 # OpenAI API Configuration
@@ -62,6 +66,7 @@ OPENAI_TEMPERATURE=0.3
 #### **Opción B: Usar Gemini (más económico)**
 
 ```bash
+AI_ENABLED=true
 AI_PROVIDER=gemini
 
 # Gemini API Configuration

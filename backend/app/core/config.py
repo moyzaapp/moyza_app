@@ -17,6 +17,7 @@ class Settings:
     WHATSAPP_API_KEY: str = os.getenv("WHATSAPP_API_KEY")
     PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "https://moyza.duckdns.org")
 
+    AI_ENABLED: bool = os.getenv("AI_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "openai")
 
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")

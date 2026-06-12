@@ -1,6 +1,7 @@
 import logging
 import json
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Dict, Optional
 from sqlalchemy.orm import Session
 from openai import OpenAIError
@@ -41,6 +42,10 @@ class AIValuationService:
         self.client = None
         self.provider = settings.AI_PROVIDER.lower()
 
+        if not settings.AI_ENABLED:
+            logger.info("Servicio de IA deshabilitado por AI_ENABLED=false.")
+            return
+
         if self.provider == "openai":
             self._init_openai()
         elif self.provider == "gemini":
@@ -80,7 +85,7 @@ class AIValuationService:
 
     def is_available(self) -> bool:
         """Verifica si el servicio de IA está disponible."""
-        return self.client is not None
+        return settings.AI_ENABLED and self.client is not None
 
     def generate_analysis(
         self,
@@ -135,6 +140,51 @@ class AIValuationService:
         except Exception as e:
             logger.exception(f"Error inesperado generando análisis para propiedad {property_item.id}: {e}")
             return None
+
+    def update_property_fair_price(
+        self,
+        property_item: Property,
+        valuation: Optional[Dict]
+    ) -> bool:
+        """
+        Guarda el valor estimado por IA como fair_price de la propiedad.
+
+        Retorna True cuando el valor fue válido y quedó asignado en la sesión.
+        El commit lo controla el flujo que genera el reporte.
+        """
+        estimated_value = self._parse_estimated_value(valuation)
+        if estimated_value is None:
+            logger.warning(
+                "No se actualizó fair_price: estimated_value inválido para propiedad %s",
+                property_item.id
+            )
+            return False
+
+        property_item.fair_price = estimated_value
+        logger.info(
+            "fair_price actualizado desde IA para propiedad %s: %s",
+            property_item.id,
+            estimated_value
+        )
+        return True
+
+    def _parse_estimated_value(self, valuation: Optional[Dict]) -> Optional[Decimal]:
+        if not valuation:
+            return None
+
+        value = valuation.get("estimated_value")
+        if value in (None, ""):
+            return None
+
+        try:
+            decimal_value = Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+
+        if decimal_value <= 0:
+            return None
+
+        return decimal_value
 
     def _generate_valuation(
         self,
