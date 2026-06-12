@@ -15,6 +15,22 @@ from reportlab.platypus.flowables import HRFlowable
 from reportlab.platypus import PageBreak
 
 from reportlab.lib.units import cm
+from xml.sax.saxutils import escape
+
+
+def _safe_text(value, default="No disponible"):
+    """Escapa texto dinámico antes de pasarlo a Paragraph de ReportLab."""
+    if value is None:
+        return default
+
+    return escape(str(value))
+
+
+def _money(value, default="$0.00"):
+    try:
+        return f"${float(value):,.2f}"
+    except (TypeError, ValueError):
+        return default
 
 
 def generate_property_report(
@@ -214,14 +230,16 @@ def generate_property_report(
     ai_valuation = report_data.get("ai_valuation")
 
     if ai_valuation:
+        price_range = ai_valuation.get('price_range') or {}
+
         # Tabla de valuación
         valuation_data = [
             ["Concepto", "Valor"],
-            ["Valor estimado de mercado", f"${ai_valuation.get('estimated_value', 0):,.2f}"],
+            ["Valor estimado de mercado", _money(ai_valuation.get('estimated_value'))],
             ["Rango de precio sugerido",
-             f"${ai_valuation.get('price_range', {}).get('min', 0):,.2f} - "
-             f"${ai_valuation.get('price_range', {}).get('max', 0):,.2f}"],
-            ["Nivel de confianza", ai_valuation.get('confidence', 'N/A').capitalize()],
+             f"{_money(price_range.get('min'))} - "
+             f"{_money(price_range.get('max'))}"],
+            ["Nivel de confianza", str(ai_valuation.get('confidence', 'N/A')).capitalize()],
         ]
 
         valuation_table = Table(
@@ -257,7 +275,7 @@ def generate_property_report(
 
         elements.append(
             Paragraph(
-                ai_valuation.get('reasoning', 'No disponible'),
+                _safe_text(ai_valuation.get('reasoning')),
                 body_style
             )
         )
@@ -294,7 +312,7 @@ def generate_property_report(
 
         elements.append(
             Paragraph(
-                ai_observations.get('market_analysis', 'No disponible'),
+                _safe_text(ai_observations.get('market_analysis')),
                 body_style
             )
         )
@@ -302,17 +320,17 @@ def generate_property_report(
         elements.append(Spacer(1, 10))
 
         # Nivel de riesgo
-        risk_level = ai_observations.get('risk_level', 'N/A').upper()
+        risk_level = str(ai_observations.get('risk_level', 'N/A')).upper()
         risk_colors = {
-            'BAJO': colors.HexColor("#0B6E4F"),
-            'MEDIO': colors.HexColor("#FFA500"),
-            'ALTO': colors.HexColor("#DC143C")
+            'BAJO': "#0B6E4F",
+            'MEDIO': "#FFA500",
+            'ALTO': "#DC143C"
         }
-        risk_color = risk_colors.get(risk_level, colors.grey)
+        risk_color = risk_colors.get(risk_level, "#808080")
 
         elements.append(
             Paragraph(
-                f"<b>Nivel de Riesgo Comercial:</b> <font color='{risk_color}'>{risk_level}</font>",
+                f"<b>Nivel de Riesgo Comercial:</b> <font color='{risk_color}'>{_safe_text(risk_level)}</font>",
                 body_style
             )
         )
@@ -328,10 +346,13 @@ def generate_property_report(
         )
 
         recommendations = ai_observations.get('recommendations', [])
+        if not isinstance(recommendations, list):
+            recommendations = [recommendations]
+
         for idx, rec in enumerate(recommendations, 1):
             elements.append(
                 Paragraph(
-                    f"{idx}. {rec}",
+                    f"{idx}. {_safe_text(rec)}",
                     body_style
                 )
             )
@@ -348,7 +369,7 @@ def generate_property_report(
 
         elements.append(
             Paragraph(
-                ai_observations.get('opportunities', 'No disponible'),
+                _safe_text(ai_observations.get('opportunities')),
                 body_style
             )
         )

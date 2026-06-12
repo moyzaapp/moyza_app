@@ -501,14 +501,23 @@ async def generate_report(
 
     report_data = PropertyMetricsService(db).report_data(property_item)
 
-    ai_service = AIValuationService(db)
-    ai_analysis=ai_service.generate_analysis(property_item, report_data)
-    if ai_analysis:
-        report_data["ai_valuation"] = ai_analysis.get("valuation")
-        report_data["ai_observations"] = ai_analysis.get("observations")
-        logger.info(f"Análisis de IA generado para propiedad {property_item.id}")
-    else:
-        logger.warning(f"No se pudo generar análisis de IA para propiedad {property_item.id}")
+    try:
+        ai_service = AIValuationService(db)
+        ai_analysis = ai_service.generate_analysis(property_item, report_data)
+        if ai_analysis:
+            report_data["ai_valuation"] = ai_analysis.get("valuation")
+            report_data["ai_observations"] = ai_analysis.get("observations")
+            logger.info("Análisis de IA generado para propiedad %s", property_item.id)
+        else:
+            logger.warning(
+                "No se pudo generar análisis de IA para propiedad %s",
+                property_item.id
+            )
+    except Exception:
+        logger.exception(
+            "Error generando análisis de IA para informe manual: property_id=%s",
+            property_item.id
+        )
 
     reports_dir = Path("storage/reports")
 
