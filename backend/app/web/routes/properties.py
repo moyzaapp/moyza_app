@@ -26,6 +26,7 @@ from app.models.property_interaction import PropertyInteraction
 from app.models.property_status_history import PropertyStatusHistory
 from app.models.property_visit import PropertyVisit
 from app.models.report import Report
+from app.services.ai_valuation import AIValuationService
 
 from pathlib import Path
 
@@ -499,6 +500,15 @@ async def generate_report(
         return response
 
     report_data = PropertyMetricsService(db).report_data(property_item)
+
+    ai_service = AIValuationService(db)
+    ai_analysis=ai_service.generate_analysis(property_item, report_data)
+    if ai_analysis:
+        report_data["ai_valuation"] = ai_analysis.get("valuation")
+        report_data["ai_observations"] = ai_analysis.get("observations")
+        logger.info(f"Análisis de IA generado para propiedad {property_item.id}")
+    else:
+        logger.warning(f"No se pudo generar análisis de IA para propiedad {property_item.id}")
 
     reports_dir = Path("storage/reports")
 
