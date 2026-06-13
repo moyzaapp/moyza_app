@@ -32,11 +32,7 @@ from pathlib import Path
 
 from app.services.property_metrics import PropertyMetricsService
 from app.services.report_generator import generate_property_report
-from app.services.visit_sheet_generator import generate_visit_sheet
-from app.services.whatsapp import send_report
-from app.core.config import settings
 from app.web.utils.flash import set_flash
-from uuid import uuid4
 
 
 router = APIRouter()
@@ -414,143 +410,6 @@ async def create_interaction(
         set_flash(response, "error", "Ocurrió un error al registrar la actividad")
         return response
 
-@router.get("/properties/{property_id}/visits/new")
-async def new_visit(
-        property_id: int,
-        request: Request,
-        db: Session = Depends(get_db)
-    ):
-
-    property_item = (
-        db.query(Property)
-        .filter(Property.id == property_id)
-        .first()
-    )
-
-    return templates.TemplateResponse(
-        request=request,
-        name="properties/visit_form.html",
-        context={
-            "request": request,
-            "property": property_item,
-            "current_user": request.state.user
-        }
-    )
-
-@router.post("/properties/{property_id}/visits/create")
-async def create_visit(
-        property_id: int,
-        request: Request,
-        db: Session = Depends(get_db)
-    ):
-
-    form = await request.form()
-
-    interest_level_raw = form.get("interest_level")
-    interest_level = None
-    if interest_level_raw not in (None, ""):
-        try:
-            interest_level = int(interest_level_raw)
-        except (TypeError, ValueError):
-            interest_level = None
-
-    generate_sheet = form.get("generate_sheet") == "true"
-
-    try:
-        visit = PropertyVisit(
-            property_id=property_id,
-            visitor_name=form.get("visitor_name"),
-            dni=form.get("dni"),
-            phone=form.get("phone"),
-            email=form.get("email"),
-            interest_level=interest_level,
-            price_feedback=form.get("price_feedback"),
-            location_feedback=form.get("location_feedback"),
-            condition_feedback=form.get("condition_feedback"),
-            lighting_feedback=form.get("lighting_feedback"),
-            elevator_feedback=form.get("elevator_feedback"),
-            garage_feedback=form.get("garage_feedback"),
-            notes=form.get("notes"),
-            created_by=request.state.user.id
-        )
-
-        db.add(visit)
-        db.commit()
-        db.refresh(visit)
-
-        property_item = db.query(Property).filter(Property.id == property_id).first()
-
-        if generate_sheet and property_item:
-            try:
-                visits_dir = Path("storage/visit_sheets")
-                visits_dir.mkdir(parents=True, exist_ok=True)
-
-                filename = f"ficha_visita_{property_id}_{visit.id}_{uuid4().hex[:8]}.pdf"
-                output_path = visits_dir / filename
-
-                generate_visit_sheet(
-                    property_item=property_item,
-                    visit=visit,
-                    agent=property_item.agent,
-                    output_path=str(output_path)
-                )
-
-                logger.info("Ficha de visita generada: %s", output_path)
-
-                file_url = settings.public_url(str(output_path))
-
-                sent_to = []
-
-                if visit.phone:
-                    try:
-                        send_report(
-                            phone=visit.phone,
-                            file_url=file_url,
-                            caption=f"Ficha de visita - {property_item.title}"
-                        )
-                        sent_to.append("comprador")
-                        logger.info("Ficha enviada al comprador: %s", visit.phone)
-                    except Exception:
-                        logger.exception("Error enviando ficha al comprador: %s", visit.phone)
-
-                if property_item.agent and property_item.agent.phone:
-                    try:
-                        send_report(
-                            phone=property_item.agent.phone,
-                            file_url=file_url,
-                            caption=f"Ficha de visita - {property_item.title}"
-                        )
-                        sent_to.append("agente")
-                        logger.info("Ficha enviada al agente: %s", property_item.agent.phone)
-                    except Exception:
-                        logger.exception("Error enviando ficha al agente: %s", property_item.agent.phone)
-
-                if sent_to:
-                    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
-                    set_flash(response, "success", f"Visita registrada y ficha enviada a {' y '.join(sent_to)}")
-                    return response
-                else:
-                    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
-                    set_flash(response, "warning", "Visita registrada, pero no se pudo enviar la ficha (verifique números de teléfono)")
-                    return response
-
-            except Exception:
-                logger.exception("Error generando/enviando ficha de visita: property_id=%s", property_id)
-                response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
-                set_flash(response, "warning", "Visita registrada, pero no se pudo generar/enviar la ficha")
-                return response
-
-    except Exception:
-        db.rollback()
-        logger.exception("Error registrando visita: property_id=%s", property_id)
-        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
-        set_flash(response, "error", "Ocurrió un error al registrar la visita")
-        return response
-
-    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
-    set_flash(response, "success", "Visita registrada")
-    return response
-
 @router.post("/properties/{property_id}/generate-report")
 async def generate_report(
         property_id: int,
@@ -624,3 +483,4 @@ async def generate_report(
     response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
     set_flash(response, "success", "Informe generado")
     return response
+

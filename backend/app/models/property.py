@@ -85,3 +85,8 @@ class Property(Base):
         "PropertyInteraction",
         backref="property"
     )
+
+    visits = relationship(
+        "PropertyVisit",
+        back_populates="property"
+    )

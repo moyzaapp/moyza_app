@@ -6,6 +6,7 @@ from sqlalchemy import String
 from sqlalchemy import Text
 from sqlalchemy import DateTime
 from sqlalchemy import ForeignKey
+from sqlalchemy.orm import relationship
 
 from app.db.base import Base
 
@@ -86,6 +87,26 @@ class PropertyVisit(Base):
         nullable=True
     )
 
+    visit_sheet_filename = Column(
+        String,
+        nullable=True
+    )
+
+    visit_sheet_filepath = Column(
+        String,
+        nullable=True
+    )
+
+    visit_sheet_generated_at = Column(
+        DateTime,
+        nullable=True
+    )
+
+    visit_sheet_sent_to = Column(
+        String,
+        nullable=True
+    )
+
     created_by = Column(
         Integer,
         ForeignKey("users.id"),
@@ -96,3 +117,6 @@ class PropertyVisit(Base):
         DateTime,
         default=datetime.utcnow
     )
+
+    # Relaciones
+    property = relationship("Property", back_populates="visits")
