@@ -9,6 +9,7 @@ keepalive = 5
 
 def post_fork(server, worker):
     """Hook ejecutado después de que Gunicorn hace fork de un worker."""
-    # Asignar ID único a cada worker
-    os.environ["WORKER_ID"] = str(worker.age)
-    server.log.info(f"Worker iniciado con WORKER_ID={worker.age}")
+    # Asignar ID único a cada worker (age comienza en 1, lo ajustamos a base 0)
+    worker_id = worker.age - 1
+    os.environ["WORKER_ID"] = str(worker_id)
+    server.log.info(f"Worker iniciado con WORKER_ID={worker_id}")
