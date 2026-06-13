@@ -31,7 +31,17 @@ class PropertyVisit(Base):
         nullable=False
     )
 
+    dni = Column(
+        String,
+        nullable=True
+    )
+
     phone = Column(
+        String,
+        nullable=True
+    )
+
+    email = Column(
         String,
         nullable=True
     )

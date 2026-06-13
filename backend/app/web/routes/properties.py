@@ -32,7 +32,11 @@ from pathlib import Path
 
 from app.services.property_metrics import PropertyMetricsService
 from app.services.report_generator import generate_property_report
+from app.services.visit_sheet_generator import generate_visit_sheet
+from app.services.whatsapp import send_report
+from app.core.config import settings
 from app.web.utils.flash import set_flash
+from uuid import uuid4
 
 
 router = APIRouter()
@@ -450,11 +454,15 @@ async def create_visit(
         except (TypeError, ValueError):
             interest_level = None
 
+    generate_sheet = form.get("generate_sheet") == "true"
+
     try:
         visit = PropertyVisit(
             property_id=property_id,
             visitor_name=form.get("visitor_name"),
+            dni=form.get("dni"),
             phone=form.get("phone"),
+            email=form.get("email"),
             interest_level=interest_level,
             price_feedback=form.get("price_feedback"),
             location_feedback=form.get("location_feedback"),
@@ -467,8 +475,70 @@ async def create_visit(
         )
 
         db.add(visit)
-
         db.commit()
+        db.refresh(visit)
+
+        property_item = db.query(Property).filter(Property.id == property_id).first()
+
+        if generate_sheet and property_item:
+            try:
+                visits_dir = Path("storage/visit_sheets")
+                visits_dir.mkdir(parents=True, exist_ok=True)
+
+                filename = f"ficha_visita_{property_id}_{visit.id}_{uuid4().hex[:8]}.pdf"
+                output_path = visits_dir / filename
+
+                generate_visit_sheet(
+                    property_item=property_item,
+                    visit=visit,
+                    agent=property_item.agent,
+                    output_path=str(output_path)
+                )
+
+                logger.info("Ficha de visita generada: %s", output_path)
+
+                file_url = settings.public_url(str(output_path))
+
+                sent_to = []
+
+                if visit.phone:
+                    try:
+                        send_report(
+                            phone=visit.phone,
+                            file_url=file_url,
+                            caption=f"Ficha de visita - {property_item.title}"
+                        )
+                        sent_to.append("comprador")
+                        logger.info("Ficha enviada al comprador: %s", visit.phone)
+                    except Exception:
+                        logger.exception("Error enviando ficha al comprador: %s", visit.phone)
+
+                if property_item.agent and property_item.agent.phone:
+                    try:
+                        send_report(
+                            phone=property_item.agent.phone,
+                            file_url=file_url,
+                            caption=f"Ficha de visita - {property_item.title}"
+                        )
+                        sent_to.append("agente")
+                        logger.info("Ficha enviada al agente: %s", property_item.agent.phone)
+                    except Exception:
+                        logger.exception("Error enviando ficha al agente: %s", property_item.agent.phone)
+
+                if sent_to:
+                    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+                    set_flash(response, "success", f"Visita registrada y ficha enviada a {' y '.join(sent_to)}")
+                    return response
+                else:
+                    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+                    set_flash(response, "warning", "Visita registrada, pero no se pudo enviar la ficha (verifique números de teléfono)")
+                    return response
+
+            except Exception:
+                logger.exception("Error generando/enviando ficha de visita: property_id=%s", property_id)
+                response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+                set_flash(response, "warning", "Visita registrada, pero no se pudo generar/enviar la ficha")
+                return response
 
     except Exception:
         db.rollback()
