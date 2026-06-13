@@ -1,28 +1,31 @@
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
-    <table class="w-full">
+    <!-- Tabla con scroll horizontal en móvil -->
+    <div class="overflow-x-auto -mx-px">
 
-        <thead class="bg-gray-50">
+    <table class="w-full min-w-[800px]">
+
+        <thead class="bg-gray-50 border-b border-gray-200">
 
             <tr>
 
-                <th class="px-6 py-4 text-left">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Propiedad
                 </th>
 
-                <th class="px-6 py-4 text-left">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Tipo
                 </th>
 
-                <th class="px-6 py-4 text-left">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Archivo
                 </th>
 
-                <th class="px-6 py-4 text-left">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Fecha
                 </th>
 
-                <th class="px-6 py-4 text-left">
+                <th class="px-3 sm:px-6 py-3 sm:py-4 text-right text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Acciones
                 </th>
 
@@ -34,51 +37,63 @@
 
             {% for report in reports %}
 
-            <tr class="border-b border-gray-100">
+            <tr class="border-b border-gray-100 hover:bg-gray-50">
 
-                <td class="px-6 py-4">
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
                     <a href="/properties/{{ report.property_id }}" class="text-blue-600 hover:text-blue-800 hover:underline">
                         {{ report.property.title }}
                     </a>
                 </td>
 
-                <td class="px-6 py-4">
-                    {{ report.report_type }}
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 whitespace-nowrap">
+                        {{ report.report_type or 'General' }}
+                    </span>
                 </td>
 
-                <td class="px-6 py-4">
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
                     {{ report.filename }}
                 </td>
 
-                <td class="px-6 py-4">
-                    {{ report.created_at }}
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm whitespace-nowrap">
+                    {{ report.created_at.strftime('%d/%m/%Y') if report.created_at else '-' }}
                 </td>
 
-                <td class="px-6 py-4">
+                <td class="px-3 sm:px-6 py-3 sm:py-4">
 
-                    <a
-                        href="/reports/download/{{ report.id }}"
-                        class="bg-black text-white px-4 py-2 rounded-lg text-sm"
-                    >
-                        Descargar
-                    </a>
+                    <div class="flex justify-end gap-1 sm:gap-2 whitespace-nowrap">
 
-                    <form 
-                        action="/reports/delete/" 
-                        method="post" 
-                        style="display: inline;">
-                        
-                        <input type="hidden" name="report_id" value="{{ report.id }}">
-
-                        <button
-                            class="bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm"
-                            type="submit"
-                            onclick="return confirm('¿Eliminar informe: {{ report.filename }}?')"
+                        <a
+                            href="/reports/download/{{ report.id }}"
+                            class="bg-black hover:bg-gray-800 text-white px-2 sm:px-4 py-2 rounded-lg text-xs sm:text-sm transition-colors inline-flex items-center"
                         >
-                            Eliminar
-                        </button>
+                            <span class="hidden sm:inline">Descargar</span>
+                            <svg class="w-4 h-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                            </svg>
+                        </a>
 
-                    </form>
+                        <form
+                            action="/reports/delete/"
+                            method="post"
+                            class="inline-block">
+
+                            <input type="hidden" name="report_id" value="{{ report.id }}">
+
+                            <button
+                                class="bg-red-100 hover:bg-red-200 text-red-700 px-2 sm:px-4 py-2 rounded-lg text-xs sm:text-sm transition-colors inline-flex items-center"
+                                type="submit"
+                                onclick="return confirm('¿Eliminar informe: {{ report.filename }}?')"
+                            >
+                                <span class="hidden sm:inline">Eliminar</span>
+                                <svg class="w-4 h-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                            </button>
+
+                        </form>
+
+                    </div>
 
                 </td>
 
@@ -89,5 +104,7 @@
         </tbody>
 
     </table>
+
+    </div>
 
 </div>
