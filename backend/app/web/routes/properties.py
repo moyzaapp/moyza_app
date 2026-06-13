@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -12,6 +13,9 @@ from fastapi.templating import Jinja2Templates
 
 from sqlalchemy.orm import Session
 
+from app.core.constants import PropertyInteractionType
+from app.core.constants import PropertyStatus
+from app.core.constants import ReportType
 from app.db.deps import get_db
 
 from app.models.property import Property
@@ -22,14 +26,17 @@ from app.models.property_interaction import PropertyInteraction
 from app.models.property_status_history import PropertyStatusHistory
 from app.models.property_visit import PropertyVisit
 from app.models.report import Report
+from app.services.ai_valuation import AIValuationService
 
 from pathlib import Path
 
+from app.services.property_metrics import PropertyMetricsService
 from app.services.report_generator import generate_property_report
 from app.web.utils.flash import set_flash
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 templates = Jinja2Templates(
     directory="app/web/templates"
@@ -41,7 +48,7 @@ async def properties_page(
     db: Session = Depends(get_db)
 ):
 
-    properties = db.query(Property).filter(Property.status != "Archivada").all()
+    properties = db.query(Property).filter(Property.status != PropertyStatus.ARCHIVED).all()
 
     clients = db.query(Client).all()
 
@@ -49,9 +56,9 @@ async def properties_page(
 
     current_user = request.state.user
 
-    active_count = db.query(Property).filter(Property.status == "Activa").count()
-    paused_count = db.query(Property).filter(Property.status == "Pausada").count()
-    sold_count = db.query(Property).filter(Property.status == "Vendida").count()
+    active_count = db.query(Property).filter(Property.status == PropertyStatus.ACTIVE).count()
+    paused_count = db.query(Property).filter(Property.status == PropertyStatus.PAUSED).count()
+    sold_count = db.query(Property).filter(Property.status == PropertyStatus.SOLD).count()
 
     search = request.query_params.get("search")
 
@@ -95,7 +102,7 @@ async def create_property(
             description=description,
             client_id=client_id,
             agent_id=agent_id,
-            status="Activa"
+            status=PropertyStatus.ACTIVE
         )
 
         db.add(property_item)
@@ -105,8 +112,9 @@ async def create_property(
         set_flash(response, "success", f"Propiedad '{title}' creada correctamente")
         return response
 
-    except Exception as e:
-        print(f"Error creando propiedad: {e}")
+    except Exception:
+        db.rollback()
+        logger.exception("Error creando propiedad: title=%s", title)
         response = RedirectResponse(url="/properties", status_code=302)
         set_flash(response, "error", "Ocurrió un error al crear la propiedad")
         return response
@@ -128,6 +136,16 @@ async def update_property(
     db: Session = Depends(get_db)
 ):
 
+    if not PropertyStatus.is_valid(status):
+        logger.warning(
+            "Estado inválido al actualizar propiedad: property_id=%s status=%s",
+            property_id,
+            status
+        )
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Estado de propiedad inválido")
+        return response
+
     property = db.query(Property).filter(
         Property.id == property_id
     ).first()
@@ -137,43 +155,51 @@ async def update_property(
         set_flash(response, "error", "Propiedad no encontrada")
         return response
 
-    old_price = property.price
-    old_status = property.status
+    try:
+        old_price = property.price
+        old_status = property.status
 
-    property.title = title
-    property.price = price
-    property.client_id = client_id
-    property.agent_id = agent_id
-    property.address = address
-    property.status = status
-    property.auto_send_report = auto_send_report
-    property.report_frequency = report_frequency
-    property.report_day = report_day
-    property.report_hour = report_hour
+        property.title = title
+        property.price = price
+        property.client_id = client_id
+        property.agent_id = agent_id
+        property.address = address
+        property.status = status
+        property.auto_send_report = auto_send_report
+        property.report_frequency = report_frequency
+        property.report_day = report_day
+        property.report_hour = report_hour
 
-    if old_price != price:
+        if old_price != price:
 
-        history = PropertyPriceHistory(
-            property_id=property_id,
-            old_price=old_price,
-            new_price=price,
-            reason="Actualización manual"
-        )
+            history = PropertyPriceHistory(
+                property_id=property_id,
+                old_price=old_price,
+                new_price=price,
+                reason="Actualización manual"
+            )
 
-        db.add(history)
+            db.add(history)
 
-    if old_status != status:
+        if old_status != status:
 
-        history = PropertyStatusHistory(
-            property_id=property_id,
-            old_status=old_status,
-            new_status=status,
-            changed_by=request.state.user.id
-        )
+            history = PropertyStatusHistory(
+                property_id=property_id,
+                old_status=old_status,
+                new_status=status,
+                changed_by=request.state.user.id
+            )
 
-        db.add(history)
+            db.add(history)
 
-    db.commit()
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        logger.exception("Error actualizando propiedad: property_id=%s", property_id)
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Ocurrió un error al actualizar la propiedad")
+        return response
 
     response = RedirectResponse(url="/properties", status_code=302)
     if old_price != price:
@@ -198,18 +224,26 @@ async def delete_property(
         set_flash(response, "error", "Propiedad no encontrada")
         return response
 
-    old_status = property.status
-    property.status = "Archivada"
+    try:
+        old_status = property.status
+        property.status = PropertyStatus.ARCHIVED
 
-    history = PropertyStatusHistory(
-        property_id=property_id,
-        old_status=old_status,
-        new_status="Archivada",
-        changed_by=request.state.user.id
-    )
+        history = PropertyStatusHistory(
+            property_id=property_id,
+            old_status=old_status,
+            new_status=PropertyStatus.ARCHIVED,
+            changed_by=request.state.user.id
+        )
 
-    db.add(history)
-    db.commit()
+        db.add(history)
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        logger.exception("Error archivando propiedad: property_id=%s", property_id)
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Ocurrió un error al archivar la propiedad")
+        return response
 
     response = RedirectResponse(url="/properties", status_code=302)
     set_flash(response, "success", "Propiedad archivada")
@@ -245,14 +279,11 @@ async def property_detail(
         .all()
     )
 
-    reductions_count = len(history)
-
-    days_on_market = 0
-    if property_item.market_entry_date:
-        days_on_market = (
-                datetime.utcnow()
-                - property_item.market_entry_date
-            ).days
+    metrics_service = PropertyMetricsService(db)
+    report_data = metrics_service.report_data(
+        property_item,
+        reductions_count=len(history)
+    )
 
     interactions = (
         db.query(PropertyInteraction)
@@ -265,50 +296,7 @@ async def property_detail(
         .all()
     )
 
-    consultas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == "CONSULTA"
-        )
-        .count()
-    )
-
-    visitas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == "VISITA"
-        )
-        .count()
-    )
-
-    interesados = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == "INTERESADO"
-        )
-        .count()
-    )
-
-    ofertas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == "OFERTA"
-        )
-        .count()
-    )
-
-    price_gap = None
-
-    if property_item.fair_price:
-
-        price_gap = (
-            float(property_item.price)
-            - float(property_item.fair_price)
-        )
+    price_gap = metrics_service.price_gap(property_item)
 
     status_history = (
         db.query(PropertyStatusHistory)
@@ -332,25 +320,7 @@ async def property_detail(
         .all()
     )
 
-    interest_avg = None
-
-    if visits_registered:
-        interest_values = []
-        for visit in visits_registered:
-            if visit.interest_level is None:
-                continue
-            try:
-                interest_values.append(int(visit.interest_level))
-            except (TypeError, ValueError):
-                continue
-        if interest_values:
-            interest_avg = round(sum(interest_values) / len(interest_values), 2)
-
-    price_high_count = sum(
-        1
-        for v in visits_registered
-        if v.price_feedback == "ALTO"
-    )
+    visit_summary = metrics_service.visit_summary(visits_registered)
 
     property_reports = (
         db.query(Report)
@@ -368,19 +338,19 @@ async def property_detail(
             "request": request,
             "property": property_item,
             "history": history,
-            "reductions": reductions_count,
-            "days_on_market": days_on_market,
+            "reductions": report_data["reductions"],
+            "days_on_market": report_data["days_on_market"],
             "interactions": interactions,
             "current_user": request.state.user,
             "price_gap": price_gap,
-            "consultas": consultas,
-            "visitas": visitas,
-            "interesados": interesados,
-            "ofertas": ofertas,
+            "consultas": report_data["consultas"],
+            "visitas": report_data["visitas"],
+            "interesados": report_data["interesados"],
+            "ofertas": report_data["ofertas"],
             "status_history": status_history,
             "visits_registered": visits_registered,
-            "interest_avg": interest_avg,
-            "price_high_count": price_high_count,
+            "interest_avg": visit_summary["interest_avg"],
+            "price_high_count": visit_summary["price_high_count"],
             "property_reports": property_reports,
             "latest_report": latest_report
         }
@@ -401,6 +371,16 @@ async def create_interaction(
 
     current_user = request.state.user
 
+    if not PropertyInteractionType.is_valid(interaction_type):
+        logger.warning(
+            "Tipo de interacción inválido: property_id=%s interaction_type=%s",
+            property_id,
+            interaction_type
+        )
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "error", "Tipo de actividad inválido")
+        return response
+
     try:
         interaction = PropertyInteraction(
             property_id=property_id,
@@ -419,74 +399,16 @@ async def create_interaction(
         set_flash(response, "success", f"Actividad de tipo '{interaction_type}' registrada correctamente")
         return response
 
-    except Exception as e:
-        print(f"Error registrando interacción: {e}")
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Error registrando interacción: property_id=%s interaction_type=%s",
+            property_id,
+            interaction_type
+        )
         response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
         set_flash(response, "error", "Ocurrió un error al registrar la actividad")
         return response
-
-@router.get("/properties/{property_id}/visits/new")
-async def new_visit(
-        property_id: int,
-        request: Request,
-        db: Session = Depends(get_db)
-    ):
-
-    property_item = (
-        db.query(Property)
-        .filter(Property.id == property_id)
-        .first()
-    )
-
-    return templates.TemplateResponse(
-        request=request,
-        name="properties/visit_form.html",
-        context={
-            "request": request,
-            "property": property_item,
-            "current_user": request.state.user
-        }
-    )
-
-@router.post("/properties/{property_id}/visits/create")
-async def create_visit(
-        property_id: int,
-        request: Request,
-        db: Session = Depends(get_db)
-    ):
-
-    form = await request.form()
-
-    interest_level_raw = form.get("interest_level")
-    interest_level = None
-    if interest_level_raw not in (None, ""):
-        try:
-            interest_level = int(interest_level_raw)
-        except (TypeError, ValueError):
-            interest_level = None
-
-    visit = PropertyVisit(
-        property_id=property_id,
-        visitor_name=form.get("visitor_name"),
-        phone=form.get("phone"),
-        interest_level=interest_level,
-        price_feedback=form.get("price_feedback"),
-        location_feedback=form.get("location_feedback"),
-        condition_feedback=form.get("condition_feedback"),
-        lighting_feedback=form.get("lighting_feedback"),
-        elevator_feedback=form.get("elevator_feedback"),
-        garage_feedback=form.get("garage_feedback"),
-        notes=form.get("notes"),
-        created_by=request.state.user.id
-    )
-
-    db.add(visit)
-
-    db.commit()
-
-    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
-    set_flash(response, "success", "Visita registrada")
-    return response
 
 @router.post("/properties/{property_id}/generate-report")
 async def generate_report(
@@ -506,81 +428,29 @@ async def generate_report(
         set_flash(response, "error", "Propiedad no encontrada")
         return response
 
-    days_on_market = 0
-    if property_item.market_entry_date:
-        days_on_market = (
-                datetime.utcnow()
-                - property_item.market_entry_date
-            ).days
+    report_data = PropertyMetricsService(db).report_data(property_item)
 
-    interactions = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id
+    try:
+        ai_service = AIValuationService(db)
+        ai_analysis = ai_service.generate_analysis(property_item, report_data)
+        if ai_analysis:
+            report_data["ai_valuation"] = ai_analysis.get("valuation")
+            report_data["ai_observations"] = ai_analysis.get("observations")
+            ai_service.update_property_fair_price(
+                property_item,
+                ai_analysis.get("valuation")
+            )
+            logger.info("Análisis de IA generado para propiedad %s", property_item.id)
+        else:
+            logger.warning(
+                "No se pudo generar análisis de IA para propiedad %s",
+                property_item.id
+            )
+    except Exception:
+        logger.exception(
+            "Error generando análisis de IA para informe manual: property_id=%s",
+            property_item.id
         )
-        .order_by(
-            PropertyInteraction.created_at.desc()
-        )
-        .all()
-    )
-
-    consultas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == "CONSULTA"
-        )
-        .count()
-    )
-
-    visitas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == "VISITA"
-        )
-        .count()
-    )
-
-    interesados = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == "INTERESADO"
-        )
-        .count()
-    )
-
-    ofertas = (
-        db.query(PropertyInteraction)
-        .filter(
-            PropertyInteraction.property_id == property_id,
-            PropertyInteraction.interaction_type == "OFERTA"
-        )
-        .count()
-    )
-
-    history = (
-        db.query(PropertyPriceHistory)
-        .filter(
-            PropertyPriceHistory.property_id == property_id
-        )
-        .order_by(
-            PropertyPriceHistory.created_at.desc()
-        )
-        .all()
-    )
-
-    reductions_count = len(history)
-
-    report_data = {
-        "days_on_market": days_on_market,
-        "reductions": reductions_count,
-        "consultas": consultas,
-        "visitas": visitas,
-        "interesados": interesados,
-        "ofertas": ofertas
-    }
 
     reports_dir = Path("storage/reports")
 
@@ -596,7 +466,7 @@ async def generate_report(
         report = Report(
             property_id=property_id,
             uploaded_by=None,
-            report_type="AUTOMATICO",
+            report_type=ReportType.AUTOMATIC,
             filename=filename,
             filepath=str(output_path)
         )
@@ -604,6 +474,8 @@ async def generate_report(
         db.add(report)
         db.commit()
     except Exception:
+        db.rollback()
+        logger.exception("Error generando informe manual: property_id=%s", property_id)
         response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
         set_flash(response, "error", "No se pudo generar el informe")
         return response
@@ -611,3 +483,4 @@ async def generate_report(
     response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
     set_flash(response, "success", "Informe generado")
     return response
+

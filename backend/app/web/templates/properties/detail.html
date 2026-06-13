@@ -55,7 +55,7 @@ Detalle Propiedad
     <div class="flex flex-col sm:flex-row gap-3 sm:gap-2">
         <!-- Botón de registrar visita -->
         <a
-            href="/properties/{{ property.id }}/visits/new"
+            href="/visits/new/{{ property.id }}"
             class="bg-black text-white px-4 py-3 rounded-xl hover:bg-gray-800 active:bg-gray-900 transition-colors text-center font-medium flex items-center justify-center gap-2"
         >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -590,6 +590,126 @@ Detalle Propiedad
                             </svg>
                             <p class="text-xs sm:text-sm font-medium">No hay informes asociados a esta propiedad</p>
                             <p class="text-xs text-gray-400 mt-1">Utiliza el botón "Generar informe" para crear uno</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Historial de visitas -->
+<div class="mt-6 sm:mt-8">
+    <div class="flex items-center justify-between mb-3 sm:mb-4">
+        <h2 class="text-base sm:text-xl font-bold">Historial de visitas</h2>
+        <span class="bg-indigo-100 text-indigo-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium">
+            {{ visits_registered|length }} visita(s)
+        </span>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead class="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                        <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Fecha visita</th>
+                        <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Cliente</th>
+                        <th class="text-left px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Contacto</th>
+                        <th class="text-center px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Archivo PDF</th>
+                        <th class="text-center px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for visit in visits_registered %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
+                            {{ visit.created_at.strftime('%d/%m/%Y %H:%M') if visit.created_at else '-' }}
+                        </td>
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
+                            {{ visit.visitor_name or '-' }}
+                        </td>
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
+                            <div class="flex flex-col gap-0.5">
+                                {% if visit.dni %}
+                                    <span class="text-gray-700">DNI: {{ visit.dni }}</span>
+                                {% endif %}
+                                {% if visit.email %}
+                                    <span class="text-gray-600 text-xs">{{ visit.email }}</span>
+                                {% endif %}
+                                {% if not visit.dni and not visit.email %}
+                                    <span>-</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-center">
+                            {% if visit.visit_sheet_filepath %}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    Disponible
+                                </span>
+                            {% else %}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                    No generado
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
+                            <div class="flex items-center justify-center gap-2 whitespace-nowrap">
+                                {% if visit.visit_sheet_filepath %}
+                                    <form action="/visits/{{ visit.id }}/send-whatsapp" method="POST" class="inline-block">
+                                        <button
+                                            type="submit"
+                                            class="bg-green-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors text-xs sm:text-sm font-medium flex items-center gap-1"
+                                            title="Enviar por WhatsApp"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                            </svg>
+                                            Enviar
+                                        </button>
+                                    </form>
+                                    <a
+                                        href="/visits/{{ visit.id }}/download"
+                                        class="bg-gray-800 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-gray-900 active:bg-black transition-colors text-xs sm:text-sm font-medium flex items-center gap-1"
+                                        title="Descargar PDF"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                        </svg>
+                                        Descargar
+                                    </a>
+                                {% else %}
+                                    <form action="/visits/{{ visit.id }}/generate-pdf" method="POST" class="inline-block">
+                                        <button
+                                            type="submit"
+                                            class="bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors text-xs sm:text-sm font-medium flex items-center gap-1"
+                                            title="Generar ficha PDF"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                                            </svg>
+                                            Generar PDF
+                                        </button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td class="px-4 sm:px-6 py-8 sm:py-12 text-center text-gray-500" colspan="5">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-10 sm:h-12 w-10 sm:w-12 mx-auto mb-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                            <p class="text-xs sm:text-sm font-medium">No hay visitas registradas para esta propiedad</p>
+                            <p class="text-xs text-gray-400 mt-1">Utiliza el botón "Registrar visita" para crear una</p>
                         </td>
                     </tr>
                     {% endfor %}

@@ -15,9 +15,12 @@ from sqlalchemy.orm import Session
 
 from uuid import uuid4
 
+import logging
 import shutil
 import os
 
+from app.core.config import settings
+from app.core.constants import ReportType
 from app.db.deps import get_db
 
 from app.models.report import Report
@@ -27,6 +30,7 @@ from app.web.utils.flash import set_flash
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 templates = Jinja2Templates(
     directory="app/web/templates"
@@ -68,6 +72,16 @@ async def upload_report(
 ):
 
     current_user = request.state.user
+    response = RedirectResponse(url="/reports", status_code=302)
+
+    if not ReportType.is_valid_upload(report_type):
+        logger.warning(
+            "Tipo de informe inválido al subir reporte: property_id=%s report_type=%s",
+            property_id,
+            report_type
+        )
+        set_flash(response, "error", "Tipo de informe inválido")
+        return response
 
     extension = report_file.filename.split(".")[-1]
 
@@ -80,27 +94,32 @@ async def upload_report(
         exist_ok=True
     )
 
-    with open(file_path, "wb") as buffer:
+    try:
+        with open(file_path, "wb") as buffer:
 
-        shutil.copyfileobj(
-            report_file.file,
-            buffer
+            shutil.copyfileobj(
+                report_file.file,
+                buffer
+            )
+
+        report = Report(
+            property_id=property_id,
+            uploaded_by=current_user.id,
+            report_type=report_type,
+            filename=report_file.filename,
+            filepath=file_path,
+            notes=notes
         )
 
-    report = Report(
-        property_id=property_id,
-        uploaded_by=current_user.id,
-        report_type=report_type,
-        filename=report_file.filename,
-        filepath=file_path,
-        notes=notes
-    )
+        db.add(report)
 
-    db.add(report)
+        db.commit()
 
-    db.commit()
-
-    response = RedirectResponse(url="/reports", status_code=302)
+    except Exception:
+        db.rollback()
+        logger.exception("Error subiendo informe: property_id=%s", property_id)
+        set_flash(response, "error", "Ocurrió un error al subir el informe")
+        return response
 
     if send_whatsapp:
         try:
@@ -112,9 +131,13 @@ async def upload_report(
 
             client_phone = property_item.client.phone
 
-            print(report.filepath, report.filename, client_phone)
+            logger.info(
+                "Enviando informe subido por WhatsApp: report_id=%s property_id=%s",
+                report.id,
+                property_id
+            )
 
-            file_url = f"https://moyza.duckdns.org/{report.filepath}"
+            file_url = settings.public_url(report.filepath)
 
             send_report(
                 phone=client_phone,
@@ -123,8 +146,12 @@ async def upload_report(
             )
 
             set_flash(response, "success", "Informe subido y enviado por WhatsApp correctamente")
-        except Exception as e:
-            print(f"Error enviando WhatsApp: {e}")
+        except Exception:
+            logger.exception(
+                "Error enviando informe subido por WhatsApp: report_id=%s property_id=%s",
+                report.id,
+                property_id
+            )
             set_flash(response, "warning", "Informe subido, pero ocurrió un error al enviar por WhatsApp")
     else:
         set_flash(response, "success", "Informe subido correctamente")
@@ -182,8 +209,9 @@ async def delete_report(
         db.commit()
 
         set_flash(response, "success", "Informe eliminado correctamente")
-    except Exception as e:
-        print(f"Error eliminando informe: {e}")
+    except Exception:
+        db.rollback()
+        logger.exception("Error eliminando informe: report_id=%s", report_id)
         set_flash(response, "error", "Ocurrió un error al eliminar el informe")
 
     return response
@@ -219,10 +247,13 @@ async def send_report_whatsapp(
 
     client_phone = property_item.client.phone
 
-    file_url = f"https://moyza.duckdns.org/{report.filepath}"
-    # file_url = "https://moyza.duckdns.org/storage/reports/b89da4b7-1407-4205-891a-c26faa33c746.pdf"
+    file_url = settings.public_url(report.filepath)
 
-    print(report.filepath, report.filename, client_phone, property_item.id)
+    logger.info(
+        "Enviando informe existente por WhatsApp: report_id=%s property_id=%s",
+        report.id,
+        property_item.id
+    )
 
     try:
         send_report(
@@ -231,8 +262,12 @@ async def send_report_whatsapp(
             caption="Reporte generado automáticamente"
         )
         set_flash(response, "success", f"Informe enviado por WhatsApp a {client_phone}")
-    except Exception as e:
-        print(f"Error enviando WhatsApp: {e}")
+    except Exception:
+        logger.exception(
+            "Error enviando informe existente por WhatsApp: report_id=%s property_id=%s",
+            report.id,
+            property_item.id
+        )
         set_flash(response, "error", "Ocurrió un error al enviar el informe por WhatsApp")
 
     return response

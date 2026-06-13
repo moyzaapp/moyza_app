@@ -6,22 +6,22 @@ Registrar visita
 
 {% block content %}
 
-<div class="flex items-start justify-between gap-6 mb-8">
+<div class="flex items-start justify-between gap-4 sm:gap-6 mb-6 sm:mb-8">
 
-    <div>
+    <div class="flex-1 min-w-0">
 
         <a
             href="/properties/{{ property.id }}"
-            class="text-sm text-gray-500 hover:text-gray-700"
+            class="text-xs sm:text-sm text-gray-500 hover:text-gray-700 inline-flex items-center gap-1"
         >
             ← Volver al detalle
         </a>
 
-        <h1 class="text-3xl font-bold text-gray-800 mt-2">
+        <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-800 mt-2 break-words">
             Registrar visita
         </h1>
 
-        <p class="text-gray-500 mt-1">
+        <p class="text-sm sm:text-base text-gray-500 mt-1 break-words">
             {{ property.title }}
         </p>
 
@@ -29,54 +29,84 @@ Registrar visita
 
 </div>
 
-<div class="bg-white rounded-2xl border border-gray-200 p-6">
+<div class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
 
     <form
-        action="/properties/{{ property.id }}/visits/create"
+        action="/visits/create/{{ property.id }}"
         method="POST"
-        class="grid grid-cols-1 md:grid-cols-2 gap-4"
+        class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"
     >
 
         <div>
 
-            <label class="block text-sm font-medium text-gray-700 mb-2">
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                 Nombre visitante
             </label>
 
             <input
                 type="text"
                 name="visitor_name"
-                placeholder="Nombre visitante"
+                placeholder="Nombre completo"
                 required
-                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
 
         </div>
 
         <div>
 
-            <label class="block text-sm font-medium text-gray-700 mb-2">
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                DNI
+            </label>
+
+            <input
+                type="text"
+                name="dni"
+                placeholder="DNI del visitante"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
+            >
+
+        </div>
+
+        <div>
+
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                 Teléfono
             </label>
 
             <input
                 type="text"
                 name="phone"
-                placeholder="Teléfono"
-                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+                placeholder="Teléfono de contacto"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
 
         </div>
 
         <div>
 
-            <label class="block text-sm font-medium text-gray-700 mb-2">
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                E-mail
+            </label>
+
+            <input
+                type="email"
+                name="email"
+                placeholder="correo@ejemplo.com"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
+            >
+
+        </div>
+
+        <div>
+
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                 Nivel de interés
             </label>
 
             <select
                 name="interest_level"
-                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
             <option value="1">1 - Muy bajo</option>
             <option value="2">2</option>
@@ -89,13 +119,13 @@ Registrar visita
 
         <div>
 
-            <label class="block text-sm font-medium text-gray-700 mb-2">
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                 Feedback precio
             </label>
 
             <select
                 name="price_feedback"
-                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
             <option value="ALTO">Precio alto</option>
             <option value="ADECUADO">Precio adecuado</option>
@@ -106,13 +136,13 @@ Registrar visita
 
         <div>
 
-            <label class="block text-sm font-medium text-gray-700 mb-2">
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                 Feedback ubicación
             </label>
 
             <select
                 name="location_feedback"
-                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
             <option value="MALA">Ubicación mala</option>
             <option value="REGULAR">Ubicación regular</option>
@@ -123,13 +153,13 @@ Registrar visita
 
         <div>
 
-            <label class="block text-sm font-medium text-gray-700 mb-2">
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                 Feedback estado
             </label>
 
             <select
                 name="condition_feedback"
-                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
             <option value="MALO">Estado malo</option>
             <option value="REGULAR">Estado regular</option>
@@ -140,13 +170,13 @@ Registrar visita
 
         <div>
 
-            <label class="block text-sm font-medium text-gray-700 mb-2">
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                 Feedback luminosidad
             </label>
 
             <select
                 name="lighting_feedback"
-                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
             <option value="MALA">Luminosidad mala</option>
             <option value="REGULAR">Luminosidad regular</option>
@@ -157,13 +187,13 @@ Registrar visita
 
         <div>
 
-            <label class="block text-sm font-medium text-gray-700 mb-2">
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                 Ascensor
             </label>
 
             <select
                 name="elevator_feedback"
-                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
             <option value="SI">Tiene ascensor</option>
             <option value="NO">No tiene ascensor</option>
@@ -173,13 +203,13 @@ Registrar visita
 
         <div>
 
-            <label class="block text-sm font-medium text-gray-700 mb-2">
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                 Garaje
             </label>
 
             <select
                 name="garage_feedback"
-                class="w-full border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
             <option value="SI">Tiene garaje</option>
             <option value="NO">No tiene garaje</option>
@@ -189,14 +219,29 @@ Registrar visita
 
         <textarea
             name="notes"
-            rows="5"
-            class="border border-gray-300 p-3 rounded-xl md:col-span-2 focus:outline-none focus:ring-2 focus:ring-gray-200"
+            rows="4"
+            class="border border-gray-300 p-2 sm:p-3 rounded-xl sm:col-span-2 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             placeholder="Observaciones"
         ></textarea>
 
-        <div class="md:col-span-2 flex justify-end">
+        <div class="sm:col-span-2">
+            <label class="flex items-start gap-2 cursor-pointer">
+                <input
+                    type="checkbox"
+                    name="generate_sheet"
+                    value="true"
+                    checked
+                    class="mt-1 w-4 h-4 sm:w-5 sm:h-5 rounded border-gray-300 flex-shrink-0"
+                >
+                <span class="text-xs sm:text-sm text-gray-700">
+                    Generar y enviar ficha de visita por WhatsApp al comprador y agente
+                </span>
+            </label>
+        </div>
 
-            <button class="bg-black text-white px-5 py-3 rounded-xl">
+        <div class="sm:col-span-2 flex justify-end">
+
+            <button class="w-full sm:w-auto bg-black hover:bg-gray-800 text-white px-4 sm:px-5 py-2 sm:py-3 rounded-xl transition-colors text-sm sm:text-base">
                 Guardar visita
             </button>
 

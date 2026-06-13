@@ -1,5 +1,8 @@
+import os
+
 from reportlab.platypus import (
     SimpleDocTemplate,
+    Image,
     Paragraph,
     Spacer,
     Table,
@@ -15,6 +18,30 @@ from reportlab.platypus.flowables import HRFlowable
 from reportlab.platypus import PageBreak
 
 from reportlab.lib.units import cm
+from xml.sax.saxutils import escape
+
+
+def _safe_text(value, default="No disponible"):
+    """Escapa texto dinámico antes de pasarlo a Paragraph de ReportLab."""
+    if value is None:
+        return default
+
+    return escape(str(value))
+
+
+def _money(value, default="$0.00"):
+    try:
+        return f"${float(value):,.2f}"
+    except (TypeError, ValueError):
+        return default
+
+
+def _first_existing_path(*paths):
+    for path in paths:
+        if os.path.exists(path):
+            return path
+
+    return None
 
 
 def generate_property_report(
@@ -81,6 +108,20 @@ def generate_property_report(
     # =========================
     # HEADER
     # =========================
+
+    logo_path = _first_existing_path(
+        "app/static/logo_moyza.png",
+        "backend/app/static/logo_moyza.png"
+    )
+    if logo_path:
+        logo = Image(logo_path)
+        logo_height = 2.5 * cm
+        logo_width = logo.drawWidth * (logo_height / logo.drawHeight)
+        logo.drawWidth = logo_width
+        logo.drawHeight = logo_height
+        logo.hAlign = "LEFT"
+        elements.append(logo)
+        elements.append(Spacer(1, 8))
 
     elements.append(
         Paragraph(
@@ -211,16 +252,66 @@ def generate_property_report(
         )
     )
 
-    elements.append(
-        Paragraph(
-            """
-            Aquí irá posteriormente el análisis generado por IA
-            sobre el valor comercial estimado de la propiedad,
-            comparativas de mercado y recomendaciones estratégicas.
-            """,
-            body_style
+    ai_valuation = report_data.get("ai_valuation")
+
+    if ai_valuation:
+        price_range = ai_valuation.get('price_range') or {}
+
+        # Tabla de valuación
+        valuation_data = [
+            ["Concepto", "Valor"],
+            ["Valor estimado de mercado", _money(ai_valuation.get('estimated_value'))],
+            ["Rango de precio sugerido",
+             f"{_money(price_range.get('min'))} - "
+             f"{_money(price_range.get('max'))}"],
+            ["Nivel de confianza", str(ai_valuation.get('confidence', 'N/A')).capitalize()],
+        ]
+
+        valuation_table = Table(
+            valuation_data,
+            colWidths=[220, 250]
         )
-    )
+
+        valuation_table.setStyle(
+            TableStyle([
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 10),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#222222")),
+                ("LINEBELOW", (0, 0), (-1, 0), 1, colors.HexColor("#BDBDBD")),
+                ("GRID", (0, 1), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
+                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 1), (-1, -1), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F5F5F5")),
+            ])
+        )
+
+        elements.append(valuation_table)
+        elements.append(Spacer(1, 10))
+
+        # Análisis del valor
+        elements.append(
+            Paragraph(
+                "<b>Análisis del Tasador IA:</b>",
+                body_style
+            )
+        )
+
+        elements.append(
+            Paragraph(
+                _safe_text(ai_valuation.get('reasoning')),
+                body_style
+            )
+        )
+    else:
+        elements.append(
+            Paragraph(
+                "El análisis de IA no está disponible para este reporte. "
+                "Verifique la configuración de la API de OpenAI.",
+                body_style
+            )
+        )
 
     # =========================
     # IA - OBSERVACIONES
@@ -233,16 +324,88 @@ def generate_property_report(
         )
     )
 
-    elements.append(
-        Paragraph(
-            """
-            Aquí se agregarán observaciones automáticas generadas
-            mediante IA según el comportamiento del mercado,
-            interés generado y tendencias inmobiliarias.
-            """,
-            body_style
+    ai_observations = report_data.get("ai_observations")
+
+    if ai_observations:
+        # Análisis de mercado
+        elements.append(
+            Paragraph(
+                "<b>Análisis de Mercado:</b>",
+                body_style
+            )
         )
-    )
+
+        elements.append(
+            Paragraph(
+                _safe_text(ai_observations.get('market_analysis')),
+                body_style
+            )
+        )
+
+        elements.append(Spacer(1, 10))
+
+        # Nivel de riesgo
+        risk_level = str(ai_observations.get('risk_level', 'N/A')).upper()
+        risk_colors = {
+            'BAJO': "#0B6E4F",
+            'MEDIO': "#FFA500",
+            'ALTO': "#DC143C"
+        }
+        risk_color = risk_colors.get(risk_level, "#808080")
+
+        elements.append(
+            Paragraph(
+                f"<b>Nivel de Riesgo Comercial:</b> <font color='{risk_color}'>{_safe_text(risk_level)}</font>",
+                body_style
+            )
+        )
+
+        elements.append(Spacer(1, 10))
+
+        # Recomendaciones
+        elements.append(
+            Paragraph(
+                "<b>Recomendaciones Estratégicas:</b>",
+                body_style
+            )
+        )
+
+        recommendations = ai_observations.get('recommendations', [])
+        if not isinstance(recommendations, list):
+            recommendations = [recommendations]
+
+        for idx, rec in enumerate(recommendations, 1):
+            elements.append(
+                Paragraph(
+                    f"{idx}. {_safe_text(rec)}",
+                    body_style
+                )
+            )
+
+        elements.append(Spacer(1, 10))
+
+        # Oportunidades
+        elements.append(
+            Paragraph(
+                "<b>Oportunidades Identificadas:</b>",
+                body_style
+            )
+        )
+
+        elements.append(
+            Paragraph(
+                _safe_text(ai_observations.get('opportunities')),
+                body_style
+            )
+        )
+    else:
+        elements.append(
+            Paragraph(
+                "Las observaciones de IA no están disponibles para este reporte. "
+                "Verifique la configuración de la API de OpenAI.",
+                body_style
+            )
+        )
 
     # =========================
     # FOOTER

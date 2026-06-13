@@ -12,6 +12,22 @@ class Settings:
     DB_PASSWORD: str = os.getenv("DB_PASSWORD")
     DB_NAME: str = os.getenv("DB_NAME")
 
+    EVOLUTION_URL_SENDMEDIA: str = os.getenv("EVOLUTION_URL_SENDMEDIA")
+    EVOLUTION_URL_SENDPRESENCE: str = os.getenv("EVOLUTION_URL_SENDPRESENCE")
+    WHATSAPP_API_KEY: str = os.getenv("WHATSAPP_API_KEY")
+    PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "https://moyza.duckdns.org")
+
+    AI_ENABLED: bool = os.getenv("AI_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "openai")
+
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
+    OPENAI_MAX_TOKENS: int = int(os.getenv("OPENAI_MAX_TOKENS", "2000"))
+    OPENAI_TEMPERATURE: float = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
+
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
     @property
     def DATABASE_URL(self):
         return (
@@ -19,5 +35,8 @@ class Settings:
             f"{self.DB_USER}:{self.DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
+
+    def public_url(self, path: str) -> str:
+        return f"{self.PUBLIC_BASE_URL.rstrip('/')}/{path.lstrip('/')}"
 
 settings = Settings()

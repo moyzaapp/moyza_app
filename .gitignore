@@ -71,3 +71,6 @@ storage/**
 # --- Ignore .env files ---
 .env
 .env.*
+
+test.py
+*.png

@@ -11,6 +11,7 @@ from sqlalchemy import Boolean
 
 from sqlalchemy.orm import relationship
 
+from app.core.constants import PropertyStatus
 from app.db.base import Base
 
 
@@ -32,7 +33,7 @@ class Property(Base):
 
     price = Column(Numeric)
 
-    status = Column(String, default="Activa")
+    status = Column(String, default=PropertyStatus.ACTIVE)
 
     description = Column(Text)
 
@@ -83,4 +84,9 @@ class Property(Base):
     interactions = relationship(
         "PropertyInteraction",
         backref="property"
+    )
+
+    visits = relationship(
+        "PropertyVisit",
+        back_populates="property"
     )

@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+
+{% block title %}
+Visitas
+{% endblock %}
+
+{% block content %}
+
+<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 sm:mb-8">
+
+    <div>
+
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">
+            Visitas
+        </h1>
+
+        <p class="text-sm sm:text-base text-gray-500 mt-1">
+            Gestión de visitas a propiedades
+        </p>
+
+    </div>
+
+    <a
+        href="/visits/select-property"
+        class="w-full sm:w-auto bg-black text-white px-4 sm:px-5 py-2 sm:py-3 rounded-xl hover:bg-gray-800 transition-colors font-medium flex items-center justify-center gap-2 text-sm sm:text-base"
+    >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        </svg>
+        Registrar visita
+    </a>
+
+</div>
+
+{% include 'visits/table.html' %}
+
+{% endblock %}

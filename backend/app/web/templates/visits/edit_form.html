@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+
+{% block title %}
+Editar visita
+{% endblock %}
+
+{% block content %}
+
+<div class="flex items-start justify-between gap-6 mb-8">
+
+    <div>
+
+        <a
+            href="/visits"
+            class="text-sm text-gray-500 hover:text-gray-700"
+        >
+            ← Volver a visitas
+        </a>
+
+        <h1 class="text-3xl font-bold text-gray-800 mt-2">
+            Editar visita
+        </h1>
+
+        <p class="text-gray-500 mt-1">
+            {{ visit.property.title }}
+        </p>
+
+    </div>
+
+</div>
+
+<div class="bg-white rounded-2xl border border-gray-200 p-6">
+
+    {% if visit.visit_sheet_filepath %}
+    <div class="mb-6 bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-xl text-sm flex items-start gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div>
+            <p class="font-medium">Esta visita tiene una ficha PDF generada</p>
+            <p class="text-xs mt-1">Al guardar los cambios, el PDF se regenerará automáticamente con la información actualizada.</p>
+        </div>
+    </div>
+    {% endif %}
+
+    <form
+        action="/visits/update/{{ visit.id }}"
+        method="POST"
+        class="grid grid-cols-1 md:grid-cols-2 gap-4"
+    >
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Nombre visitante
+            </label>
+
+            <input
+                type="text"
+                name="visitor_name"
+                placeholder="Nombre completo"
+                value="{{ visit.visitor_name }}"
+                required
+                class="w-full border border-gray-300 p-3 rounded-xl"
+            >
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                DNI
+            </label>
+
+            <input
+                type="text"
+                name="dni"
+                placeholder="Número de DNI"
+                value="{{ visit.dni or '' }}"
+                class="w-full border border-gray-300 p-3 rounded-xl"
+            >
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Teléfono
+            </label>
+
+            <input
+                type="text"
+                name="phone"
+                placeholder="Número de teléfono"
+                value="{{ visit.phone or '' }}"
+                class="w-full border border-gray-300 p-3 rounded-xl"
+            >
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Email
+            </label>
+
+            <input
+                type="email"
+                name="email"
+                placeholder="Correo electrónico"
+                value="{{ visit.email or '' }}"
+                class="w-full border border-gray-300 p-3 rounded-xl"
+            >
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Nivel de interés (1-5)
+            </label>
+
+            <select
+                name="interest_level"
+                class="w-full border border-gray-300 p-3 rounded-xl"
+            >
+                <option value="">Sin especificar</option>
+                <option value="1" {% if visit.interest_level == 1 %}selected{% endif %}>1 - Muy bajo</option>
+                <option value="2" {% if visit.interest_level == 2 %}selected{% endif %}>2 - Bajo</option>
+                <option value="3" {% if visit.interest_level == 3 %}selected{% endif %}>3 - Medio</option>
+                <option value="4" {% if visit.interest_level == 4 %}selected{% endif %}>4 - Alto</option>
+                <option value="5" {% if visit.interest_level == 5 %}selected{% endif %}>5 - Muy alto</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Feedback precio
+            </label>
+
+            <select
+                name="price_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl"
+            >
+                <option value="">Sin especificar</option>
+                <option value="BAJO" {% if visit.price_feedback == 'BAJO' %}selected{% endif %}>Bajo</option>
+                <option value="JUSTO" {% if visit.price_feedback == 'JUSTO' %}selected{% endif %}>Justo</option>
+                <option value="ALTO" {% if visit.price_feedback == 'ALTO' %}selected{% endif %}>Alto</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Feedback ubicación
+            </label>
+
+            <select
+                name="location_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl"
+            >
+                <option value="">Sin especificar</option>
+                <option value="MALA" {% if visit.location_feedback == 'MALA' %}selected{% endif %}>Mala</option>
+                <option value="REGULAR" {% if visit.location_feedback == 'REGULAR' %}selected{% endif %}>Regular</option>
+                <option value="BUENA" {% if visit.location_feedback == 'BUENA' %}selected{% endif %}>Buena</option>
+                <option value="EXCELENTE" {% if visit.location_feedback == 'EXCELENTE' %}selected{% endif %}>Excelente</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Feedback estado
+            </label>
+
+            <select
+                name="condition_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl"
+            >
+                <option value="">Sin especificar</option>
+                <option value="MALO" {% if visit.condition_feedback == 'MALO' %}selected{% endif %}>Malo</option>
+                <option value="REGULAR" {% if visit.condition_feedback == 'REGULAR' %}selected{% endif %}>Regular</option>
+                <option value="BUENO" {% if visit.condition_feedback == 'BUENO' %}selected{% endif %}>Bueno</option>
+                <option value="EXCELENTE" {% if visit.condition_feedback == 'EXCELENTE' %}selected{% endif %}>Excelente</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Feedback iluminación
+            </label>
+
+            <select
+                name="lighting_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl"
+            >
+                <option value="">Sin especificar</option>
+                <option value="MALA" {% if visit.lighting_feedback == 'MALA' %}selected{% endif %}>Mala</option>
+                <option value="REGULAR" {% if visit.lighting_feedback == 'REGULAR' %}selected{% endif %}>Regular</option>
+                <option value="BUENA" {% if visit.lighting_feedback == 'BUENA' %}selected{% endif %}>Buena</option>
+                <option value="EXCELENTE" {% if visit.lighting_feedback == 'EXCELENTE' %}selected{% endif %}>Excelente</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Feedback ascensor
+            </label>
+
+            <select
+                name="elevator_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl"
+            >
+                <option value="">Sin especificar</option>
+                <option value="NO_APLICA" {% if visit.elevator_feedback == 'NO_APLICA' %}selected{% endif %}>No aplica</option>
+                <option value="NO_TIENE" {% if visit.elevator_feedback == 'NO_TIENE' %}selected{% endif %}>No tiene</option>
+                <option value="MALO" {% if visit.elevator_feedback == 'MALO' %}selected{% endif %}>Malo</option>
+                <option value="BUENO" {% if visit.elevator_feedback == 'BUENO' %}selected{% endif %}>Bueno</option>
+            </select>
+
+        </div>
+
+        <div>
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Feedback cochera
+            </label>
+
+            <select
+                name="garage_feedback"
+                class="w-full border border-gray-300 p-3 rounded-xl"
+            >
+                <option value="">Sin especificar</option>
+                <option value="NO_APLICA" {% if visit.garage_feedback == 'NO_APLICA' %}selected{% endif %}>No aplica</option>
+                <option value="NO_TIENE" {% if visit.garage_feedback == 'NO_TIENE' %}selected{% endif %}>No tiene</option>
+                <option value="TIENE" {% if visit.garage_feedback == 'TIENE' %}selected{% endif %}>Tiene</option>
+            </select>
+
+        </div>
+
+        <div class="md:col-span-2">
+
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+                Observaciones
+            </label>
+
+            <textarea
+                name="notes"
+                class="w-full border border-gray-300 p-3 rounded-xl"
+                placeholder="Observaciones adicionales"
+                rows="4"
+            >{{ visit.notes or '' }}</textarea>
+
+        </div>
+
+        <div class="md:col-span-2 flex justify-end gap-3">
+
+            <a
+                href="/visits"
+                class="px-5 py-3 rounded-xl border border-gray-300 hover:bg-gray-50 transition-colors font-medium"
+            >
+                Cancelar
+            </a>
+
+            <button
+                type="submit"
+                class="bg-black text-white px-5 py-3 rounded-xl hover:bg-gray-800 transition-colors font-medium"
+            >
+                Guardar cambios
+            </button>
+
+        </div>
+
+    </form>
+
+</div>
+
+{% endblock %}

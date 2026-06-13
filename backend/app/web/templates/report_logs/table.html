@@ -1,0 +1,179 @@
+<div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+
+    <table class="w-full">
+
+        <thead class="bg-gray-50">
+
+            <tr>
+
+                <th class="px-6 py-4 text-left">
+                    ID
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Propiedad
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Estado
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Etapa
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Fecha Ejecución
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Duración
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Reintentos
+                </th>
+
+                <th class="px-6 py-4 text-left">
+                    Acciones
+                </th>
+
+            </tr>
+
+        </thead>
+
+        <tbody>
+
+            {% if logs %}
+                {% for log in logs %}
+
+                <tr class="border-b border-gray-100 hover:bg-gray-50">
+
+                    <td class="px-6 py-4 text-sm text-gray-600">
+                        #{{ log.id }}
+                    </td>
+
+                    <td class="px-6 py-4">
+                        <div class="font-medium text-gray-900">
+                            {{ log.property.title if log.property else 'N/A' }}
+                        </div>
+                        {% if log.report_id %}
+                        <div class="text-xs text-gray-500">
+                            Reporte ID: {{ log.report_id }}
+                        </div>
+                        {% endif %}
+                    </td>
+
+                    <td class="px-6 py-4">
+                        {% if log.status == 'success' %}
+                        <span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-medium">
+                            ✅ Exitoso
+                        </span>
+                        {% elif log.status == 'failed' %}
+                        <span class="bg-red-100 text-red-800 px-3 py-1 rounded-full text-xs font-medium">
+                            ❌ Fallido
+                        </span>
+                        {% elif log.status == 'pending' %}
+                        <span class="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-medium">
+                            ⏳ Pendiente
+                        </span>
+                        {% elif log.status == 'skipped' %}
+                        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-medium">
+                            ⏭️ Omitido
+                        </span>
+                        {% else %}
+                        <span class="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-xs font-medium">
+                            {{ log.status }}
+                        </span>
+                        {% endif %}
+                    </td>
+
+                    <td class="px-6 py-4 text-sm">
+                        <span class="text-gray-700 font-mono">
+                            {{ log.stage or '-' }}
+                        </span>
+                    </td>
+
+                    <td class="px-6 py-4 text-sm text-gray-600">
+                        {{ log.job_run_at.strftime('%Y-%m-%d %H:%M') if log.job_run_at else '-' }}
+                    </td>
+
+                    <td class="px-6 py-4 text-sm text-gray-600">
+                        {% if log.duration_seconds %}
+                            {{ "%.2f"|format(log.duration_seconds) }}s
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+
+                    <td class="px-6 py-4 text-sm">
+                        {% if log.retry_count > 0 %}
+                        <span class="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs font-medium">
+                            🔁 {{ log.retry_count }}
+                        </span>
+                        {% else %}
+                        <span class="text-gray-400">0</span>
+                        {% endif %}
+                    </td>
+
+                    <td class="px-6 py-4">
+                        <div class="flex gap-2">
+
+                            {% if log.error_message %}
+                            <button
+                                onclick="alert('Error: {{ log.error_message }}')"
+                                class="bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs hover:bg-red-200"
+                                title="Ver error"
+                            >
+                                🔍 Ver Error
+                            </button>
+                            {% endif %}
+
+                            {% if log.status == 'failed' and log.retry_count < 3 %}
+                            <button
+                                onclick="retryJob({{ log.id }})"
+                                class="bg-blue-100 text-blue-600 px-3 py-1 rounded-lg text-xs hover:bg-blue-200"
+                                title="Reintentar"
+                            >
+                                🔄 Reintentar
+                            </button>
+                            {% endif %}
+
+                            {% if log.report_id %}
+                            <a
+                                href="/reports/download/{{ log.report_id }}"
+                                class="bg-green-100 text-green-600 px-3 py-1 rounded-lg text-xs hover:bg-green-200"
+                                title="Descargar reporte"
+                            >
+                                📥 Descargar
+                            </a>
+                            {% endif %}
+
+                        </div>
+                    </td>
+
+                </tr>
+
+                {% endfor %}
+
+            {% else %}
+
+                <tr>
+                    <td colspan="8" class="px-6 py-12 text-center text-gray-500">
+                        <div class="flex flex-col items-center gap-3">
+                            <svg class="w-16 h-16 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <p class="text-lg font-medium">No hay logs de reportes aún</p>
+                            <p class="text-sm">Los logs aparecerán cuando el scheduler ejecute los reportes automáticos</p>
+                        </div>
+                    </td>
+                </tr>
+
+            {% endif %}
+
+        </tbody>
+
+    </table>
+
+</div>
