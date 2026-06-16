@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block title %}
+Visita Completada
+{% endblock %}
+
+{% block content %}
+
+<!-- Indicador de progreso -->
+<div class="max-w-4xl mx-auto mb-8">
+    <div class="flex items-center justify-between">
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
+                ✓
+            </div>
+            <span class="text-xs mt-2 text-green-600 font-medium">Datos</span>
+        </div>
+        <div class="flex-1 h-1 bg-green-500"></div>
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
+                ✓
+            </div>
+            <span class="text-xs mt-2 text-green-600 font-medium">Vista Previa</span>
+        </div>
+        <div class="flex-1 h-1 bg-green-500"></div>
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
+                ✓
+            </div>
+            <span class="text-xs mt-2 text-green-600 font-medium">Firma</span>
+        </div>
+        <div class="flex-1 h-1 bg-green-500"></div>
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
+                ✓
+            </div>
+            <span class="text-xs mt-2 text-green-600 font-medium">Finalizado</span>
+        </div>
+    </div>
+</div>
+
+<!-- Tarjeta de confirmación -->
+<div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-2xl p-8 text-center">
+
+    <!-- Icono de éxito -->
+    <div class="mb-6">
+        <div class="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+            <svg class="w-12 h-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+        </div>
+    </div>
+
+    <h1 class="text-3xl font-bold text-gray-800 mb-4">
+        ¡Visita Registrada Exitosamente!
+    </h1>
+
+    <p class="text-gray-600 mb-8">
+        El documento de visita está siendo generado y será enviado por WhatsApp
+        al cliente y al agente inmobiliario.
+    </p>
+
+    <!-- Loading mientras se genera el PDF -->
+    <div id="loading-state" class="mb-6">
+        <div class="flex items-center justify-center gap-3 text-blue-600">
+            <svg class="animate-spin h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span class="text-lg font-medium">Generando documento...</span>
+        </div>
+    </div>
+
+    <!-- Estado de éxito (oculto inicialmente) -->
+    <div id="success-state" class="hidden">
+
+        <!-- Información del documento -->
+        <div class="bg-gray-50 rounded-xl p-6 mb-6">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Documento Generado</h3>
+
+            <div class="flex items-center justify-center gap-4 p-4 bg-white rounded-lg border border-gray-200">
+                <svg class="w-12 h-12 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 0v12h8V4H6z"/>
+                </svg>
+                <div class="text-left flex-1">
+                    <p class="font-medium text-gray-800" id="filename">ficha_visita_{{ visit.id }}.pdf</p>
+                    <p class="text-sm text-gray-500">Ficha de Visita Inmobiliaria</p>
+                </div>
+                <a
+                    href="/visits/{{ visit.id }}/download"
+                    target="_blank"
+                    class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                >
+                    Descargar
+                </a>
+            </div>
+        </div>
+
+        <!-- Información de envío -->
+        <div class="bg-green-50 rounded-xl p-6 mb-6" id="sent-info">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">Enviado por WhatsApp</h3>
+            <div class="space-y-2" id="sent-to-list">
+                <!-- Se llena dinámicamente -->
+            </div>
+        </div>
+
+        <!-- Información de la visita -->
+        <div class="text-left bg-gray-50 rounded-xl p-6 mb-6">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">Detalles de la Visita</h3>
+            <div class="space-y-2 text-sm">
+                <p><span class="font-semibold">Cliente:</span> {{ visit.visitor_name }}</p>
+                <p><span class="font-semibold">Propiedad:</span> {{ property.title }}</p>
+                <p><span class="font-semibold">Dirección:</span> {{ property.address }}</p>
+                <p><span class="font-semibold">Fecha:</span> {{ visit.created_at.strftime("%d/%m/%Y %H:%M") if visit.created_at else 'N/A' }}</p>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Estado de error (oculto inicialmente) -->
+    <div id="error-state" class="hidden">
+        <div class="bg-red-50 border border-red-200 rounded-xl p-6 mb-6">
+            <p class="text-red-800 font-medium mb-2">Error al generar el documento</p>
+            <p class="text-red-600 text-sm" id="error-message"></p>
+        </div>
+    </div>
+
+    <!-- Botones de acción -->
+    <div class="flex justify-center gap-4 mt-8">
+        <a
+            href="/properties/{{ property.id }}"
+            class="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-colors"
+        >
+            ← Volver a la Propiedad
+        </a>
+        <a
+            href="/visits/select-property"
+            class="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors"
+        >
+            Registrar Otra Visita
+        </a>
+    </div>
+
+</div>
+
+<script>
+// Finalizar visita automáticamente al cargar la página
+window.addEventListener('load', async function() {
+    const visitId = {{ visit.id }};
+
+    try {
+        const response = await fetch(`/api/v1/visits/${visitId}/finalize`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            // Ocultar loading y mostrar éxito
+            document.getElementById('loading-state').classList.add('hidden');
+            document.getElementById('success-state').classList.remove('hidden');
+
+            // Actualizar información de envío
+            if (data.sent_to && data.sent_to.length > 0) {
+                const sentToList = document.getElementById('sent-to-list');
+                sentToList.innerHTML = '';
+
+                data.sent_to.forEach(recipient => {
+                    const item = document.createElement('p');
+                    item.className = 'text-green-700 flex items-center gap-2';
+                    item.innerHTML = `
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                        <span>Enviado a ${recipient}</span>
+                    `;
+                    sentToList.appendChild(item);
+                });
+            } else {
+                document.getElementById('sent-info').classList.add('hidden');
+            }
+
+        } else {
+            // Mostrar error
+            document.getElementById('loading-state').classList.add('hidden');
+            document.getElementById('error-state').classList.remove('hidden');
+            document.getElementById('error-message').textContent =
+                data.detail || 'No se pudo completar el proceso. Por favor, contacte al administrador.';
+        }
+
+    } catch (error) {
+        console.error('Error:', error);
+        // Mostrar error
+        document.getElementById('loading-state').classList.add('hidden');
+        document.getElementById('error-state').classList.remove('hidden');
+        document.getElementById('error-message').textContent =
+            'Error de conexión. Por favor, verifique su internet.';
+    }
+});
+</script>
+
+{% endblock %}

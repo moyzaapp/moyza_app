@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+
+{% block title %}
+Firma Digital - Visita
+{% endblock %}
+
+{% block content %}
+
+<!-- Indicador de progreso -->
+<div class="max-w-4xl mx-auto mb-8">
+    <div class="flex items-center justify-between">
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
+                ✓
+            </div>
+            <span class="text-xs mt-2 text-green-600 font-medium">Datos</span>
+        </div>
+        <div class="flex-1 h-1 bg-green-500"></div>
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
+                ✓
+            </div>
+            <span class="text-xs mt-2 text-green-600 font-medium">Vista Previa</span>
+        </div>
+        <div class="flex-1 h-1 bg-blue-500"></div>
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
+                3
+            </div>
+            <span class="text-xs mt-2 text-blue-600 font-medium">Firma</span>
+        </div>
+        <div class="flex-1 h-1 bg-gray-300"></div>
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-bold">
+                4
+            </div>
+            <span class="text-xs mt-2 text-gray-500">Finalizado</span>
+        </div>
+    </div>
+</div>
+
+<!-- Tarjeta de firma -->
+<div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-2xl p-8">
+
+    <h2 class="text-2xl font-bold text-gray-800 mb-4">Firma del Cliente</h2>
+
+    <p class="text-gray-600 mb-6">
+        Por favor, firme en el recuadro inferior utilizando su dedo (en pantalla táctil)
+        o el mouse. La firma será incluida en el documento oficial de visita.
+    </p>
+
+    <!-- Canvas de firma -->
+    <div class="mb-6">
+        <div class="border-2 border-gray-300 rounded-xl overflow-hidden bg-white" style="cursor: crosshair;">
+            <canvas id="signature-canvas" width="700" height="250"></canvas>
+        </div>
+        <p class="text-xs text-gray-500 mt-2">
+            💡 Consejo: Dibuje su firma de forma clara y legible
+        </p>
+    </div>
+
+    <!-- Vista previa de la firma -->
+    <div id="signature-preview" class="hidden mb-6">
+        <h3 class="text-sm font-semibold text-gray-700 mb-2">Vista previa de su firma:</h3>
+        <div class="border border-gray-300 rounded-xl p-4 bg-gray-50">
+            <img id="signature-image" src="" alt="Firma" class="max-w-full mx-auto" style="max-height: 150px;">
+        </div>
+    </div>
+
+    <!-- Botones de acción -->
+    <div class="flex justify-between items-center gap-4">
+        <button
+            id="clear-signature"
+            class="px-6 py-3 bg-white border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-100 transition-colors"
+        >
+            🗑️ Limpiar Firma
+        </button>
+
+        <button
+            id="confirm-signature"
+            disabled
+            class="px-8 py-3 bg-gray-400 text-white rounded-xl cursor-not-allowed transition-all"
+        >
+            ✓ Confirmar Firma
+        </button>
+    </div>
+
+</div>
+
+<script>
+// ============================================
+// SIGNATURE PAD IMPLEMENTATION
+// ============================================
+const canvas = document.getElementById('signature-canvas');
+const ctx = canvas.getContext('2d');
+const clearBtn = document.getElementById('clear-signature');
+const confirmBtn = document.getElementById('confirm-signature');
+const previewDiv = document.getElementById('signature-preview');
+const previewImg = document.getElementById('signature-image');
+
+let isDrawing = false;
+let hasDrawn = false;
+
+// Inicializar canvas con fondo blanco (importante para la validación)
+ctx.fillStyle = '#FFFFFF';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+// Configurar canvas para dibujo
+ctx.strokeStyle = '#000000';
+ctx.lineWidth = 3;  // Aumentado de 2 a 3 para trazos más visibles
+ctx.lineCap = 'round';
+ctx.lineJoin = 'round';
+
+// Eventos de dibujo (mouse)
+canvas.addEventListener('mousedown', startDrawing);
+canvas.addEventListener('mousemove', draw);
+canvas.addEventListener('mouseup', stopDrawing);
+canvas.addEventListener('mouseout', stopDrawing);
+
+// Eventos de dibujo (touch)
+canvas.addEventListener('touchstart', handleTouchStart, {passive: false});
+canvas.addEventListener('touchmove', handleTouchMove, {passive: false});
+canvas.addEventListener('touchend', stopDrawing);
+
+function startDrawing(e) {
+    isDrawing = true;
+    const pos = getPosition(e);
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+}
+
+function draw(e) {
+    if (!isDrawing) return;
+
+    e.preventDefault();
+    const pos = getPosition(e);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+
+    hasDrawn = true;
+    enableConfirmButton();
+}
+
+function stopDrawing() {
+    isDrawing = false;
+}
+
+function getPosition(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    return {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY
+    };
+}
+
+function handleTouchStart(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const mouseEvent = new MouseEvent('mousedown', {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+    });
+    canvas.dispatchEvent(mouseEvent);
+}
+
+function handleTouchMove(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const mouseEvent = new MouseEvent('mousemove', {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+    });
+    canvas.dispatchEvent(mouseEvent);
+}
+
+function enableConfirmButton() {
+    confirmBtn.disabled = false;
+    confirmBtn.classList.remove('bg-gray-400', 'cursor-not-allowed');
+    confirmBtn.classList.add('bg-green-600', 'hover:bg-green-700', 'cursor-pointer');
+}
+
+function disableConfirmButton() {
+    confirmBtn.disabled = true;
+    confirmBtn.classList.remove('bg-green-600', 'hover:bg-green-700', 'cursor-pointer');
+    confirmBtn.classList.add('bg-gray-400', 'cursor-not-allowed');
+}
+
+// Limpiar canvas
+clearBtn.addEventListener('click', function() {
+    // Limpiar y rellenar con blanco nuevamente
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    hasDrawn = false;
+    disableConfirmButton();
+    previewDiv.classList.add('hidden');
+});
+
+// Confirmar firma
+confirmBtn.addEventListener('click', async function() {
+    if (!hasDrawn) {
+        alert('Por favor, firme antes de continuar');
+        return;
+    }
+
+    // Convertir canvas a base64
+    const signatureData = canvas.toDataURL('image/png');
+
+    // Log para debugging
+    console.log('Signature data length:', signatureData.length);
+    console.log('Signature data preview:', signatureData.substring(0, 100));
+
+    // Mostrar vista previa
+    previewImg.src = signatureData;
+    previewDiv.classList.remove('hidden');
+
+    // Deshabilitar botón y mostrar estado de carga
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '⏳ Guardando firma...';
+    confirmBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+    confirmBtn.classList.add('bg-gray-400');
+
+    try {
+        const response = await fetch('/api/v1/visits/{{ visit.id }}/save-signature', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                signature_data: signatureData
+            })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+
+            // Mostrar mensaje de éxito
+            confirmBtn.textContent = '✓ Firma guardada';
+            confirmBtn.classList.remove('bg-gray-400');
+            confirmBtn.classList.add('bg-green-500');
+
+            // Esperar 1 segundo para que vea el mensaje
+            setTimeout(() => {
+                window.location.href = `/visits/complete/{{ visit.id }}`;
+            }, 1000);
+        } else {
+            const error = await response.json();
+            console.error('Server error:', error);
+
+            // Mostrar error más descriptivo
+            let errorMsg = error.detail || 'No se pudo guardar la firma';
+
+            // Si el error es de validación, dar más contexto
+            if (errorMsg.includes('vacía') || errorMsg.includes('pequeña')) {
+                errorMsg += '\n\n💡 Intente:\n- Dibujar trazos más largos y definidos\n- Presionar más fuerte (si usa stylus)\n- Usar un trazo continuo en vez de puntos';
+            }
+
+            alert('❌ ' + errorMsg);
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = '✓ Confirmar Firma';
+            enableConfirmButton();
+        }
+    } catch (error) {
+        console.error('Network error:', error);
+        alert('❌ Error de conexión. Por favor, verifique su internet e inténtelo de nuevo.');
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = '✓ Confirmar Firma';
+        enableConfirmButton();
+    }
+});
+
+// Ajustar canvas al tamaño de la ventana (responsive)
+function resizeCanvas() {
+    const container = canvas.parentElement;
+    const containerWidth = container.offsetWidth;
+
+    // Mantener aspecto 7:2.5 aproximadamente
+    const newWidth = Math.min(containerWidth - 40, 700);
+    const newHeight = (newWidth / 700) * 250;
+
+    canvas.style.width = newWidth + 'px';
+    canvas.style.height = newHeight + 'px';
+}
+
+// Ajustar al cargar y al redimensionar
+window.addEventListener('load', resizeCanvas);
+window.addEventListener('resize', resizeCanvas);
+</script>
+
+{% endblock %}
