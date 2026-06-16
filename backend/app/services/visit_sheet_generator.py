@@ -1,4 +1,5 @@
 import os
+import logging
 from datetime import datetime
 
 from reportlab.platypus import (
@@ -18,6 +19,9 @@ from reportlab.platypus.flowables import HRFlowable
 
 from reportlab.lib.units import cm
 from xml.sax.saxutils import escape
+
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_text(value, default=""):
@@ -328,38 +332,69 @@ def generate_visit_sheet(
     elements.append(Spacer(1, 25))
 
     # =========================
-    # FIRMAS
+    # FIRMAS CON FIRMA DIGITAL
     # =========================
 
-    # Tabla con 6 columnas para tener líneas de firma separadas y centradas
-    signature_data = [
-        ["", "", "", "", "", ""],
-        ["", "COMPRADOR", "", "", "AGENTE INMOBILIARIO", ""],
-        ["", "", "", "", "", ""],
-        ["", "", "", "", "", ""],
-    ]
+    signature_data = []
+
+    # Fila 1: Espaciado
+    signature_data.append(["", "", "", "", "", ""])
+
+    # Fila 2: Etiquetas
+    signature_data.append(["", "COMPRADOR", "", "", "AGENTE INMOBILIARIO", ""])
+
+    # Fila 3: Imagen de firma (si existe)
+    if visit.signature_filepath and os.path.exists(visit.signature_filepath):
+        try:
+            # Cargar imagen de firma desde archivo
+            signature_img = Image(visit.signature_filepath)
+            signature_img.drawHeight = 40
+            signature_img.drawWidth = 140
+            signature_data.append(["", signature_img, "", "", "", ""])
+        except Exception as e:
+            logger.error(f"Error loading signature image: {e}")
+            # Si falla la carga, espacio vacío
+            signature_data.append(["", "", "", "", "", ""])
+    else:
+        # Fila vacía si no hay firma
+        signature_data.append(["", "", "", "", "", ""])
+
+    # Fila 4: Línea de firma
+    signature_data.append(["", "", "", "", "", ""])
+
+    # Fila 5: Metadatos de firma
+    if visit.signature_captured_at:
+        signature_date = visit.signature_captured_at.strftime("%d/%m/%Y %H:%M")
+        signature_data.append([
+            "",
+            Paragraph(f"<font size=7>Firmado digitalmente el {signature_date}</font>", body_style),
+            "",
+            "",
+            "",
+            ""
+        ])
+    else:
+        signature_data.append(["", "", "", "", "", ""])
 
     signature_table = Table(
         signature_data,
         colWidths=[40, 155, 40, 40, 155, 40],
-        rowHeights=[15, 15, 35, 5]
+        rowHeights=[15, 15, 50, 5, 20]
     )
 
     signature_table.setStyle(
         TableStyle([
-            ("FONTNAME", (1, 0), (1, 0), "Helvetica"),
-            ("FONTNAME", (4, 0), (4, 0), "Helvetica"),
             ("FONTNAME", (1, 1), (1, 1), "Helvetica-Bold"),
             ("FONTNAME", (4, 1), (4, 1), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), 10),
-            ("ALIGN", (1, 0), (1, 1), "CENTER"),
-            ("ALIGN", (4, 0), (4, 1), "CENTER"),
-            # Línea corta solo para el comprador (columna 1, fila 3)
+            ("ALIGN", (1, 0), (1, -1), "CENTER"),
+            ("ALIGN", (4, 0), (4, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            # Línea de firma para comprador
             ("LINEABOVE", (1, 3), (1, 3), 1, colors.black),
-            # Línea corta solo para el agente (columna 4, fila 3)
+            # Línea de firma para agente
             ("LINEABOVE", (4, 3), (4, 3), 1, colors.black),
             ("TOPPADDING", (0, 3), (-1, 3), 0),
-            # Sin bordes visibles
             ("GRID", (0, 0), (-1, -1), 0, colors.white),
         ])
     )
@@ -426,6 +461,55 @@ def generate_visit_sheet(
             small_style
         )
     )
+
+    elements.append(Spacer(1, 20))
+
+    # =========================
+    # PIE DE PÁGINA CON METADATOS DE VALIDACIÓN LEGAL
+    # =========================
+
+    elements.append(
+        HRFlowable(
+            width="100%",
+            thickness=1,
+            color=colors.HexColor("#CCCCCC")
+        )
+    )
+
+    elements.append(Spacer(1, 10))
+
+    validation_metadata = f"""
+    <b>METADATOS DE VALIDACIÓN LEGAL</b><br/>
+    Documento generado electrónicamente el {datetime.now().strftime("%d/%m/%Y a las %H:%M UTC")}<br/>
+    """
+
+    if visit.data_consent_accepted_at:
+        consent_date = visit.data_consent_accepted_at.strftime("%d/%m/%Y %H:%M")
+        validation_metadata += f"Consentimiento RGPD aceptado el {consent_date}<br/>"
+
+    if visit.signature_captured_at:
+        sig_date = visit.signature_captured_at.strftime("%d/%m/%Y %H:%M")
+        validation_metadata += f"Firma digital capturada el {sig_date}<br/>"
+
+    if visit.data_consent_ip:
+        # Ofuscar IP por privacidad (mostrar solo primeros 2 octetos)
+        ip_parts = visit.data_consent_ip.split('.')
+        if len(ip_parts) == 4:
+            ip_masked = f"{ip_parts[0]}.{ip_parts[1]}.xxx.xxx"
+            validation_metadata += f"IP de validación: {ip_masked}<br/>"
+
+    validation_metadata += f"ID de documento: MOYZA-VISIT-{visit.id}-{property_item.id}<br/>"
+
+    validation_style = ParagraphStyle(
+        "ValidationStyle",
+        parent=styles["BodyText"],
+        fontSize=7,
+        leading=10,
+        textColor=colors.HexColor("#666666"),
+        alignment=TA_LEFT,
+    )
+
+    elements.append(Paragraph(validation_metadata, validation_style))
 
     # =========================
     # BUILD PDF

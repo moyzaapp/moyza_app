@@ -5,7 +5,9 @@ from sqlalchemy import Integer
 from sqlalchemy import String
 from sqlalchemy import Text
 from sqlalchemy import DateTime
+from sqlalchemy import Boolean
 from sqlalchemy import ForeignKey
+from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
@@ -107,6 +109,63 @@ class PropertyVisit(Base):
         nullable=True
     )
 
+    # Campos de consentimiento de datos (RGPD)
+    data_consent_accepted = Column(
+        Boolean,
+        default=False,
+        nullable=False
+    )
+
+    data_consent_accepted_at = Column(
+        DateTime,
+        nullable=True
+    )
+
+    data_consent_ip = Column(
+        String,
+        nullable=True
+    )
+
+    data_consent_user_agent = Column(
+        String,
+        nullable=True
+    )
+
+    # Campos de firma digital
+    signature_filename = Column(
+        String,
+        nullable=True
+    )
+
+    signature_filepath = Column(
+        String,
+        nullable=True
+    )
+
+    signature_captured_at = Column(
+        DateTime,
+        nullable=True
+    )
+
+    signature_ip = Column(
+        String,
+        nullable=True
+    )
+
+    # Estado del proceso de visita
+    # Estados: 'draft', 'preview', 'signed', 'completed'
+    visit_status = Column(
+        String,
+        default='completed',
+        nullable=False
+    )
+
+    # Audit trail completo en formato JSON
+    audit_trail = Column(
+        JSON,
+        nullable=True
+    )
+
     created_by = Column(
         Integer,
         ForeignKey("users.id"),
@@ -120,3 +179,5 @@ class PropertyVisit(Base):
 
     # Relaciones
     property = relationship("Property", back_populates="visits")
+    audit_logs = relationship("VisitAuditLog", back_populates="visit", cascade="all, delete-orphan")
+    otp_verifications = relationship("VisitOTPVerification", back_populates="visit", cascade="all, delete-orphan")

@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+
+{% block title %}
+Vista Previa del Documento - Visita
+{% endblock %}
+
+{% block content %}
+
+<!-- Indicador de progreso -->
+<div class="max-w-4xl mx-auto mb-8">
+    <div class="flex items-center justify-between">
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
+                ✓
+            </div>
+            <span class="text-xs mt-2 text-green-600 font-medium">Datos</span>
+        </div>
+        <div class="flex-1 h-1 bg-blue-500"></div>
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
+                2
+            </div>
+            <span class="text-xs mt-2 text-blue-600 font-medium">Vista Previa</span>
+        </div>
+        <div class="flex-1 h-1 bg-gray-300"></div>
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-bold">
+                3
+            </div>
+            <span class="text-xs mt-2 text-gray-500">Firma</span>
+        </div>
+        <div class="flex-1 h-1 bg-gray-300"></div>
+        <div class="flex flex-col items-center flex-1">
+            <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-bold">
+                4
+            </div>
+            <span class="text-xs mt-2 text-gray-500">Finalizado</span>
+        </div>
+    </div>
+</div>
+
+<!-- Documento simulado (estilo papel) -->
+<div class="max-w-4xl mx-auto bg-white rounded-2xl shadow-2xl p-8 mb-8" id="document-preview">
+
+    <!-- Logo -->
+    {% if logo_exists %}
+    <div class="text-center mb-6">
+        <img src="/static/logo_moyza.png" alt="MOYZA" class="mx-auto" style="max-height: 80px;">
+    </div>
+    {% endif %}
+
+    <!-- Título -->
+    <h1 class="text-2xl font-bold text-center text-gray-800 mb-6">
+        FICHA DE VISITA INMOBILIARIA MOYZA
+    </h1>
+
+    <!-- Fecha y Dirección -->
+    <div class="mb-6 text-sm">
+        <p class="mb-2"><strong>FECHA:</strong> {{ visit_date }}</p>
+        <p><strong>DIRECCIÓN DEL INMUEBLE VISITADO:</strong> {{ property.address }}</p>
+    </div>
+
+    <hr class="my-6 border-gray-300">
+
+    <!-- DATOS DEL COMPRADOR -->
+    <div class="mb-6">
+        <h2 class="text-lg font-bold text-gray-800 mb-4">DATOS DEL COMPRADOR</h2>
+        <table class="w-full text-sm">
+            <tr class="border-b">
+                <td class="py-2 font-semibold w-48">Nombre:</td>
+                <td class="py-2">{{ visit.visitor_name }}</td>
+            </tr>
+            <tr class="border-b">
+                <td class="py-2 font-semibold">DNI:</td>
+                <td class="py-2">{{ visit.dni or 'No especificado' }}</td>
+            </tr>
+            <tr class="border-b">
+                <td class="py-2 font-semibold">Teléfono de contacto:</td>
+                <td class="py-2">{{ visit.phone or 'No especificado' }}</td>
+            </tr>
+            <tr>
+                <td class="py-2 font-semibold">E-mail:</td>
+                <td class="py-2">{{ visit.email or 'No especificado' }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <hr class="my-6 border-gray-300">
+
+    <!-- DATOS DEL INMUEBLE VISITADO -->
+    <div class="mb-6">
+        <h2 class="text-lg font-bold text-gray-800 mb-4">DATOS DEL INMUEBLE VISITADO</h2>
+        <table class="w-full text-sm">
+            <tr class="border-b">
+                <td class="py-2 font-semibold w-48">Tipo de vivienda:</td>
+                <td class="py-2">{{ property.title }}</td>
+            </tr>
+            <tr class="border-b">
+                <td class="py-2 font-semibold">Precio de venta:</td>
+                <td class="py-2">€{{ "{:,.2f}".format(property.price) if property.price else 'No especificado' }}</td>
+            </tr>
+            <tr>
+                <td class="py-2 font-semibold">Honorarios en caso de compra:</td>
+                <td class="py-2">Según condiciones establecidas</td>
+            </tr>
+        </table>
+    </div>
+
+    <hr class="my-6 border-gray-300">
+
+    <!-- FEEDBACK DE LA VISITA -->
+    <div class="mb-6">
+        <h2 class="text-lg font-bold text-gray-800 mb-4">FEEDBACK DE LA VISITA</h2>
+        <table class="w-full text-sm border border-gray-300">
+            <tr class="border-b bg-gray-50">
+                <td class="py-2 px-3 font-semibold w-48">Nivel de interés:</td>
+                <td class="py-2 px-3">{{ visit.interest_level }}/5 {% if visit.interest_level %}{% else %}No especificado{% endif %}</td>
+            </tr>
+            <tr class="border-b">
+                <td class="py-2 px-3 font-semibold">Feedback precio:</td>
+                <td class="py-2 px-3">{{ visit.price_feedback or 'No especificado' }}</td>
+            </tr>
+            <tr class="border-b bg-gray-50">
+                <td class="py-2 px-3 font-semibold">Feedback ubicación:</td>
+                <td class="py-2 px-3">{{ visit.location_feedback or 'No especificado' }}</td>
+            </tr>
+            <tr class="border-b">
+                <td class="py-2 px-3 font-semibold">Feedback estado:</td>
+                <td class="py-2 px-3">{{ visit.condition_feedback or 'No especificado' }}</td>
+            </tr>
+            <tr class="border-b bg-gray-50">
+                <td class="py-2 px-3 font-semibold">Feedback luminosidad:</td>
+                <td class="py-2 px-3">{{ visit.lighting_feedback or 'No especificado' }}</td>
+            </tr>
+            <tr class="border-b">
+                <td class="py-2 px-3 font-semibold">Ascensor:</td>
+                <td class="py-2 px-3">{{ visit.elevator_feedback or 'No especificado' }}</td>
+            </tr>
+            <tr>
+                <td class="py-2 px-3 font-semibold">Garaje:</td>
+                <td class="py-2 px-3">{{ visit.garage_feedback or 'No especificado' }}</td>
+            </tr>
+        </table>
+
+        {% if visit.notes %}
+        <div class="mt-4 p-3 bg-gray-50 rounded">
+            <p class="text-sm"><strong>Observaciones:</strong> {{ visit.notes }}</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <hr class="my-6 border-gray-300">
+
+    <!-- TEXTO LEGAL -->
+    <div class="mb-6 text-xs leading-relaxed text-justify">
+        <h2 class="text-base font-bold text-gray-800 mb-3">TÉRMINOS Y CONDICIONES</h2>
+        <p class="mb-3">
+            El presente documento es emitido por el asesor inmobiliario <strong>{{ agent_name }}</strong>
+            en calidad de representante de la agencia inmobiliaria MOYZA con domicilio fiscal en
+            Avda. Doctor Eduardo García Triviño López 9, 23009 (Jaén).
+        </p>
+        <p class="mb-3">
+            El interesado declara que ha visitado el inmueble con fecha <strong>{{ visit_date }}</strong> a las <strong>{{ visit_time }}</strong> horas
+            con esta agencia y que no lo había visitado antes, acompañado por el agente de la inmobiliaria.
+            Asimismo, reconoce que ha conocido dicho inmueble gracias a la intermediación de la empresa inmobiliaria mencionada,
+            la cual actúa como mediadora en la operación de compraventa. Durante dicha visita "El agente" ha proporcionado
+            información fidedigna y detalles generales sobre el inmueble, condiciones de adquisición, resolviendo todas
+            las dudas y consultas presentadas por el interesado.
+        </p>
+        <p class="mb-3">
+            La visita del inmueble no tiene ningún costo ni honorario para el mismo, pero si el cliente desea comprarla
+            (directamente o a través de familiares, otras inmobiliarias, corredores o empresas relacionadas) se compromete
+            a realizarlo a través de esta agencia y reconoce los honorarios anteriormente reseñados. Los honorarios se
+            abonarán de la siguiente manera: El 50%+IVA a la firma del contrato de compraventa y el 50%+IVA a la firma
+            de Escritura Pública de Compraventa.
+        </p>
+        <p class="mb-3">
+            En caso de interés por parte de "El interesado", en la adquisición del inmueble, este podrá llevar a cabo
+            negociaciones directamente con el propietario, siempre bajo la mediación y asesoramiento de la Inmobiliaria
+            a través del personal correspondiente. Si "El interesado" decide presentar una oferta formal para la adquisición
+            del inmueble, se compromete a gestionar y comunicar dicha intención a través de La Inmobiliaria, reconociendo
+            la relevancia de su intervención en el proceso de visita e información proporcionada.
+        </p>
+        <p>
+            En caso de incumplimiento, acepta abonar a la inmobiliaria los honorarios establecidos por su intermediación.
+        </p>
+    </div>
+
+    <hr class="my-6 border-gray-300">
+
+    <!-- AUTORIZACIÓN RGPD -->
+    <div class="mb-6 text-xs leading-relaxed">
+        <h2 class="text-base font-bold text-gray-800 mb-3">AUTORIZACIÓN DE USO DE DATOS PERSONALES CONFORME AL REGLAMENTO GENERAL DE PROTECCIÓN DE DATOS (RGPD)</h2>
+        <p class="mb-3">
+            En nombre de la empresa Inmobiliaria MOYZA tratamos la información que nos facilita con el fin de prestarles
+            el servicio solicitado y realizar la facturación del mismo. Los datos proporcionados se conservarán mientras
+            se mantenga la relación comercial o durante los meses necesarios para cumplir con las obligaciones legales.
+            Los datos no se cederán a terceros salvo en los casos en que exista una obligación legal. Usted tiene derecho
+            a obtener confirmación sobre si en Inmobiliaria MOYZA estamos tratando sus datos personales, por tanto tiene
+            derecho a acceder a sus datos personales, rectificar los datos inexactos o solicitar su supresión cuando los
+            datos ya no sean necesarios.
+        </p>
+        <p class="mb-3">
+            Asimismo solicito su autorización para ofrecerle productos y servicios relacionados con los solicitados y
+            fidelizarle como cliente.
+        </p>
+        <p class="font-bold">
+            Autorizo a que mis datos sean tratados por Inmobiliaria MOYZA hasta que finalice la operación o se
+            comunique por mi parte rescindir la misma.
+        </p>
+    </div>
+
+    <hr class="my-6 border-gray-400">
+
+    <!-- PIE DE PÁGINA -->
+    <div class="text-xs text-gray-600">
+        <p><strong>Responsable:</strong> Moyza 2012 S.L.</p>
+        <p><strong>C.I.F.:</strong> B16914012</p>
+        <p><strong>Dirección postal:</strong> Avda. Doctor Eduardo García Triviño López 9, 23009 (Jaén)</p>
+        <p><strong>Tlf:</strong> 642 497 955 / 953 940 956</p>
+    </div>
+
+</div>
+
+<!-- Área de aceptación -->
+<div class="max-w-4xl mx-auto bg-gray-50 rounded-2xl p-6 mb-8">
+    <div class="flex items-start gap-4 mb-6">
+        <input
+            type="checkbox"
+            id="rgpd-acceptance"
+            class="w-6 h-6 mt-1 rounded border-gray-300 flex-shrink-0"
+        >
+        <label for="rgpd-acceptance" class="text-sm text-gray-700 cursor-pointer select-none">
+            <span class="font-semibold">He leído y acepto el contenido completo del documento</span>, incluyendo los términos y condiciones de la visita y la
+            <strong>autorización para el tratamiento de mis datos personales conforme al Reglamento General de Protección de Datos (RGPD)</strong>.
+            Entiendo que este documento tendrá validez legal y comercial una vez que lo firme digitalmente.
+        </label>
+    </div>
+
+    <div class="flex justify-between items-center gap-4">
+        <a
+            href="/visits/new/{{ property.id }}"
+            class="px-6 py-3 bg-white border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-100 transition-colors"
+        >
+            ← Volver a Editar Datos
+        </a>
+
+        <button
+            id="continue-to-signature"
+            disabled
+            class="px-8 py-3 bg-gray-400 text-white rounded-xl cursor-not-allowed transition-all"
+        >
+            Continuar a Firma →
+        </button>
+    </div>
+</div>
+
+<script>
+const checkbox = document.getElementById('rgpd-acceptance');
+const continueBtn = document.getElementById('continue-to-signature');
+
+checkbox.addEventListener('change', function() {
+    if (this.checked) {
+        continueBtn.disabled = false;
+        continueBtn.classList.remove('bg-gray-400', 'cursor-not-allowed');
+        continueBtn.classList.add('bg-blue-600', 'hover:bg-blue-700', 'cursor-pointer');
+    } else {
+        continueBtn.disabled = true;
+        continueBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700', 'cursor-pointer');
+        continueBtn.classList.add('bg-gray-400', 'cursor-not-allowed');
+    }
+});
+
+continueBtn.addEventListener('click', async function() {
+    if (!checkbox.checked) {
+        alert('Por favor, acepte los términos antes de continuar');
+        return;
+    }
+
+    // Deshabilitar botón para evitar doble click
+    this.disabled = true;
+    this.textContent = 'Procesando...';
+
+    try {
+        const response = await fetch('/api/v1/visits/{{ visit.id }}/accept-terms', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                accepted: true,
+                timestamp: new Date().toISOString()
+            })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            window.location.href = data.redirect_url;
+        } else {
+            const error = await response.json();
+            alert('Error: ' + (error.detail || 'No se pudo registrar la aceptación'));
+            this.disabled = false;
+            this.textContent = 'Continuar a Firma →';
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error de conexión. Por favor, verifique su internet e inténtelo de nuevo.');
+        this.disabled = false;
+        this.textContent = 'Continuar a Firma →';
+    }
+});
+</script>
+
+{% endblock %}

@@ -114,6 +114,8 @@ async def create_visit(
     request: Request,
     db: Session = Depends(get_db)
 ):
+    from app.services.visit_audit_service import log_visit_event
+
     form = await request.form()
 
     interest_level_raw = form.get("interest_level")
@@ -127,6 +129,7 @@ async def create_visit(
     generate_sheet = form.get("generate_sheet") == "true"
 
     try:
+        # Crear visita en estado 'draft' para seguir el nuevo flujo legal
         visit = PropertyVisit(
             property_id=property_id,
             visitor_name=form.get("visitor_name"),
@@ -141,82 +144,44 @@ async def create_visit(
             elevator_feedback=form.get("elevator_feedback"),
             garage_feedback=form.get("garage_feedback"),
             notes=form.get("notes"),
-            created_by=request.state.user.id
+            created_by=request.state.user.id,
+            visit_status='draft'  # Nuevo flujo: inicia en draft
         )
 
         db.add(visit)
         db.commit()
         db.refresh(visit)
 
-        property_item = db.query(Property).filter(Property.id == property_id).first()
+        # Registrar evento de auditoría
+        log_visit_event(
+            visit=visit,
+            event_type='draft_created',
+            db=db,
+            request=request,
+            event_data={
+                'property_id': property_id,
+                'visitor_name': visit.visitor_name,
+                'generate_sheet': generate_sheet
+            }
+        )
 
-        if generate_sheet and property_item:
-            try:
-                visits_dir = Path("storage/visit_sheets")
-                visits_dir.mkdir(parents=True, exist_ok=True)
+        # Redirigir al preview en vez de generar PDF inmediatamente
+        if generate_sheet:
+            response = RedirectResponse(url=f"/visits/preview/{visit.id}", status_code=302)
+            set_flash(response, "info", "Por favor, revise el documento antes de firmar")
+            return response
 
-                filename = f"ficha_visita_{property_id}_{visit.id}_{uuid4().hex[:8]}.pdf"
-                output_path = visits_dir / filename
+        # El PDF no se genera aquí. Se generará después de que el cliente
+        # revise el documento, acepte términos y firme (nuevo flujo legal)
 
-                generate_visit_sheet(
-                    property_item=property_item,
-                    visit=visit,
-                    agent=property_item.agent,
-                    output_path=str(output_path)
-                )
+        # Si no se solicita generar ficha, comportamiento antiguo (para compatibilidad)
+        if not generate_sheet:
+            visit.visit_status = 'completed'  # Completar directamente sin flujo legal
+            db.commit()
 
-                visit.visit_sheet_filename = filename
-                visit.visit_sheet_filepath = str(output_path)
-                visit.visit_sheet_generated_at = datetime.utcnow()
-                db.commit()
-
-                logger.info("Ficha de visita generada: %s", output_path)
-
-                file_url = settings.public_url(str(output_path))
-
-                sent_to = []
-
-                if visit.phone:
-                    try:
-                        send_report(
-                            phone=visit.phone,
-                            file_url=file_url,
-                            caption=f"Ficha de visita - {property_item.title}"
-                        )
-                        sent_to.append("comprador")
-                        logger.info("Ficha enviada al comprador: %s", visit.phone)
-                    except Exception:
-                        logger.exception("Error enviando ficha al comprador: %s", visit.phone)
-
-                if property_item.agent and property_item.agent.phone:
-                    try:
-                        send_report(
-                            phone=property_item.agent.phone,
-                            file_url=file_url,
-                            caption=f"Ficha de visita - {property_item.title}"
-                        )
-                        sent_to.append("agente")
-                        logger.info("Ficha enviada al agente: %s", property_item.agent.phone)
-                    except Exception:
-                        logger.exception("Error enviando ficha al agente: %s", property_item.agent.phone)
-
-                visit.visit_sheet_sent_to = ", ".join(sent_to) if sent_to else None
-                db.commit()
-
-                if sent_to:
-                    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
-                    set_flash(response, "success", f"Visita registrada y ficha enviada a {' y '.join(sent_to)}")
-                    return response
-                else:
-                    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
-                    set_flash(response, "warning", "Visita registrada, pero no se pudo enviar la ficha (verifique números de teléfono)")
-                    return response
-
-            except Exception:
-                logger.exception("Error generando/enviando ficha de visita: property_id=%s", property_id)
-                response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
-                set_flash(response, "warning", "Visita registrada, pero no se pudo generar/enviar la ficha")
-                return response
+            response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+            set_flash(response, "success", "Visita registrada")
+            return response
 
     except Exception:
         db.rollback()
@@ -224,10 +189,6 @@ async def create_visit(
         response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
         set_flash(response, "error", "Ocurrió un error al registrar la visita")
         return response
-
-    response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
-    set_flash(response, "success", "Visita registrada")
-    return response
 
 
 @router.get("/visits/{visit_id}/download")
@@ -331,6 +292,172 @@ async def send_visit_sheet_whatsapp(
         response = RedirectResponse(url=redirect_url, status_code=302)
         set_flash(response, "error", "No se pudo enviar la ficha (verifique números de teléfono)")
         return response
+
+
+@router.get("/visits/preview/{visit_id}", response_class=HTMLResponse)
+async def preview_visit(
+    visit_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Muestra la vista previa del documento de visita antes de la firma.
+    FASE 2 del nuevo flujo legal.
+    """
+    from app.services.visit_audit_service import log_visit_event
+    from pathlib import Path
+
+    visit = db.query(PropertyVisit).filter(
+        PropertyVisit.id == visit_id
+    ).first()
+
+    if not visit:
+        response = RedirectResponse(url="/visits", status_code=302)
+        set_flash(response, "error", "Visita no encontrada")
+        return response
+
+    property_item = db.query(Property).filter(
+        Property.id == visit.property_id
+    ).first()
+
+    if not property_item:
+        response = RedirectResponse(url="/visits", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
+
+    # Verificar que la visita está en estado draft o preview
+    if visit.visit_status not in ['draft', 'preview']:
+        response = RedirectResponse(url=f"/properties/{property_item.id}", status_code=302)
+        set_flash(response, "warning", "Esta visita ya ha sido procesada")
+        return response
+
+    # Actualizar estado a preview si viene de draft
+    if visit.visit_status == 'draft':
+        visit.visit_status = 'preview'
+        db.commit()
+
+        # Registrar evento de auditoría
+        log_visit_event(
+            visit=visit,
+            event_type='preview_viewed',
+            db=db,
+            request=request,
+            event_data={'viewed_at': datetime.utcnow().isoformat()}
+        )
+
+    # Preparar datos para el template
+    visit_date = visit.created_at.strftime("%d/%m/%Y") if visit.created_at else datetime.now().strftime("%d/%m/%Y")
+    visit_time = visit.created_at.strftime("%H:%M") if visit.created_at else datetime.now().strftime("%H:%M")
+    agent_name = property_item.agent.name if property_item.agent else "Agente MOYZA"
+
+    # Verificar si existe el logo
+    logo_path = Path("app/static/logo_moyza.png")
+    if not logo_path.exists():
+        logo_path = Path("backend/app/static/logo_moyza.png")
+    logo_exists = logo_path.exists()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="visits/preview.html",
+        context={
+            "request": request,
+            "visit": visit,
+            "property": property_item,
+            "visit_date": visit_date,
+            "visit_time": visit_time,
+            "agent_name": agent_name,
+            "logo_exists": logo_exists,
+            "current_user": request.state.user
+        }
+    )
+
+
+@router.get("/visits/signature/{visit_id}", response_class=HTMLResponse)
+async def signature_visit(
+    visit_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Muestra el canvas de firma digital.
+    FASE 3 del nuevo flujo legal.
+    """
+    visit = db.query(PropertyVisit).filter(
+        PropertyVisit.id == visit_id
+    ).first()
+
+    if not visit:
+        response = RedirectResponse(url="/visits", status_code=302)
+        set_flash(response, "error", "Visita no encontrada")
+        return response
+
+    # Verificar que se aceptaron los términos
+    if not visit.data_consent_accepted:
+        response = RedirectResponse(url=f"/visits/preview/{visit_id}", status_code=302)
+        set_flash(response, "warning", "Debe aceptar los términos antes de firmar")
+        return response
+
+    # Verificar que no esté ya firmada
+    if visit.visit_status == 'signed' or visit.visit_status == 'completed':
+        response = RedirectResponse(url=f"/visits/complete/{visit_id}", status_code=302)
+        set_flash(response, "info", "Esta visita ya ha sido firmada")
+        return response
+
+    return templates.TemplateResponse(
+        request=request,
+        name="visits/signature.html",
+        context={
+            "request": request,
+            "visit": visit,
+            "current_user": request.state.user
+        }
+    )
+
+
+@router.get("/visits/complete/{visit_id}", response_class=HTMLResponse)
+async def complete_visit_page(
+    visit_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Página de confirmación que finaliza el proceso y genera el PDF.
+    FASE 4 del nuevo flujo legal.
+    """
+    visit = db.query(PropertyVisit).filter(
+        PropertyVisit.id == visit_id
+    ).first()
+
+    if not visit:
+        response = RedirectResponse(url="/visits", status_code=302)
+        set_flash(response, "error", "Visita no encontrada")
+        return response
+
+    property_item = db.query(Property).filter(
+        Property.id == visit.property_id
+    ).first()
+
+    if not property_item:
+        response = RedirectResponse(url="/visits", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
+
+    # Verificar que tiene firma
+    if not visit.signature_filepath:
+        response = RedirectResponse(url=f"/visits/signature/{visit_id}", status_code=302)
+        set_flash(response, "warning", "Debe firmar antes de continuar")
+        return response
+
+    return templates.TemplateResponse(
+        request=request,
+        name="visits/complete.html",
+        context={
+            "request": request,
+            "visit": visit,
+            "property": property_item,
+            "current_user": request.state.user
+        }
+    )
 
 
 @router.get("/visits/edit/{visit_id}", response_class=HTMLResponse)
