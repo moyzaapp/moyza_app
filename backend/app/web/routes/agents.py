@@ -176,7 +176,7 @@ async def upload_agent_signature(
         )
 
     # Crear directorio de firmas si no existe
-    signatures_dir = "signatures/agents"
+    signatures_dir = "storage/signatures/agents"
     os.makedirs(signatures_dir, exist_ok=True)
 
     # Decodificar base64
