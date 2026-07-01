@@ -1,0 +1,330 @@
+{% extends 'base.html' %}
+
+{% block title %}
+Dashboard de IA - Consumo y Logs
+{% endblock %}
+
+{% block content %}
+
+<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 sm:mb-8">
+    <div>
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">
+            📊 Dashboard de IA
+        </h1>
+        <p class="text-sm sm:text-base text-gray-500 mt-1">
+            Monitoreo de consumo de tokens y costos
+        </p>
+    </div>
+
+    <div class="flex gap-2">
+        <select
+            id="periodFilter"
+            class="border border-gray-300 rounded-lg px-4 py-2 text-sm bg-white"
+            onchange="loadData()"
+        >
+            <option value="7">Últimos 7 días</option>
+            <option value="30" selected>Últimos 30 días</option>
+            <option value="90">Últimos 90 días</option>
+            <option value="365">Último año</option>
+        </select>
+
+        <button
+            onclick="loadData()"
+            class="bg-black hover:bg-gray-800 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+        >
+            🔄 Actualizar
+        </button>
+    </div>
+</div>
+
+<!-- Tarjetas de estadísticas -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+
+    <!-- Total Llamadas -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-gray-500">Total Llamadas</span>
+            <span class="text-2xl">🤖</span>
+        </div>
+        <p class="text-3xl font-bold text-gray-800" id="stat-total-calls">-</p>
+        <p class="text-xs text-gray-500 mt-1">
+            <span id="stat-success-rate" class="text-green-600 font-medium">-</span> tasa de éxito
+        </p>
+    </div>
+
+    <!-- Total Tokens -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-gray-500">Total Tokens</span>
+            <span class="text-2xl">🔢</span>
+        </div>
+        <p class="text-3xl font-bold text-gray-800" id="stat-total-tokens">-</p>
+        <p class="text-xs text-gray-500 mt-1">
+            Input + Output tokens
+        </p>
+    </div>
+
+    <!-- Costo Total -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-gray-500">Costo Total</span>
+            <span class="text-2xl">💰</span>
+        </div>
+        <p class="text-3xl font-bold text-blue-600" id="stat-total-cost">-</p>
+        <p class="text-xs text-gray-500 mt-1">
+            USD estimado
+        </p>
+    </div>
+
+    <!-- Tiempo Promedio -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-gray-500">Tiempo Promedio</span>
+            <span class="text-2xl">⏱️</span>
+        </div>
+        <p class="text-3xl font-bold text-gray-800" id="stat-avg-time">-</p>
+        <p class="text-xs text-gray-500 mt-1">
+            por respuesta
+        </p>
+    </div>
+
+</div>
+
+<!-- Estadísticas por modelo -->
+<div class="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
+    <h2 class="text-lg font-bold text-gray-800 mb-4">📈 Costos por Modelo</h2>
+    <div id="models-stats" class="space-y-3">
+        <div class="text-center text-gray-500 py-8">
+            Cargando estadísticas...
+        </div>
+    </div>
+</div>
+
+<!-- Tabla de logs recientes -->
+<div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+    <div class="p-6 border-b border-gray-200">
+        <div class="flex items-center justify-between">
+            <h2 class="text-lg font-bold text-gray-800">📝 Logs Recientes</h2>
+            <div class="flex gap-2">
+                <select
+                    id="typeFilter"
+                    class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white"
+                    onchange="loadLogs()"
+                >
+                    <option value="">Todos los tipos</option>
+                    <option value="valuation">Valuaciones</option>
+                    <option value="observations">Observaciones</option>
+                </select>
+
+                <select
+                    id="statusFilter"
+                    class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white"
+                    onchange="loadLogs()"
+                >
+                    <option value="">Todos los estados</option>
+                    <option value="success">Exitosos</option>
+                    <option value="error">Errores</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="w-full min-w-[800px]">
+            <thead class="bg-gray-50 border-b border-gray-200">
+                <tr>
+                    <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Fecha</th>
+                    <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Propiedad</th>
+                    <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Tipo</th>
+                    <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Modelo</th>
+                    <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">Tokens</th>
+                    <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">Costo</th>
+                    <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">Tiempo</th>
+                    <th class="px-6 py-3 text-center text-xs font-semibold text-gray-600">Estado</th>
+                </tr>
+            </thead>
+            <tbody id="logs-table-body">
+                <tr>
+                    <td colspan="8" class="px-6 py-8 text-center text-gray-500">
+                        Cargando logs...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Paginación -->
+    <div class="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+        <div class="text-sm text-gray-500">
+            Mostrando <span id="showing-count">0</span> de <span id="total-count">0</span> registros
+        </div>
+        <div class="flex gap-2">
+            <button
+                id="prev-btn"
+                onclick="prevPage()"
+                class="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled
+            >
+                ← Anterior
+            </button>
+            <button
+                id="next-btn"
+                onclick="nextPage()"
+                class="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled
+            >
+                Siguiente →
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentOffset = 0;
+const limit = 20;
+let totalRecords = 0;
+
+// Cargar datos al iniciar
+document.addEventListener('DOMContentLoaded', function() {
+    loadData();
+});
+
+async function loadData() {
+    await loadStats();
+    await loadLogs();
+}
+
+async function loadStats() {
+    const days = document.getElementById('periodFilter').value;
+
+    try {
+        const response = await fetch(`/api/ai-logs/stats/summary?days=${days}`);
+        const data = await response.json();
+
+        // Actualizar tarjetas de estadísticas
+        document.getElementById('stat-total-calls').textContent = data.total_calls.toLocaleString();
+        document.getElementById('stat-success-rate').textContent = `${data.success_rate}%`;
+        document.getElementById('stat-total-tokens').textContent = data.total_tokens.toLocaleString();
+        document.getElementById('stat-total-cost').textContent = `$${data.total_cost_usd.toFixed(4)}`;
+        document.getElementById('stat-avg-time').textContent = `${data.avg_response_time_seconds.toFixed(2)}s`;
+
+        // Actualizar estadísticas por modelo
+        const modelsContainer = document.getElementById('models-stats');
+        if (data.costs_by_model && data.costs_by_model.length > 0) {
+            modelsContainer.innerHTML = data.costs_by_model.map(model => `
+                <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                    <div class="flex-1">
+                        <p class="font-semibold text-sm text-gray-800">${model.model}</p>
+                        <p class="text-xs text-gray-500 mt-1">
+                            ${model.calls} llamadas · ${model.total_tokens.toLocaleString()} tokens
+                        </p>
+                    </div>
+                    <div class="text-right">
+                        <p class="font-bold text-blue-600">$${model.total_cost.toFixed(4)}</p>
+                        <p class="text-xs text-gray-500">$${model.avg_cost_per_call.toFixed(5)}/llamada</p>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            modelsContainer.innerHTML = '<div class="text-center text-gray-500 py-4">No hay datos disponibles</div>';
+        }
+
+    } catch (error) {
+        console.error('Error loading stats:', error);
+        alert('Error al cargar estadísticas');
+    }
+}
+
+async function loadLogs() {
+    const typeFilter = document.getElementById('typeFilter').value;
+    const statusFilter = document.getElementById('statusFilter').value;
+
+    let url = `/api/ai-logs?limit=${limit}&offset=${currentOffset}`;
+    if (typeFilter) url += `&analysis_type=${typeFilter}`;
+    if (statusFilter) url += `&status=${statusFilter}`;
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+
+        totalRecords = data.total;
+
+        // Actualizar tabla
+        const tbody = document.getElementById('logs-table-body');
+        if (data.logs && data.logs.length > 0) {
+            tbody.innerHTML = data.logs.map(log => {
+                const date = new Date(log.created_at);
+                const statusBadge = log.status === 'success'
+                    ? '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">✓ OK</span>'
+                    : '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">✗ Error</span>';
+
+                const typeBadge = log.analysis_type === 'valuation'
+                    ? '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">Valuación</span>'
+                    : '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700">Observaciones</span>';
+
+                return `
+                    <tr class="border-b border-gray-100 hover:bg-gray-50">
+                        <td class="px-6 py-3 text-xs text-gray-700">
+                            ${date.toLocaleDateString('es-ES')} ${date.toLocaleTimeString('es-ES', {hour: '2-digit', minute: '2-digit'})}
+                        </td>
+                        <td class="px-6 py-3 text-xs text-gray-700">
+                            ${log.property_title || `Propiedad #${log.property_id}`}
+                        </td>
+                        <td class="px-6 py-3 text-xs">
+                            ${typeBadge}
+                        </td>
+                        <td class="px-6 py-3 text-xs text-gray-600">
+                            ${log.model_name}
+                        </td>
+                        <td class="px-6 py-3 text-xs text-right text-gray-700">
+                            ${log.total_tokens ? log.total_tokens.toLocaleString() : '-'}
+                        </td>
+                        <td class="px-6 py-3 text-xs text-right font-medium text-blue-600">
+                            ${log.estimated_cost ? `$${log.estimated_cost.toFixed(5)}` : '-'}
+                        </td>
+                        <td class="px-6 py-3 text-xs text-right text-gray-600">
+                            ${log.response_time_seconds ? `${log.response_time_seconds.toFixed(2)}s` : '-'}
+                        </td>
+                        <td class="px-6 py-3 text-center">
+                            ${statusBadge}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        } else {
+            tbody.innerHTML = '<tr><td colspan="8" class="px-6 py-8 text-center text-gray-500">No se encontraron registros</td></tr>';
+        }
+
+        // Actualizar contador y botones de paginación
+        updatePagination(data.logs.length);
+
+    } catch (error) {
+        console.error('Error loading logs:', error);
+        alert('Error al cargar logs');
+    }
+}
+
+function updatePagination(currentCount) {
+    document.getElementById('showing-count').textContent = Math.min(currentOffset + currentCount, totalRecords);
+    document.getElementById('total-count').textContent = totalRecords;
+
+    document.getElementById('prev-btn').disabled = currentOffset === 0;
+    document.getElementById('next-btn').disabled = currentOffset + limit >= totalRecords;
+}
+
+function nextPage() {
+    if (currentOffset + limit < totalRecords) {
+        currentOffset += limit;
+        loadLogs();
+    }
+}
+
+function prevPage() {
+    if (currentOffset >= limit) {
+        currentOffset -= limit;
+        loadLogs();
+    }
+}
+</script>
+
+{% endblock %}

@@ -343,38 +343,55 @@ def generate_visit_sheet(
     # Fila 2: Etiquetas
     signature_data.append(["", "COMPRADOR", "", "", "AGENTE INMOBILIARIO", ""])
 
-    # Fila 3: Imagen de firma (si existe)
+    # Fila 3: Imágenes de firma
+    buyer_signature = ""
+    agent_signature = ""
+
+    # Firma del comprador
     if visit.signature_filepath and os.path.exists(visit.signature_filepath):
         try:
-            # Cargar imagen de firma desde archivo
-            signature_img = Image(visit.signature_filepath)
-            signature_img.drawHeight = 40
-            signature_img.drawWidth = 140
-            signature_data.append(["", signature_img, "", "", "", ""])
+            buyer_signature = Image(visit.signature_filepath)
+            buyer_signature.drawHeight = 40
+            buyer_signature.drawWidth = 140
         except Exception as e:
-            logger.error(f"Error loading signature image: {e}")
-            # Si falla la carga, espacio vacío
-            signature_data.append(["", "", "", "", "", ""])
-    else:
-        # Fila vacía si no hay firma
-        signature_data.append(["", "", "", "", "", ""])
+            logger.error(f"Error loading buyer signature image: {e}")
+            buyer_signature = ""
+
+    # Firma del agente
+    if agent and agent.signature_filepath and os.path.exists(agent.signature_filepath):
+        try:
+            agent_signature = Image(agent.signature_filepath)
+            agent_signature.drawHeight = 40
+            agent_signature.drawWidth = 140
+        except Exception as e:
+            logger.error(f"Error loading agent signature image: {e}")
+            agent_signature = ""
+
+    signature_data.append(["", buyer_signature, "", "", agent_signature, ""])
 
     # Fila 4: Línea de firma
     signature_data.append(["", "", "", "", "", ""])
 
     # Fila 5: Metadatos de firma
+    buyer_signature_date = ""
+    agent_signature_date = ""
+
     if visit.signature_captured_at:
         signature_date = visit.signature_captured_at.strftime("%d/%m/%Y %H:%M")
-        signature_data.append([
-            "",
-            Paragraph(f"<font size=7>Firmado digitalmente el {signature_date}</font>", body_style),
-            "",
-            "",
-            "",
-            ""
-        ])
-    else:
-        signature_data.append(["", "", "", "", "", ""])
+        buyer_signature_date = Paragraph(f"<font size=7>Firmado digitalmente el {signature_date}</font>", body_style)
+
+    if agent and agent.signature_uploaded_at:
+        agent_sig_date = agent.signature_uploaded_at.strftime("%d/%m/%Y %H:%M")
+        agent_signature_date = Paragraph(f"<font size=7>Firmado digitalmente el {agent_sig_date}</font>", body_style)
+
+    signature_data.append([
+        "",
+        buyer_signature_date,
+        "",
+        "",
+        agent_signature_date,
+        ""
+    ])
 
     signature_table = Table(
         signature_data,
