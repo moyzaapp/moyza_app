@@ -1,0 +1,225 @@
+<!-- Modal para firma del agente -->
+<div
+    id="signatureModal"
+    class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4 hidden"
+>
+    <div class="bg-white rounded-2xl p-4 sm:p-6 lg:p-8 w-full max-w-[600px] max-h-[95vh] overflow-y-auto">
+
+        <div class="flex items-center justify-between mb-3 sm:mb-4">
+            <h2 class="text-base sm:text-lg lg:text-xl font-bold text-gray-800">
+                Firma: <span id="agentNameDisplay" class="text-blue-600"></span>
+            </h2>
+            <button
+                type="button"
+                onclick="closeSignatureModal()"
+                class="text-gray-400 hover:text-gray-600 transition-colors text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100"
+            >
+                ✕
+            </button>
+        </div>
+
+        <p class="text-xs sm:text-sm text-gray-600 mb-3 sm:mb-4">
+            Dibuja tu firma. Se incluirá en todos los informes de visita.
+        </p>
+
+        <!-- Canvas para dibujar la firma -->
+        <div class="mb-3 sm:mb-4">
+            <div class="border-2 border-gray-300 rounded-lg bg-gray-50">
+                <canvas
+                    id="signatureCanvas"
+                    width="552"
+                    height="200"
+                    class="cursor-crosshair w-full touch-none"
+                    style="touch-action: none;"
+                ></canvas>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">
+                💡 Usa tu dedo o stylus en móvil, mouse en escritorio
+            </p>
+        </div>
+
+        <!-- Botones de acción -->
+        <div class="flex flex-col sm:flex-row gap-2 sm:gap-3">
+
+            <button
+                type="button"
+                onclick="clearSignature()"
+                class="w-full sm:w-auto bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2.5 rounded-lg transition-colors text-sm font-medium order-3 sm:order-1"
+            >
+                🗑️ Limpiar
+            </button>
+
+            <div class="flex gap-2 sm:gap-3 sm:ml-auto order-1 sm:order-2">
+                <button
+                    type="button"
+                    onclick="closeSignatureModal()"
+                    class="flex-1 sm:flex-none bg-white border-2 border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-lg transition-colors text-sm font-medium"
+                >
+                    Cancelar
+                </button>
+
+                <button
+                    type="button"
+                    onclick="saveSignature()"
+                    class="flex-1 sm:flex-none bg-black hover:bg-gray-800 text-white px-4 py-2.5 rounded-lg transition-colors text-sm font-medium"
+                >
+                    ✓ Guardar
+                </button>
+            </div>
+
+        </div>
+
+    </div>
+</div>
+
+<script>
+    let signatureCanvas;
+    let signatureCtx;
+    let isDrawing = false;
+    let lastX = 0;
+    let lastY = 0;
+    let currentAgentId = null;
+
+    // Inicializar canvas cuando cargue la página
+    document.addEventListener('DOMContentLoaded', function() {
+        signatureCanvas = document.getElementById('signatureCanvas');
+        signatureCtx = signatureCanvas.getContext('2d');
+
+        // Configurar el contexto del canvas
+        signatureCtx.strokeStyle = '#000000';
+        signatureCtx.lineWidth = 2;
+        signatureCtx.lineCap = 'round';
+        signatureCtx.lineJoin = 'round';
+
+        // Eventos de mouse
+        signatureCanvas.addEventListener('mousedown', startDrawing);
+        signatureCanvas.addEventListener('mousemove', draw);
+        signatureCanvas.addEventListener('mouseup', stopDrawing);
+        signatureCanvas.addEventListener('mouseout', stopDrawing);
+
+        // Eventos táctiles para móviles
+        signatureCanvas.addEventListener('touchstart', handleTouchStart);
+        signatureCanvas.addEventListener('touchmove', handleTouchMove);
+        signatureCanvas.addEventListener('touchend', stopDrawing);
+    });
+
+    function openSignatureModal(agentId, agentName) {
+        currentAgentId = agentId;
+        document.getElementById('agentNameDisplay').textContent = agentName;
+        document.getElementById('signatureModal').classList.remove('hidden');
+        clearSignature();
+    }
+
+    function closeSignatureModal() {
+        document.getElementById('signatureModal').classList.add('hidden');
+        currentAgentId = null;
+    }
+
+    function clearSignature() {
+        signatureCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+    }
+
+    function getMousePos(canvas, evt) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        return {
+            x: (evt.clientX - rect.left) * scaleX,
+            y: (evt.clientY - rect.top) * scaleY
+        };
+    }
+
+    function getTouchPos(canvas, evt) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        return {
+            x: (evt.touches[0].clientX - rect.left) * scaleX,
+            y: (evt.touches[0].clientY - rect.top) * scaleY
+        };
+    }
+
+    function startDrawing(e) {
+        isDrawing = true;
+        const pos = getMousePos(signatureCanvas, e);
+        lastX = pos.x;
+        lastY = pos.y;
+    }
+
+    function draw(e) {
+        if (!isDrawing) return;
+
+        e.preventDefault();
+        const pos = getMousePos(signatureCanvas, e);
+
+        signatureCtx.beginPath();
+        signatureCtx.moveTo(lastX, lastY);
+        signatureCtx.lineTo(pos.x, pos.y);
+        signatureCtx.stroke();
+
+        lastX = pos.x;
+        lastY = pos.y;
+    }
+
+    function stopDrawing() {
+        isDrawing = false;
+    }
+
+    function handleTouchStart(e) {
+        e.preventDefault();
+        isDrawing = true;
+        const pos = getTouchPos(signatureCanvas, e);
+        lastX = pos.x;
+        lastY = pos.y;
+    }
+
+    function handleTouchMove(e) {
+        if (!isDrawing) return;
+
+        e.preventDefault();
+        const pos = getTouchPos(signatureCanvas, e);
+
+        signatureCtx.beginPath();
+        signatureCtx.moveTo(lastX, lastY);
+        signatureCtx.lineTo(pos.x, pos.y);
+        signatureCtx.stroke();
+
+        lastX = pos.x;
+        lastY = pos.y;
+    }
+
+    async function saveSignature() {
+        if (!currentAgentId) {
+            alert('Error: No se ha seleccionado ningún agente');
+            return;
+        }
+
+        // Verificar que el canvas no esté vacío
+        const imageData = signatureCtx.getImageData(0, 0, signatureCanvas.width, signatureCanvas.height);
+        const isEmpty = !imageData.data.some(channel => channel !== 0);
+
+        if (isEmpty) {
+            alert('Por favor, dibuja tu firma antes de guardar');
+            return;
+        }
+
+        // Convertir el canvas a base64
+        const signatureData = signatureCanvas.toDataURL('image/png');
+
+        // Crear formulario y enviar
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = `/agents/${currentAgentId}/upload-signature`;
+
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'signature_data';
+        input.value = signatureData;
+
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
+    }
+</script>

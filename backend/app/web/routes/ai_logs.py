@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request, Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from typing import Optional
@@ -10,6 +11,28 @@ from app.models.ai_analysis_log import AIAnalysisLog
 from app.models.property import Property
 
 router = APIRouter()
+
+templates = Jinja2Templates(
+    directory="app/web/templates"
+)
+
+
+@router.get("/ai-logs-dashboard", response_class=HTMLResponse)
+async def ai_logs_dashboard_page(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Página principal del dashboard de logs de IA."""
+    current_user = request.state.user
+
+    return templates.TemplateResponse(
+        request=request,
+        name="ai_logs/dashboard.html",
+        context={
+            "request": request,
+            "current_user": current_user
+        }
+    )
 
 
 @router.get("/api/ai-logs", response_class=JSONResponse)
