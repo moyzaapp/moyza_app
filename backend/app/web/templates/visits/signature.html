@@ -51,7 +51,7 @@ Firma Digital - Visita
 
     <!-- Canvas de firma -->
     <div class="mb-6">
-        <div class="border-2 border-gray-300 rounded-xl overflow-hidden bg-gray-50" style="cursor: crosshair;">
+        <div class="border-2 border-gray-300 rounded-xl overflow-hidden bg-white" style="cursor: crosshair;">
             <canvas id="signature-canvas" width="700" height="250"></canvas>
         </div>
         <p class="text-xs text-gray-500 mt-2">
@@ -101,7 +101,10 @@ const previewImg = document.getElementById('signature-image');
 let isDrawing = false;
 let hasDrawn = false;
 
-// No inicializar con fondo blanco - dejar transparente
+// Inicializar canvas con fondo blanco (importante para la validación)
+ctx.fillStyle = '#FFFFFF';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+
 // Configurar canvas para dibujo
 ctx.strokeStyle = '#000000';
 ctx.lineWidth = 3;  // Aumentado de 2 a 3 para trazos más visibles
@@ -187,8 +190,10 @@ function disableConfirmButton() {
 
 // Limpiar canvas
 clearBtn.addEventListener('click', function() {
-    // Limpiar canvas dejando fondo transparente
+    // Limpiar y rellenar con blanco nuevamente
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     hasDrawn = false;
     disableConfirmButton();
