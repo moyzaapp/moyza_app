@@ -203,6 +203,32 @@
                                 {% for alert in alerts %}
                                 {% set is_locked = not is_admin and alert.id in locked_alert_ids %}
                                 <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors {% if is_locked %}opacity-60{% elif not alert.read_at %}bg-blue-50{% endif %}">
+                                    {% if is_locked %}
+                                    <!-- Alerta en cola: no se renderiza ningún dato del comprador ni de la propiedad -->
+                                    <td class="px-6 py-4 text-sm text-gray-400 italic" colspan="{{ '6' if is_admin else '5' }}">
+                                        Información oculta hasta que se desbloquee esta alerta
+                                    </td>
+
+                                    <td class="px-6 py-4 text-center">
+                                        <span class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">
+                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                                            </svg>
+                                            En cola
+                                        </span>
+                                    </td>
+
+                                    <td class="px-6 py-4 text-sm text-gray-400">—</td>
+
+                                    <td class="px-6 py-4 text-center">
+                                        <span
+                                            title="Registra un seguimiento en la alerta anterior para desbloquear esta"
+                                            class="bg-gray-200 text-gray-500 px-4 py-2 rounded-lg text-sm font-medium cursor-not-allowed"
+                                        >
+                                            Bloqueada
+                                        </span>
+                                    </td>
+                                    {% else %}
                                     <td class="px-6 py-4 text-sm text-gray-700">
                                         <div class="flex flex-col">
                                             <span class="font-medium">{{ alert.property.title }}</span>
@@ -252,14 +278,7 @@
                                     </td>
 
                                     <td class="px-6 py-4 text-center">
-                                        {% if is_locked %}
-                                        <span class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-600">
-                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                                            </svg>
-                                            En cola
-                                        </span>
-                                        {% elif alert.status == AlertStatus.PENDING %}
+                                        {% if alert.status == AlertStatus.PENDING %}
                                         <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
                                             Pendiente
                                         </span>
@@ -284,21 +303,12 @@
 
                                     <td class="px-6 py-4 text-center">
                                         <div class="flex items-center justify-center gap-2">
-                                            {% if is_locked %}
-                                            <span
-                                                title="Registra un seguimiento en la alerta anterior para desbloquear esta"
-                                                class="bg-gray-200 text-gray-500 px-4 py-2 rounded-lg text-sm font-medium cursor-not-allowed"
-                                            >
-                                                Bloqueada
-                                            </span>
-                                            {% else %}
                                             <a
                                                 href="/alerts/{{ alert.id }}"
                                                 class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
                                             >
                                                 Ver Detalle
                                             </a>
-                                            {% endif %}
 
                                             {% if is_admin and alert.status == AlertStatus.COMPLETED %}
                                             <form method="POST" action="/alerts/{{ alert.id }}/reactivate" onsubmit="return confirm('¿Reactivar esta alerta? Volverá a la cola del agente.');" class="inline">
@@ -323,6 +333,7 @@
                                             {% endif %}
                                         </div>
                                     </td>
+                                    {% endif %}
                                 </tr>
                                 {% endfor %}
                             {% else %}
@@ -364,7 +375,6 @@
                         <thead class="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                             <tr>
                                 <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Nombre</th>
-                                <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Teléfono</th>
                                 <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Email</th>
                                 <th class="text-center px-6 py-4 text-sm font-semibold text-gray-600">Alertas</th>
                                 <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Registrado</th>
@@ -382,7 +392,6 @@
                                             {{ buyer.name }}
                                         </a>
                                     </td>
-                                    <td class="px-6 py-4 text-sm text-gray-600">{{ buyer.phone or '-' }}</td>
                                     <td class="px-6 py-4 text-sm text-gray-600">{{ buyer.email or '-' }}</td>
                                     <td class="px-6 py-4 text-center">
                                         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
@@ -409,7 +418,7 @@
                                 {% endfor %}
                             {% else %}
                                 <tr>
-                                    <td colspan="6" class="px-6 py-12 text-center text-gray-500">
+                                    <td colspan="{{ '5' if request.state.user.role.name.lower() == 'admin' else '4' }}" class="px-6 py-12 text-center text-gray-500">
                                         <div class="flex flex-col items-center gap-3">
                                             <svg class="w-10 h-10 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path>
