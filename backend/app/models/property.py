@@ -10,6 +10,8 @@ from sqlalchemy import Numeric
 from sqlalchemy import Date
 from sqlalchemy import DateTime
 from sqlalchemy import Boolean
+from sqlalchemy import func
+from sqlalchemy import or_
 
 from sqlalchemy.orm import relationship
 
@@ -145,3 +147,27 @@ class Property(Base):
         "PropertyVisit",
         back_populates="property"
     )
+
+    # -----------------------------------------------------------------
+    # Disponibilidad: una propiedad es "No disponible" cuando su
+    # estado_inmueble (texto libre) dice "No disponible", sin importar
+    # mayúsculas ni espacios. Por ahora las selecciones de trabajo
+    # (visitas, alertas, informes, envíos automáticos) solo usan las
+    # disponibles.
+    # -----------------------------------------------------------------
+
+    NOT_AVAILABLE_STATE = "no disponible"
+
+    @classmethod
+    def not_available_clause(cls):
+        """Condición SQL: la propiedad está marcada como No disponible."""
+        return func.lower(func.trim(cls.estado_inmueble)) == cls.NOT_AVAILABLE_STATE
+
+    @classmethod
+    def available_clause(cls):
+        """Condición SQL: la propiedad NO está marcada como No disponible."""
+        return or_(cls.estado_inmueble.is_(None), ~cls.not_available_clause())
+
+    @property
+    def is_available(self):
+        return (self.estado_inmueble or "").strip().lower() != self.NOT_AVAILABLE_STATE

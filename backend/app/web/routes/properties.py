@@ -137,10 +137,14 @@ def _build_change_logs(property_obj, new_values: dict, user_id: int, db) -> list
 async def properties_page(
     request: Request,
     tab: str = Query(default="mine"),
+    filtro: str = Query(default=""),
     db: Session = Depends(get_db)
 ):
 
     current_user = request.state.user
+
+    # Filtro por tarjeta: 'activas' | 'no_disponible' | '' (todas)
+    filtro = filtro if filtro in ("activas", "no_disponible") else ""
 
     # Solo el admin puede crear o eliminar propiedades
     can_create = is_admin(current_user)
@@ -169,14 +173,22 @@ async def properties_page(
 
     agents = db.query(Agent).all()
 
+    # Una propiedad No disponible no cuenta como Activa aunque su status sea Activa.
+    is_not_available = Property.not_available_clause()
+    is_active = (Property.status == PropertyStatus.ACTIVE) & Property.available_clause()
+
     # Los contadores reflejan el total del usuario, no el resultado de la búsqueda
-    active_count = base_query.filter(Property.status == PropertyStatus.ACTIVE).count()
-    paused_count = base_query.filter(Property.status == PropertyStatus.PAUSED).count()
-    sold_count = base_query.filter(Property.status == PropertyStatus.SOLD).count()
+    active_count = base_query.filter(is_active).count()
+    not_available_count = base_query.filter(is_not_available).count()
 
     search = (request.query_params.get("search") or "").strip()
 
     filtered_query = base_query
+
+    if filtro == "activas":
+        filtered_query = filtered_query.filter(is_active)
+    elif filtro == "no_disponible":
+        filtered_query = filtered_query.filter(is_not_available)
 
     if search:
         pattern = f"%{search}%"
@@ -216,6 +228,7 @@ async def properties_page(
     if show_others_tab:
         others_base = db.query(Property).filter(
             Property.status == PropertyStatus.ACTIVE,
+            Property.available_clause(),
             or_(Property.agent_id != agent.id, Property.agent_id.is_(None)),
         )
         other_count = others_base.count()
@@ -268,8 +281,8 @@ async def properties_page(
             "agents": agents,
             "current_user": current_user,
             "active_count": active_count,
-            "paused_count": paused_count,
-            "sold_count": sold_count,
+            "not_available_count": not_available_count,
+            "filtro": filtro,
             "search": search,
             "can_create": can_create,
             "can_delete": can_delete,

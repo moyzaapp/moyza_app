@@ -1,3 +1,7 @@
+# Empresas disponibles en los selectores de "Empresa" (usuarios, agentes)
+COMPANIES = ["MOYZA", "MOES PREMIUM"]
+
+
 class PhoneCountryCodes:
     """Indicativos telefónicos disponibles en el selector de país de teléfonos."""
 

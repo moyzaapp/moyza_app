@@ -160,5 +160,23 @@
 
     </div>
 
+    <script>
+    // Selecciona la empresa en un <select> de empresas sin distinguir mayúsculas
+    // ("Moyza" -> "MOYZA"). Si el valor guardado no está en la lista, se añade
+    // como opción para no perderlo al guardar.
+    function selectCompany(select, value) {
+        value = (value || "").trim()
+        if (!value) { select.value = ""; return }
+
+        const match = Array.from(select.options).find(
+            opt => opt.value.toLowerCase() === value.toLowerCase()
+        )
+        if (match) { select.value = match.value; return }
+
+        select.add(new Option(value, value))
+        select.value = value
+    }
+    </script>
+
 </body>
 </html>

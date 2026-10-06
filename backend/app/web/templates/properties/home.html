@@ -36,9 +36,15 @@ Propiedades
 
 </div>
 
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
+{# Tarjetas: cada una filtra la tabla; un segundo clic quita el filtro #}
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6 sm:mb-8">
 
-    <div class="bg-white rounded-2xl p-4 sm:p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+    <a
+        href="{{ '/properties' if filtro == 'activas' else '/properties?filtro=activas' }}"
+        title="{{ 'Quitar filtro' if filtro == 'activas' else 'Ver solo propiedades activas' }}"
+        class="block bg-white rounded-2xl p-4 sm:p-6 border-2 hover:shadow-lg transition-all
+               {% if filtro == 'activas' %}border-green-500 ring-2 ring-green-100{% else %}border-gray-200 hover:border-green-300{% endif %}"
+    >
 
         <div class="flex items-center justify-between">
             <div>
@@ -58,51 +64,34 @@ Propiedades
             </div>
         </div>
 
-    </div>
+    </a>
 
-    <div class="bg-white rounded-2xl p-4 sm:p-6 border border-gray-200 hover:shadow-lg transition-shadow">
-
-        <div class="flex items-center justify-between">
-            <div>
-                <p class="text-gray-500 text-xs sm:text-sm">
-                    Pausadas
-                </p>
-
-                <h2 class="text-2xl sm:text-3xl font-bold text-yellow-600 mt-1 sm:mt-2">
-                    {{ paused_count }}
-                </h2>
-            </div>
-
-            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-yellow-100 flex items-center justify-center">
-                <svg class="w-5 h-5 sm:w-6 sm:h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-            </div>
-        </div>
-
-    </div>
-
-    <div class="bg-white rounded-2xl p-4 sm:p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+    <a
+        href="{{ '/properties' if filtro == 'no_disponible' else '/properties?filtro=no_disponible' }}"
+        title="{{ 'Quitar filtro' if filtro == 'no_disponible' else 'Ver solo propiedades no disponibles' }}"
+        class="block bg-white rounded-2xl p-4 sm:p-6 border-2 hover:shadow-lg transition-all
+               {% if filtro == 'no_disponible' %}border-gray-500 ring-2 ring-gray-100{% else %}border-gray-200 hover:border-gray-400{% endif %}"
+    >
 
         <div class="flex items-center justify-between">
             <div>
                 <p class="text-gray-500 text-xs sm:text-sm">
-                    Vendidas
+                    No disponibles
                 </p>
 
-                <h2 class="text-2xl sm:text-3xl font-bold text-red-600 mt-1 sm:mt-2">
-                    {{ sold_count }}
+                <h2 class="text-2xl sm:text-3xl font-bold text-gray-600 mt-1 sm:mt-2">
+                    {{ not_available_count }}
                 </h2>
             </div>
 
-            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-red-100 flex items-center justify-center">
-                <svg class="w-5 h-5 sm:w-6 sm:h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-100 flex items-center justify-center">
+                <svg class="w-5 h-5 sm:w-6 sm:h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
                 </svg>
             </div>
         </div>
 
-    </div>
+    </a>
 
 </div>
 
