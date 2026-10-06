@@ -146,15 +146,16 @@ def _build_change_logs(property_obj, new_values: dict, user_id: int, db) -> list
 async def properties_page(
     request: Request,
     tab: str = Query(default="mine"),
-    filtro: str = Query(default=""),
+    filtro: str = Query(default="activas"),
     db: Session = Depends(get_db)
 ):
 
     current_user = request.state.user
     company = get_active_company(request)
 
-    # Filtro por tarjeta: 'activas' | 'no_disponible' | '' (todas)
-    filtro = filtro if filtro in ("activas", "no_disponible") else ""
+    # Filtro por tarjeta: 'activas' (por defecto) | 'no_disponible'.
+    # Por ahora no se ofrece una vista con todas las propiedades.
+    filtro = filtro if filtro in ("activas", "no_disponible") else "activas"
 
     # Solo el admin puede crear o eliminar propiedades
     can_create = is_admin(current_user)
