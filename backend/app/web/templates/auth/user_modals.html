@@ -78,13 +78,16 @@
                 <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
                     Empresa <span class="text-gray-400 font-normal">(opcional)</span>
                 </label>
-                <input
-                    type="text"
+                <select
                     id="edit_company"
                     name="company"
                     class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                    placeholder="Moyza"
                 >
+                    <option value="">Sin empresa</option>
+                    {% for company in companies %}
+                    <option value="{{ company }}">{{ company }}</option>
+                    {% endfor %}
+                </select>
             </div>
 
             <div class="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3">
@@ -192,7 +195,7 @@ function editUser(id, fullName, email, phone, company, roleId) {
     document.getElementById("edit_email_display").value = email
     document.getElementById("edit_full_name").value = fullName
     document.getElementById("edit_phone").value = phone
-    document.getElementById("edit_company").value = company
+    selectCompany(document.getElementById("edit_company"), company)
     document.getElementById("edit_role_id").value = roleId
 
     const modal = document.getElementById("userEditModal")

@@ -78,7 +78,10 @@ async def select_property(
 
     current_user = request.state.user
 
-    properties_query = db.query(Property).filter(Property.status != PropertyStatus.ARCHIVED)
+    properties_query = db.query(Property).filter(
+        Property.status != PropertyStatus.ARCHIVED,
+        Property.available_clause()
+    )
 
     # Si no es admin, filtrar solo sus propiedades
     if not is_admin(current_user):
@@ -118,6 +121,11 @@ async def new_visit(
         set_flash(response, "error", "Propiedad no encontrada")
         return response
 
+    if not property_item.is_available:
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "error", "No se pueden registrar visitas en una propiedad No disponible")
+        return response
+
     return templates.TemplateResponse(
         request=request,
         name="properties/visit_form.html",
@@ -138,6 +146,13 @@ async def create_visit(
     db: Session = Depends(get_db)
 ):
     from app.services.visit_audit_service import log_visit_event
+
+    property_item = db.query(Property).filter(Property.id == property_id).first()
+
+    if not property_item or not property_item.is_available:
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "error", "No se pueden registrar visitas en una propiedad No disponible")
+        return response
 
     form = await request.form()
 

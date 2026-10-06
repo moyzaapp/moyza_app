@@ -114,12 +114,16 @@
                     Empresa <span class="text-gray-400 font-normal">(opcional)</span>
                 </label>
 
-                <input
-                    type="text"
+                <select
                     id="company"
                     name="company"
                     class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
                 >
+                    <option value="">Sin empresa</option>
+                    {% for company in companies %}
+                    <option value="{{ company }}">{{ company }}</option>
+                    {% endfor %}
+                </select>
 
             </div>
 
@@ -208,7 +212,7 @@ function editAgent(id, name, email, dni, phone, zone, company, signaturePath, si
 
     document.getElementById("zone").value = zone || ""
 
-    document.getElementById("company").value = company || ""
+    selectCompany(document.getElementById("company"), company)
 
     // Mostrar firma si existe
     if (signaturePath) {

@@ -576,6 +576,7 @@ async def search_properties(
         db.query(Property)
         .filter(
             Property.status != PropertyStatus.ARCHIVED,
+            Property.available_clause(),
             Property.agent_id.isnot(None),
             or_(
                 Property.title.ilike(like),
@@ -733,6 +734,12 @@ async def create_alert(
         db.rollback()
         response = RedirectResponse(url="/alerts", status_code=302)
         set_flash(response, "error", "Propiedad no encontrada")
+        return response
+
+    if not property_item.is_available:
+        db.rollback()
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "La propiedad está marcada como No disponible")
         return response
 
     if not property_item.agent_id:
@@ -1293,9 +1300,10 @@ async def alerts_dashboard(
 # ---------------------------------------------------------------------------
 
 def _build_matching_properties(criteria: BuyerSearchCriteria, db: Session):
-    """Filtra propiedades activas que cumplen todos los criterios definidos."""
+    """Filtra propiedades activas y disponibles que cumplen todos los criterios definidos."""
     query = db.query(Property).filter(
         Property.status == PropertyStatus.ACTIVE,
+        Property.available_clause(),
         Property.agent_id.isnot(None),
     )
 

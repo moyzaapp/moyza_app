@@ -4,6 +4,10 @@
 
         <form method="GET" action="/properties" class="flex items-center gap-3">
 
+            {% if filtro %}
+            <input type="hidden" name="filtro" value="{{ filtro }}">
+            {% endif %}
+
             <input
                 type="text"
                 name="search"
@@ -15,7 +19,7 @@
             {% if search %}
 
             <a
-                href="/properties"
+                href="/properties{{ '?filtro=' ~ filtro if filtro else '' }}"
                 class="text-xs sm:text-sm text-gray-500 hover:text-gray-800 whitespace-nowrap"
             >
                 Limpiar
@@ -24,6 +28,25 @@
             {% endif %}
 
         </form>
+
+        {% if filtro %}
+
+        <div class="mt-3 flex items-center gap-2 text-xs sm:text-sm">
+            <span class="text-gray-500">Mostrando:</span>
+            <span class="px-3 py-1 rounded-full font-medium
+                {% if filtro == 'activas' %}bg-green-100 text-green-700{% else %}bg-gray-200 text-gray-700{% endif %}">
+                {{ 'Activas' if filtro == 'activas' else 'No disponibles' }}
+                · {{ properties | length }}
+            </span>
+            <a
+                href="/properties{{ '?search=' ~ (search | urlencode) if search else '' }}"
+                class="text-blue-600 hover:text-blue-800 hover:underline"
+            >
+                Ver todas
+            </a>
+        </div>
+
+        {% endif %}
 
     </div>
 
@@ -238,6 +261,10 @@
 
                     {% if search %}
                     No se encontraron propiedades para "{{ search }}"
+                    {% elif filtro == 'no_disponible' %}
+                    No hay propiedades marcadas como "No disponible" en el estado del inmueble
+                    {% elif filtro == 'activas' %}
+                    No hay propiedades activas
                     {% else %}
                     Aún no hay propiedades registradas
                     {% endif %}

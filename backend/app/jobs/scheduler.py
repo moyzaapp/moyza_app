@@ -41,7 +41,8 @@ def check_automatic_reports():
             db.query(Property)
             .filter(
                 Property.auto_send_report == True,
-                Property.status == PropertyStatus.ACTIVE
+                Property.status == PropertyStatus.ACTIVE,
+                Property.available_clause()
             )
             .all()
         )

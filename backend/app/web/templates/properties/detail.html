@@ -53,7 +53,8 @@ Detalle Propiedad
 
     <!-- Botones de acción - stack en móvil, fila en desktop -->
     <div class="flex flex-col sm:flex-row gap-3 sm:gap-2">
-        <!-- Botón de registrar visita -->
+        <!-- Botón de registrar visita (deshabilitado si la propiedad está No disponible) -->
+        {% if property.is_available %}
         <a
             href="/visits/new/{{ property.id }}"
             class="bg-black text-white px-4 py-3 rounded-xl hover:bg-gray-800 active:bg-gray-900 transition-colors text-center font-medium flex items-center justify-center gap-2"
@@ -63,6 +64,17 @@ Detalle Propiedad
             </svg>
             Registrar visita
         </a>
+        {% else %}
+        <span
+            title="La propiedad está marcada como No disponible"
+            class="bg-gray-200 text-gray-500 px-4 py-3 rounded-xl text-center font-medium flex items-center justify-center gap-2 cursor-not-allowed"
+        >
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Registrar visita
+        </span>
+        {% endif %}
 
         <!-- Botón de registrar actividad -->
         <button

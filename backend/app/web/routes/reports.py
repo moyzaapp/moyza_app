@@ -44,15 +44,20 @@ async def reports_page(
 
     # Si es admin, mostrar todos los informes y propiedades
     # Si es agente, mostrar solo informes de sus propiedades
+    # El selector para subir informes solo ofrece propiedades disponibles;
+    # el listado de informes ya subidos se mantiene completo.
     if is_admin(current_user):
         reports = db.query(Report).all()
-        properties = db.query(Property).all()
+        properties = db.query(Property).filter(Property.available_clause()).all()
     else:
         agent = get_agent_from_user(current_user, db)
         if agent:
             # Filtrar informes por propiedades del agente
             reports = db.query(Report).join(Property).filter(Property.agent_id == agent.id).all()
-            properties = db.query(Property).filter(Property.agent_id == agent.id).all()
+            properties = db.query(Property).filter(
+                Property.agent_id == agent.id,
+                Property.available_clause()
+            ).all()
         else:
             reports = []
             properties = []
