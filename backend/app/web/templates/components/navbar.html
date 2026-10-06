@@ -13,9 +13,20 @@
             </svg>
         </button>
 
-        <div class="w-10 h-10 rounded-full bg-black text-white flex items-center justify-center font-bold flex-shrink-0">
+        <div
+            class="w-10 h-10 rounded-full text-white flex items-center justify-center font-bold flex-shrink-0"
+            style="background-color: {{ brand_color }}"
+        >
             {{ current_user.full_name[0] }}
         </div>
+
+        <!-- Empresa activa en móvil (el sidebar está oculto) -->
+        <span
+            class="lg:hidden text-xs font-semibold px-2 py-1 rounded-full text-white"
+            style="background-color: {{ brand_color }}"
+        >
+            {{ brand_name }}
+        </span>
 
         <div class="hidden sm:block">
             <p class="font-semibold text-gray-800 text-sm lg:text-base">

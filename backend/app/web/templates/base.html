@@ -10,12 +10,12 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="MOYZA">
-    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-title" content="{{ brand_name }}">
+    <meta name="theme-color" content="{{ brand_color }}">
 
     <title>
         {% block title %}
-        MOYZA
+        {{ brand_name }}
         {% endblock %}
     </title>
 
@@ -154,27 +154,19 @@
 
         <footer class="mt-auto px-4 sm:px-6 lg:px-8 py-4 border-t border-gray-200">
             <p class="text-center text-xs text-gray-400">
-                &copy; {{ current_year() }} MOYZA. Todos los derechos reservados.
+                &copy; {{ current_year() }} {{ brand_name }}. Todos los derechos reservados.
             </p>
         </footer>
 
     </div>
 
     <script>
-    // Selecciona la empresa en un <select> de empresas sin distinguir mayúsculas
-    // ("Moyza" -> "MOYZA"). Si el valor guardado no está en la lista, se añade
-    // como opción para no perderlo al guardar.
-    function selectCompany(select, value) {
-        value = (value || "").trim()
-        if (!value) { select.value = ""; return }
-
-        const match = Array.from(select.options).find(
-            opt => opt.value.toLowerCase() === value.toLowerCase()
-        )
-        if (match) { select.value = match.value; return }
-
-        select.add(new Option(value, value))
-        select.value = value
+    // Marca los checkboxes de empresa de un formulario (ver company_macros.html).
+    // `prefix` es el id_prefix del macro; `ids` la lista de ids de empresa.
+    function setCompanyChecks(prefix, ids) {
+        const wanted = new Set((ids || []).map(String))
+        document.querySelectorAll(`[data-company-group="${prefix}"] input[name="company_ids"]`)
+            .forEach(cb => { cb.checked = wanted.has(cb.value) })
     }
     </script>
 
