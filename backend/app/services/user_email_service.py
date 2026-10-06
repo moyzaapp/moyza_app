@@ -6,6 +6,9 @@ from app.services.gmail_service import GmailService
 
 logger = logging.getLogger(__name__)
 
+# Marca por defecto de los correos de cuenta cuando no se indica empresa
+DEFAULT_COMPANY_NAME = "MOYZA"
+
 
 def _build_welcome_email_body(
     full_name: str,
@@ -13,6 +16,7 @@ def _build_welcome_email_body(
     password: str,
     login_url: str,
     role_name: Optional[str] = None,
+    company_name: str = DEFAULT_COMPANY_NAME,
 ) -> str:
 
     role_row = ""
@@ -25,9 +29,9 @@ def _build_welcome_email_body(
 
     return f"""
     <html><body style="font-family:Arial,sans-serif;color:#333;max-width:680px;margin:auto;">
-      <h2 style="color:#0E567B;">Bienvenido a Moyza</h2>
+      <h2 style="color:#0E567B;">Bienvenido a {company_name}</h2>
       <p>Hola <strong>{full_name}</strong>,</p>
-      <p>Se ha creado tu cuenta en el sistema Moyza. Estos son tus datos de acceso:</p>
+      <p>Se ha creado tu cuenta en el sistema {company_name}. Estos son tus datos de acceso:</p>
       <table style="width:100%;border-collapse:collapse;margin-top:16px;background:#f7f9fa;">
         <tbody>
           <tr>
@@ -52,7 +56,7 @@ def _build_welcome_email_body(
         y no compartas este correo con nadie.
       </p>
       <p style="margin-top:24px;font-size:13px;color:#888;">
-        Este es un correo automático del sistema Moyza.
+        Este es un correo automático del sistema {company_name}.
       </p>
     </body></html>
     """
@@ -64,8 +68,12 @@ def send_welcome_email(
     password: str,
     role_name: Optional[str] = None,
     gmail_service: Optional[GmailService] = None,
+    company_name: Optional[str] = None,
 ) -> bool:
     """Envía al usuario recién creado sus credenciales de acceso.
+
+    `company_name` es la empresa desde la que el admin crea al usuario
+    (MOYZA o MOES PREMIUM); por defecto MOYZA.
 
     Nunca lanza: cualquier fallo se registra y se devuelve False, de modo que
     un problema de correo no interrumpa la creación del usuario.
@@ -87,11 +95,12 @@ def send_welcome_email(
             password=password,
             login_url=settings.public_url("/"),
             role_name=role_name,
+            company_name=company_name or DEFAULT_COMPANY_NAME,
         )
 
         return service.send_email(
             to=email,
-            subject="Bienvenido a Moyza — Datos de acceso",
+            subject=f"Bienvenido a {company_name or DEFAULT_COMPANY_NAME} — Datos de acceso",
             html_body=body,
         )
 
@@ -105,13 +114,14 @@ def _build_password_changed_email_body(
     email: str,
     password: str,
     login_url: str,
+    company_name: str = DEFAULT_COMPANY_NAME,
 ) -> str:
 
     return f"""
     <html><body style="font-family:Arial,sans-serif;color:#333;max-width:680px;margin:auto;">
       <h2 style="color:#0E567B;">Tu contraseña ha sido actualizada</h2>
       <p>Hola <strong>{full_name}</strong>,</p>
-      <p>Un administrador ha restablecido la contraseña de tu cuenta en Moyza.
+      <p>Un administrador ha restablecido la contraseña de tu cuenta en {company_name}.
          Estos son tus nuevos datos de acceso:</p>
       <table style="width:100%;border-collapse:collapse;margin-top:16px;background:#f7f9fa;">
         <tbody>
@@ -137,7 +147,7 @@ def _build_password_changed_email_body(
         administrador del sistema. No compartas este correo con nadie.
       </p>
       <p style="margin-top:24px;font-size:13px;color:#888;">
-        Este es un correo automático del sistema Moyza.
+        Este es un correo automático del sistema {company_name}.
       </p>
     </body></html>
     """
@@ -148,6 +158,7 @@ def send_password_changed_email(
     full_name: str,
     password: str,
     gmail_service: Optional[GmailService] = None,
+    company_name: Optional[str] = None,
 ) -> bool:
     """Notifica al usuario su nueva contraseña tras un cambio administrativo.
 
@@ -169,11 +180,12 @@ def send_password_changed_email(
             email=email,
             password=password,
             login_url=settings.public_url("/"),
+            company_name=company_name or DEFAULT_COMPANY_NAME,
         )
 
         return service.send_email(
             to=email,
-            subject="Moyza — Tu contraseña ha sido actualizada",
+            subject=f"{company_name or DEFAULT_COMPANY_NAME} — Tu contraseña ha sido actualizada",
             html_body=body,
         )
 
