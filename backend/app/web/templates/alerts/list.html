@@ -232,7 +232,7 @@
                                     <td class="px-6 py-4 text-sm text-gray-700">
                                         <div class="flex flex-col">
                                             <span class="font-medium">{{ alert.property.title }}</span>
-                                            <span class="text-xs text-gray-500">{{ alert.property.address }}</span>
+                                            <span class="text-xs text-gray-500">{{ (alert.property.address or '').split(',')[0] }}</span>
                                         </div>
                                     </td>
 

@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -29,6 +30,9 @@ from app.services.visit_whatsapp_log_service import log_whatsapp_attempt
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Importe de honorarios: dígitos con separadores opcionales (2500, 2.500, 2500,50)
+PURCHASE_FEES_PATTERN = re.compile(r"\d[\d.,]*")
 
 
 
@@ -152,12 +156,17 @@ async def create_visit(
     phone = f"{phone_country_code}{phone_number_digits}" if phone_number_digits else ""
 
     visitor_name = (form.get("visitor_name") or "").strip()
-    purchase_fees = (form.get("purchase_fees") or "").strip()
+    purchase_fees = PropertyVisit.clean_purchase_fees(form.get("purchase_fees"))
     notes = (form.get("notes") or "").strip()
 
     if not visitor_name or not phone or not purchase_fees or not notes:
         response = RedirectResponse(url=f"/visits/new/{property_id}", status_code=302)
         set_flash(response, "error", "Nombre, teléfono, honorarios y observaciones son obligatorios")
+        return response
+
+    if not PURCHASE_FEES_PATTERN.fullmatch(purchase_fees):
+        response = RedirectResponse(url=f"/visits/new/{property_id}", status_code=302)
+        set_flash(response, "error", "Los honorarios deben ser solo el importe (ej: 2500)")
         return response
 
     try:
@@ -600,12 +609,17 @@ async def update_visit(
     phone = f"{phone_country_code}{phone_number_digits}" if phone_number_digits else ""
 
     visitor_name = (form.get("visitor_name") or "").strip()
-    purchase_fees = (form.get("purchase_fees") or "").strip()
+    purchase_fees = PropertyVisit.clean_purchase_fees(form.get("purchase_fees"))
     notes = (form.get("notes") or "").strip()
 
     if not visitor_name or not phone or not purchase_fees or not notes:
         response = RedirectResponse(url=f"/visits/edit/{visit_id}", status_code=302)
         set_flash(response, "error", "Nombre, teléfono, honorarios y observaciones son obligatorios")
+        return response
+
+    if not PURCHASE_FEES_PATTERN.fullmatch(purchase_fees):
+        response = RedirectResponse(url=f"/visits/edit/{visit_id}", status_code=302)
+        set_flash(response, "error", "Los honorarios deben ser solo el importe (ej: 2500)")
         return response
 
     try:

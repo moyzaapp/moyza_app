@@ -32,14 +32,14 @@
     <!-- Scroll horizontal en móvil y vertical cuando hay muchas propiedades -->
     <div class="overflow-x-auto overflow-y-auto max-h-[60vh] -mx-px">
 
-    <table class="w-full min-w-[800px]">
+    <table class="js-sortable w-full min-w-[800px]">
 
         <thead class="bg-gray-50 border-b border-gray-200">
 
             <tr>
 
-                <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
-                    Propiedad
+                <th data-sort-type="text" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap cursor-pointer select-none hover:text-gray-900">
+                    Propiedad <span class="sort-indicator text-gray-400">↕</span>
                 </th>
 
                 <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
@@ -54,8 +54,8 @@
                     Operación
                 </th>
 
-                <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
-                    Valor
+                <th data-sort-type="number" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap cursor-pointer select-none hover:text-gray-900">
+                    Valor <span class="sort-indicator text-gray-400">↕</span>
                 </th>
 
                 <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
@@ -66,8 +66,8 @@
                     Estado
                 </th>
 
-                <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
-                    Agente asignado
+                <th data-sort-type="text" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap cursor-pointer select-none hover:text-gray-900">
+                    Agente asignado <span class="sort-indicator text-gray-400">↕</span>
                 </th>
 
             </tr>
@@ -80,7 +80,7 @@
 
             <tr class="border-b border-gray-100 hover:bg-gray-50">
 
-                <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
+                <td data-sort-value="{{ property.title or '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
                     <div class="flex flex-col">
                         <span class="font-medium">{{ property.title }}</span>
                         <span class="text-xs text-gray-500">{{ property.address or '-' }}</span>
@@ -104,7 +104,7 @@
                     </span>
                 </td>
 
-                <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm whitespace-nowrap">
+                <td data-sort-value="{{ property.price if property.price is not none else '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm whitespace-nowrap">
                     {% if property.price is not none %}
                         {{ property.moneda or '' }} {{ "{:,.0f}".format(property.price) }}
                     {% else %}
@@ -140,7 +140,7 @@
                     </span>
                 </td>
 
-                <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm text-gray-600">
+                <td data-sort-value="{{ property.agent_name or '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm text-gray-600">
                     {{ property.agent_name or 'Sin asignar' }}
                 </td>
 

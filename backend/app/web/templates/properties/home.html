@@ -146,4 +146,56 @@ Propiedades
 
 {% include 'properties/form.html' %}
 
+<script>
+// Ordenar por columna al hacer clic en los encabezados marcados con data-sort-type.
+// Las filas sin valor (data-sort-value vacío) quedan siempre al final.
+document.querySelectorAll('table.js-sortable').forEach(function (table) {
+    var headers = Array.prototype.slice.call(table.querySelectorAll('thead th'));
+    var tbody = table.querySelector('tbody');
+
+    headers.forEach(function (th, colIndex) {
+        var type = th.dataset.sortType;
+        if (!type) return;
+
+        th.addEventListener('click', function () {
+            // Primer clic: Valor de mayor a menor; texto de A a Z
+            var dir = th.dataset.sortDir === 'asc' ? 'desc'
+                    : th.dataset.sortDir === 'desc' ? 'asc'
+                    : (type === 'number' ? 'desc' : 'asc');
+
+            headers.forEach(function (h) {
+                delete h.dataset.sortDir;
+                var ind = h.querySelector('.sort-indicator');
+                if (ind) { ind.textContent = '↕'; ind.classList.add('text-gray-400'); }
+            });
+            th.dataset.sortDir = dir;
+            var indicator = th.querySelector('.sort-indicator');
+            indicator.textContent = dir === 'asc' ? '↑' : '↓';
+            indicator.classList.remove('text-gray-400');
+
+            var rows = Array.prototype.filter.call(tbody.rows, function (row) {
+                return row.cells.length === headers.length;
+            });
+
+            rows.sort(function (a, b) {
+                var va = a.cells[colIndex].dataset.sortValue || '';
+                var vb = b.cells[colIndex].dataset.sortValue || '';
+
+                if (va === '' && vb === '') return 0;
+                if (va === '') return 1;
+                if (vb === '') return -1;
+
+                var cmp = type === 'number'
+                    ? parseFloat(va) - parseFloat(vb)
+                    : va.localeCompare(vb, 'es', { numeric: true, sensitivity: 'base' });
+
+                return dir === 'asc' ? cmp : -cmp;
+            });
+
+            rows.forEach(function (row) { tbody.appendChild(row); });
+        });
+    });
+});
+</script>
+
 {% endblock %}

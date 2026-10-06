@@ -101,7 +101,7 @@ Vista Previa del Documento - Visita
             </tr>
             <tr>
                 <td class="py-2 font-semibold">Honorarios en caso de compra:</td>
-                <td class="py-2">{{ '€' + visit.purchase_fees if visit.purchase_fees else 'Según condiciones establecidas' }}</td>
+                <td class="py-2">{{ visit.purchase_fees_display or 'Según condiciones establecidas' }}</td>
             </tr>
         </table>
     </div>
