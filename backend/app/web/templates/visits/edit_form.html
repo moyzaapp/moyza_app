@@ -141,11 +141,18 @@ Editar visita
                 <input
                     type="text"
                     name="purchase_fees"
-                    placeholder="Ej: 2500 + IVA"
-                    value="{{ visit.purchase_fees or '' }}"
+                    inputmode="decimal"
+                    pattern="\d[\d.,]*"
+                    title="Escribe solo el importe, el IVA se añade automáticamente"
+                    oninput="this.value = this.value.replace(/[^\d.,]/g, '')"
+                    placeholder="Ej: 2500"
+                    value="{{ visit.clean_purchase_fees(visit.purchase_fees) }}"
                     required
-                    class="w-full border border-gray-300 p-3 pl-7 rounded-xl"
+                    class="w-full border border-gray-300 p-3 pl-7 pr-20 rounded-xl"
                 >
+                <span class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500">
+                    + IVA
+                </span>
             </div>
 
         </div>

@@ -210,7 +210,7 @@ def generate_visit_sheet(
     property_data = [
         ["Tipo de vivienda:", _safe_text(property_item.title)],
         ["Precio de venta:", f"€{property_item.price:,.2f}" if property_item.price else "No especificado"],
-        ["Honorarios en caso de compra:", _safe_text(f"€{visit.purchase_fees}" if visit.purchase_fees else None, "Según condiciones establecidas")],
+        ["Honorarios en caso de compra:", _safe_text(visit.purchase_fees_display, "Según condiciones establecidas")],
     ]
 
     property_table = Table(

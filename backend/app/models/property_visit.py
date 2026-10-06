@@ -1,3 +1,5 @@
+import builtins
+import re
 from datetime import datetime
 
 from sqlalchemy import Column
@@ -184,6 +186,21 @@ class PropertyVisit(Base):
 
     # Relaciones
     property = relationship("Property", back_populates="visits")
+    creator = relationship("User")
     audit_logs = relationship("VisitAuditLog", back_populates="visit", cascade="all, delete-orphan")
     otp_verifications = relationship("VisitOTPVerification", back_populates="visit", cascade="all, delete-orphan")
     whatsapp_logs = relationship("VisitWhatsappLog", back_populates="visit", cascade="all, delete-orphan")
+
+    @staticmethod
+    def clean_purchase_fees(value):
+        """Deja solo el importe: quita '€', '+ IVA' y espacios que algunos agentes escriben."""
+        if not value:
+            return ""
+        return re.sub(r"(?i)iva|€|\+|\s", "", value)
+
+    # builtins.property porque el atributo 'property' (relación) tapa al decorador
+    @builtins.property
+    def purchase_fees_display(self):
+        """Honorarios para el informe, siempre con el formato '€2500 + IVA'."""
+        amount = self.clean_purchase_fees(self.purchase_fees)
+        return f"€{amount} + IVA" if amount else None

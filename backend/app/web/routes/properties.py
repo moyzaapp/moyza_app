@@ -200,7 +200,10 @@ async def properties_page(
         (Property.title.op("~")(r"^\d+$"), cast(Property.title, Integer)),
         else_=None
     )
-    properties = filtered_query.order_by(numeric_title.desc().nullslast()).all()
+    properties = filtered_query.order_by(
+        Property.price.desc().nullslast(),
+        numeric_title.desc().nullslast()
+    ).all()
 
     # "Resto de propiedades": inventario activo de la empresa que NO está
     # asociado al agente logueado. Se construye con `with_entities` sobre
@@ -250,7 +253,7 @@ async def properties_page(
                     Property.num_banos_aseos,
                     Agent.name.label("agent_name"),
                 )
-                .order_by(Property.title.asc())
+                .order_by(Property.price.desc().nullslast(), Property.title.asc())
                 .all()
             )
             other_properties = [dict(row._mapping) for row in rows]
