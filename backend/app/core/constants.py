@@ -1,5 +1,16 @@
-# Empresas disponibles en los selectores de "Empresa" (usuarios, agentes)
-COMPANIES = ["MOYZA", "MOES PREMIUM"]
+class CompanyCode:
+    """Claves estables de las empresas internas (columna `companies.code`).
+
+    Se usan en código y en la cookie de empresa activa. Los datos de marca
+    y legales viven en la tabla `companies`, no aquí.
+    """
+
+    MOYZA = "MOYZA"
+    MOES = "MOES"
+
+    # Empresa por defecto: todo lo anterior a la separación por empresa
+    # pertenece a MOYZA.
+    DEFAULT = MOYZA
 
 
 class PhoneCountryCodes:

@@ -26,3 +26,11 @@ class User(Base):
     role_id = Column(Integer, ForeignKey("roles.id"))
     
     role = relationship("Role")
+
+    # Empresas a las que tiene acceso el usuario. Un admin ve todas
+    # independientemente de esta lista.
+    companies = relationship(
+        "Company",
+        secondary="user_companies",
+        back_populates="users"
+    )

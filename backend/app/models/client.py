@@ -21,3 +21,10 @@ class Client(Base):
         "Property",
         back_populates="client"
     )
+
+    # Empresas en las que el cliente tiene inmuebles (puede ser más de una)
+    companies = relationship(
+        "Company",
+        secondary="client_companies",
+        back_populates="clients"
+    )

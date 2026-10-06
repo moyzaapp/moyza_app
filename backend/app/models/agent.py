@@ -48,3 +48,11 @@ class Agent(Base):
         "Property",
         back_populates="agent"
     )
+
+    # Empresas para las que trabaja el agente (puede ser más de una).
+    # Sustituye progresivamente al texto libre de `company`.
+    companies = relationship(
+        "Company",
+        secondary="agent_companies",
+        back_populates="agents"
+    )

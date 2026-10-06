@@ -98,6 +98,15 @@ class Property(Base):
 
     fecha_alta = Column(Date, nullable=True)
 
+    # Empresa propietaria del inmueble (MOYZA o MOES). Una propiedad
+    # pertenece siempre a una sola empresa.
+    company_id = Column(
+        Integer,
+        ForeignKey("companies.id"),
+        nullable=False,
+        index=True
+    )
+
     client_id = Column(
         Integer,
         ForeignKey("clients.id")
@@ -126,6 +135,11 @@ class Property(Base):
     report_hour = Column(
         Integer,
         nullable=True
+    )
+
+    company = relationship(
+        "Company",
+        back_populates="properties"
     )
 
     client = relationship(
