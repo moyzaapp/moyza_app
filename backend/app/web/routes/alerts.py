@@ -31,8 +31,18 @@ from app.models.user import User
 from app.models.buyer import Buyer
 from app.models.buyer_search_criteria import BuyerSearchCriteria
 
+from app.services.company_scope import (
+    scope_alerts,
+    scope_agents,
+    scope_buyers,
+    scope_properties,
+    get_alert_in_company,
+    get_buyer_in_company,
+    get_property_in_company,
+)
 from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, get_agent_from_user, require_admin_role
+from app.web.dependencies.company import get_active_company
 
 
 router = APIRouter()
@@ -46,10 +56,30 @@ OPEN_ALERT_STATUSES = [AlertStatus.PENDING, AlertStatus.IN_PROGRESS]
 PROPERTY_SEARCH_LIMIT = 15
 
 
-def _get_agent_open_alerts_ordered(agent_id: int, db: Session):
-    """Devuelve las alertas abiertas del agente ordenadas FIFO."""
+def _property_filter_values(db: Session, company_id: int) -> dict:
+    """Valores distintos (zona, ciudad, tipo, operación) de las propiedades de la empresa."""
+    def distinct_values(column, exclude_empty: bool = False):
+        query = scope_properties(db.query(column), company_id).filter(column.isnot(None))
+        if exclude_empty:
+            query = query.filter(column != "")
+        return [r[0] for r in query.distinct().order_by(column.asc()).all()]
+
+    return {
+        "zones": distinct_values(Property.zona, exclude_empty=True),
+        "cities": distinct_values(Property.city, exclude_empty=True),
+        "property_types": distinct_values(Property.property_type),
+        "business_types": distinct_values(Property.business_type),
+    }
+
+
+def _get_agent_open_alerts_ordered(agent_id: int, db: Session, company_id: int):
+    """Devuelve las alertas abiertas del agente en la empresa, ordenadas FIFO.
+
+    La cola secuencial es por empresa: una alerta pendiente en MOYZA no
+    bloquea el trabajo del mismo agente en MOES (y viceversa).
+    """
     return (
-        db.query(PropertyAlert)
+        scope_alerts(db.query(PropertyAlert), company_id)
         .filter(
             PropertyAlert.agent_id == agent_id,
             PropertyAlert.status.in_(OPEN_ALERT_STATUSES),
@@ -67,14 +97,14 @@ def _alert_has_followup(alert_id: int, db: Session) -> bool:
     ) > 0
 
 
-def get_locked_alert_ids(agent_id: int, db: Session) -> set:
-    """Devuelve el conjunto de IDs de alertas bloqueadas para un agente.
+def get_locked_alert_ids(agent_id: int, db: Session, company_id: int) -> set:
+    """Devuelve el conjunto de IDs de alertas bloqueadas para un agente en la empresa.
 
     Una alerta en la cola está bloqueada si alguna alerta anterior (más antigua)
     aún no tiene ningún seguimiento registrado. En cuanto el agente registra
     cualquier seguimiento en la alerta actual, la siguiente se desbloquea.
     """
-    open_alerts = _get_agent_open_alerts_ordered(agent_id, db)
+    open_alerts = _get_agent_open_alerts_ordered(agent_id, db, company_id)
     locked = set()
     all_preceding_started = True
     for alert in open_alerts:
@@ -102,7 +132,8 @@ def is_alert_locked_for_user(alert: PropertyAlert, current_user, db: Session) ->
     if not agent:
         return False
 
-    open_alerts = _get_agent_open_alerts_ordered(agent.id, db)
+    # La cola se evalúa dentro de la empresa de la propia alerta
+    open_alerts = _get_agent_open_alerts_ordered(agent.id, db, alert.property.company_id)
     for oa in open_alerts:
         if oa.id == alert.id:
             return False  # Todas las anteriores tienen seguimiento → accesible
@@ -122,9 +153,10 @@ async def alerts_page(
     """Lista de alertas - Admin ve todas, agentes solo las suyas"""
 
     current_user = request.state.user
+    company = get_active_company(request)
 
-    # Base query
-    base_query = db.query(PropertyAlert).join(Property).join(Agent)
+    # Base query: solo alertas de propiedades de la empresa activa
+    base_query = scope_alerts(db.query(PropertyAlert).join(Property).join(Agent), company.id)
 
     # Si es agente, filtrar solo sus alertas
     if not is_admin(current_user):
@@ -176,19 +208,19 @@ async def alerts_page(
     # precargan: el formulario las busca por /alerts/search-properties.
     agents = []
     if is_admin(current_user):
-        agents = db.query(Agent).all()
+        agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
 
-    # Lista de compradores: el admin ve siempre el listado completo. Para el
-    # agente, en cambio, solo aparecen los compradores cuyas alertas ya
-    # iniciaron seguimiento (status distinto de PENDING), así la lista se va
-    # llenando a medida que va gestionando sus alertas.
+    # Lista de compradores: el admin ve siempre el listado completo de la
+    # empresa activa. Para el agente, en cambio, solo aparecen los compradores
+    # cuyas alertas ya iniciaron seguimiento (status distinto de PENDING), así
+    # la lista se va llenando a medida que va gestionando sus alertas.
     if is_admin(current_user):
-        buyers = db.query(Buyer).order_by(Buyer.name.asc()).all()
+        buyers = scope_buyers(db.query(Buyer), company.id).order_by(Buyer.name.asc()).all()
     else:
         agent = get_agent_from_user(current_user, db)
         if agent:
             started_buyer_ids = (
-                db.query(PropertyAlert.buyer_id)
+                scope_alerts(db.query(PropertyAlert.buyer_id), company.id)
                 .filter(
                     PropertyAlert.buyer_id.isnot(None),
                     PropertyAlert.status != AlertStatus.PENDING,
@@ -197,7 +229,7 @@ async def alerts_page(
                 .subquery()
             )
             buyers = (
-                db.query(Buyer)
+                scope_buyers(db.query(Buyer), company.id)
                 .filter(Buyer.id.in_(started_buyer_ids))
                 .order_by(Buyer.name.asc())
                 .all()
@@ -231,33 +263,18 @@ async def alerts_page(
                 )
 
     # Valores para selectores del modal de criteria
-    zones = [
-        r[0] for r in
-        db.query(Property.zona).filter(Property.zona.isnot(None), Property.zona != "")
-        .distinct().order_by(Property.zona.asc()).all()
-    ]
-    cities = [
-        r[0] for r in
-        db.query(Property.city).filter(Property.city.isnot(None), Property.city != "")
-        .distinct().order_by(Property.city.asc()).all()
-    ]
-    property_types = [
-        r[0] for r in
-        db.query(Property.property_type).filter(Property.property_type.isnot(None))
-        .distinct().order_by(Property.property_type.asc()).all()
-    ]
-    business_types = [
-        r[0] for r in
-        db.query(Property.business_type).filter(Property.business_type.isnot(None))
-        .distinct().order_by(Property.business_type.asc()).all()
-    ]
+    filter_values = _property_filter_values(db, company.id)
+    zones = filter_values["zones"]
+    cities = filter_values["cities"]
+    property_types = filter_values["property_types"]
+    business_types = filter_values["business_types"]
 
     # Calcular alertas bloqueadas y etapa actual de cada alerta
     locked_alert_ids = set()
     if not is_admin(current_user):
         agent = get_agent_from_user(current_user, db)
         if agent:
-            locked_alert_ids = get_locked_alert_ids(agent.id, db)
+            locked_alert_ids = get_locked_alert_ids(agent.id, db, company.id)
 
     # Etapa actual de cada alerta: último seguimiento de progresión (ignora
     # SIN_RESPUESTA para no retroceder la etapa visible; si solo hay sin-respuesta,
@@ -331,7 +348,7 @@ async def search_buyers(
     like = f"%{term}%"
 
     buyers = (
-        db.query(Buyer)
+        scope_buyers(db.query(Buyer), get_active_company(request).id)
         .filter(
             or_(
                 Buyer.name.ilike(like),
@@ -387,7 +404,8 @@ async def create_buyer(
             phone=(phone or "").strip() or None,
             email=(email or "").strip() or None,
             notes=notes,
-            created_by=current_user.id
+            created_by=current_user.id,
+            company_id=get_active_company(request).id
         )
         db.add(buyer)
         db.commit()
@@ -452,7 +470,7 @@ async def create_buyer_with_criteria(
     try:
         # Resolver comprador
         if buyer_id:
-            buyer = db.query(Buyer).filter(Buyer.id == buyer_id).first()
+            buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
             if not buyer:
                 response = RedirectResponse(url="/alerts", status_code=302)
                 set_flash(response, "error", "Comprador no encontrado")
@@ -467,7 +485,8 @@ async def create_buyer_with_criteria(
                 name=buyer_name,
                 phone=(buyer_phone or "").strip() or None,
                 email=(buyer_email or "").strip() or None,
-                created_by=current_user.id
+                created_by=current_user.id,
+                company_id=get_active_company(request).id
             )
             db.add(buyer)
             db.flush()
@@ -522,7 +541,7 @@ async def delete_buyer(
         set_flash(response, "error", "Solo administradores pueden eliminar compradores")
         return response
 
-    buyer = db.query(Buyer).filter(Buyer.id == buyer_id).first()
+    buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
 
     if not buyer:
         response = RedirectResponse(url="/alerts?tab=buyers", status_code=302)
@@ -573,7 +592,7 @@ async def search_properties(
     like = f"%{term}%"
 
     properties = (
-        db.query(Property)
+        scope_properties(db.query(Property), get_active_company(request).id)
         .filter(
             Property.status != PropertyStatus.ARCHIVED,
             Property.available_clause(),
@@ -613,7 +632,7 @@ async def alert_detail(
 
     current_user = request.state.user
 
-    alert = db.query(PropertyAlert).filter(PropertyAlert.id == alert_id).first()
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
 
     if not alert:
         response = RedirectResponse(url="/alerts", status_code=302)
@@ -706,7 +725,7 @@ async def create_alert(
     buyer = None
 
     if buyer_id:
-        buyer = db.query(Buyer).filter(Buyer.id == buyer_id).first()
+        buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
         if not buyer:
             response = RedirectResponse(url="/alerts", status_code=302)
             set_flash(response, "error", "Comprador no encontrado")
@@ -722,13 +741,14 @@ async def create_alert(
             name=buyer_name,
             phone=(buyer_phone or "").strip() or None,
             email=(buyer_email or "").strip() or None,
-            created_by=current_user.id
+            created_by=current_user.id,
+            company_id=get_active_company(request).id
         )
         db.add(buyer)
         db.flush()  # obtener buyer.id antes del commit
 
-    # Obtener la propiedad y su agente
-    property_item = db.query(Property).filter(Property.id == property_id).first()
+    # Obtener la propiedad y su agente (solo de la empresa activa)
+    property_item = get_property_in_company(db, property_id, get_active_company(request).id)
 
     if not property_item:
         db.rollback()
@@ -790,7 +810,7 @@ async def mark_alert_read(
 
     current_user = request.state.user
 
-    alert = db.query(PropertyAlert).filter(PropertyAlert.id == alert_id).first()
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
 
     if not alert:
         response = RedirectResponse(url="/alerts", status_code=302)
@@ -845,7 +865,7 @@ async def add_follow_up(
 
     current_user = request.state.user
 
-    alert = db.query(PropertyAlert).filter(PropertyAlert.id == alert_id).first()
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
 
     if not alert:
         response = RedirectResponse(url="/alerts", status_code=302)
@@ -940,7 +960,7 @@ async def complete_alert(
 
     current_user = request.state.user
 
-    alert = db.query(PropertyAlert).filter(PropertyAlert.id == alert_id).first()
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
 
     if not alert:
         response = RedirectResponse(url="/alerts", status_code=302)
@@ -1008,7 +1028,7 @@ async def reactivate_alert(
         set_flash(response, "error", "Solo administradores pueden reactivar alertas")
         return response
 
-    alert = db.query(PropertyAlert).filter(PropertyAlert.id == alert_id).first()
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
 
     if not alert:
         response = RedirectResponse(url="/alerts", status_code=302)
@@ -1048,27 +1068,22 @@ async def get_unread_count(
 ):
     """API endpoint para obtener contador de alertas no leídas (para badge)"""
 
-    # Obtener usuario desde el token (las rutas API no pasan por AuthMiddleware)
-    from app.core.security import decode_token
+    # Obtener usuario y empresa desde las cookies (las rutas API no pasan por AuthMiddleware)
+    from app.web.dependencies.company import get_api_user, resolve_company_for_api
 
-    token = request.cookies.get("access_token")
-    if not token:
-        return JSONResponse(content={"unread_count": 0})
-
-    payload = decode_token(token)
-    if not payload:
-        return JSONResponse(content={"unread_count": 0})
-
-    email = payload.get("sub")
-    if not email:
-        return JSONResponse(content={"unread_count": 0})
-
-    current_user = db.query(User).filter(User.email == email).first()
+    current_user = get_api_user(request, db)
     if not current_user:
         return JSONResponse(content={"unread_count": 0})
 
-    base_query = db.query(PropertyAlert).filter(
-        PropertyAlert.status.in_([AlertStatus.PENDING, AlertStatus.IN_PROGRESS])
+    company = resolve_company_for_api(request, current_user, db)
+    if company is None:
+        return JSONResponse(content={"unread_count": 0})
+
+    base_query = scope_alerts(
+        db.query(PropertyAlert).filter(
+            PropertyAlert.status.in_([AlertStatus.PENDING, AlertStatus.IN_PROGRESS])
+        ),
+        company.id
     )
 
     # Si es agente, filtrar solo sus alertas
@@ -1099,7 +1114,7 @@ async def delete_alert(
         set_flash(response, "error", "Solo administradores pueden eliminar alertas")
         return response
 
-    alert = db.query(PropertyAlert).filter(PropertyAlert.id == alert_id).first()
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
 
     if not alert:
         response = RedirectResponse(url="/alerts", status_code=302)
@@ -1143,8 +1158,10 @@ async def alerts_dashboard(
         set_flash(response, "error", "Solo administradores pueden acceder al dashboard")
         return response
 
-    # ── Tab General: métricas globales ──────────────────────────────────────
-    all_alerts = db.query(PropertyAlert).all()
+    company = get_active_company(request)
+
+    # ── Tab General: métricas de la empresa activa ──────────────────────────
+    all_alerts = scope_alerts(db.query(PropertyAlert), company.id).all()
 
     total_alerts = len(all_alerts)
     pending_alerts = sum(1 for a in all_alerts if a.status == AlertStatus.PENDING)
@@ -1166,7 +1183,7 @@ async def alerts_dashboard(
     avg_response_time = sum(response_times) / len(response_times) if response_times else 0
 
     agents_data = []
-    agents = db.query(Agent).all()
+    agents = scope_agents(db.query(Agent), company.id).all()
 
     for agent in agents:
         agent_alerts = [a for a in all_alerts if a.agent_id == agent.id]
@@ -1236,7 +1253,7 @@ async def alerts_dashboard(
         is_current = svc.is_current_period(period_type, ps)
         show_next = next_start <= current_start
 
-        all_perf_agents = db.query(Agent).order_by(Agent.name.asc()).all()
+        all_perf_agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
         perf_agents = []
         for agent in all_perf_agents:
             report = svc.get_report(agent.id, period_type, ps)
@@ -1299,12 +1316,15 @@ async def alerts_dashboard(
 # Detalle del comprador y perfil de búsqueda
 # ---------------------------------------------------------------------------
 
-def _build_matching_properties(criteria: BuyerSearchCriteria, db: Session):
-    """Filtra propiedades activas y disponibles que cumplen todos los criterios definidos."""
-    query = db.query(Property).filter(
-        Property.status == PropertyStatus.ACTIVE,
-        Property.available_clause(),
-        Property.agent_id.isnot(None),
+def _build_matching_properties(criteria: BuyerSearchCriteria, db: Session, company_id: int):
+    """Filtra propiedades activas y disponibles de la empresa que cumplen los criterios."""
+    query = scope_properties(
+        db.query(Property).filter(
+            Property.status == PropertyStatus.ACTIVE,
+            Property.available_clause(),
+            Property.agent_id.isnot(None),
+        ),
+        company_id
     )
 
     if criteria.zones:
@@ -1344,7 +1364,7 @@ async def buyer_detail(
 
     current_user = request.state.user
 
-    buyer = db.query(Buyer).filter(Buyer.id == buyer_id).first()
+    buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
     if not buyer:
         response = RedirectResponse(url="/alerts", status_code=302)
         set_flash(response, "error", "Comprador no encontrado")
@@ -1373,36 +1393,23 @@ async def buyer_detail(
             set_flash(response, "error", "No tienes acceso a este comprador")
             return response
 
+    company = get_active_company(request)
+
     criteria = buyer.search_criteria
 
     # Propiedades que hacen match (solo si hay criterios definidos)
     matching_properties = []
     if criteria:
-        matching_properties = _build_matching_properties(criteria, db)
+        matching_properties = _build_matching_properties(criteria, db, company.id)
 
     # Valores disponibles en la BD para los selectores
-    zones = [
-        r[0] for r in
-        db.query(Property.zona).filter(Property.zona.isnot(None), Property.zona != "")
-        .distinct().order_by(Property.zona.asc()).all()
-    ]
-    cities = [
-        r[0] for r in
-        db.query(Property.city).filter(Property.city.isnot(None), Property.city != "")
-        .distinct().order_by(Property.city.asc()).all()
-    ]
-    property_types = [
-        r[0] for r in
-        db.query(Property.property_type).filter(Property.property_type.isnot(None))
-        .distinct().order_by(Property.property_type.asc()).all()
-    ]
-    business_types = [
-        r[0] for r in
-        db.query(Property.business_type).filter(Property.business_type.isnot(None))
-        .distinct().order_by(Property.business_type.asc()).all()
-    ]
+    filter_values = _property_filter_values(db, company.id)
+    zones = filter_values["zones"]
+    cities = filter_values["cities"]
+    property_types = filter_values["property_types"]
+    business_types = filter_values["business_types"]
 
-    agents = db.query(Agent).order_by(Agent.name.asc()).all()
+    agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
     buyer_alerts = (
         db.query(PropertyAlert)
         .filter(PropertyAlert.buyer_id == buyer_id)
@@ -1445,7 +1452,7 @@ async def update_buyer_contact(
     """Actualiza nombre, teléfono y email del comprador. Accesible para admin y agentes asignados."""
     current_user = request.state.user
 
-    buyer = db.query(Buyer).filter(Buyer.id == buyer_id).first()
+    buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
     if not buyer:
         response = RedirectResponse(url="/alerts", status_code=302)
         set_flash(response, "error", "Comprador no encontrado")
@@ -1509,7 +1516,7 @@ async def save_search_criteria(
         set_flash(response, "error", "Acceso no autorizado")
         return response
 
-    buyer = db.query(Buyer).filter(Buyer.id == buyer_id).first()
+    buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
     if not buyer:
         response = RedirectResponse(url="/alerts?tab=buyers", status_code=302)
         set_flash(response, "error", "Comprador no encontrado")

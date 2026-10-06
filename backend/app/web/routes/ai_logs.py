@@ -9,8 +9,26 @@ from datetime import datetime, timedelta
 from app.db.deps import get_db
 from app.models.ai_analysis_log import AIAnalysisLog
 from app.models.property import Property
+from app.services.company_scope import get_property_in_company
+from app.web.dependencies.company import get_api_user
+from app.web.dependencies.company import resolve_company_for_api
 
 router = APIRouter()
+
+
+def _scope_ai_logs(query, company_id: int):
+    return query.filter(AIAnalysisLog.property.has(Property.company_id == company_id))
+
+
+def _api_company(request: Request, db: Session):
+    """Empresa activa para los endpoints /api (sin AuthMiddleware). None si no hay sesión."""
+    user = get_api_user(request, db)
+    if not user:
+        return None
+    return resolve_company_for_api(request, user, db)
+
+
+_UNAUTHORIZED = {"error": "No autenticado"}
 
 
 
@@ -34,6 +52,7 @@ async def ai_logs_dashboard_page(
 
 @router.get("/api/ai-logs", response_class=JSONResponse)
 async def get_ai_logs(
+    request: Request,
     property_id: Optional[int] = Query(None),
     analysis_type: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
@@ -42,7 +61,7 @@ async def get_ai_logs(
     db: Session = Depends(get_db)
 ):
     """
-    Endpoint para obtener logs de análisis de IA con filtros.
+    Endpoint para obtener logs de análisis de IA con filtros (empresa activa).
 
     Query params:
     - property_id: Filtrar por propiedad específica
@@ -51,7 +70,11 @@ async def get_ai_logs(
     - limit: Cantidad máxima de resultados (default: 50)
     - offset: Offset para paginación (default: 0)
     """
-    query = db.query(AIAnalysisLog)
+    company = _api_company(request, db)
+    if company is None:
+        return JSONResponse(status_code=401, content=_UNAUTHORIZED)
+
+    query = _scope_ai_logs(db.query(AIAnalysisLog), company.id)
 
     if property_id:
         query = query.filter(AIAnalysisLog.property_id == property_id)
@@ -100,15 +123,24 @@ async def get_ai_logs(
 @router.get("/api/ai-logs/{log_id}", response_class=JSONResponse)
 async def get_ai_log_detail(
     log_id: int,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """
     Obtiene el detalle completo de un log específico, incluyendo prompt y response.
     """
-    log = db.query(AIAnalysisLog).filter(AIAnalysisLog.id == log_id).first()
+    company = _api_company(request, db)
+    if company is None:
+        return JSONResponse(status_code=401, content=_UNAUTHORIZED)
+
+    log = (
+        _scope_ai_logs(db.query(AIAnalysisLog), company.id)
+        .filter(AIAnalysisLog.id == log_id)
+        .first()
+    )
 
     if not log:
-        return {"error": "Log no encontrado"}, 404
+        return JSONResponse(status_code=404, content={"error": "Log no encontrado"})
 
     return {
         "id": log.id,
@@ -137,18 +169,29 @@ async def get_ai_log_detail(
 
 @router.get("/api/ai-logs/stats/summary", response_class=JSONResponse)
 async def get_ai_stats_summary(
+    request: Request,
     days: int = Query(30, ge=1, le=365),
     db: Session = Depends(get_db)
 ):
     """
-    Obtiene estadísticas resumidas de los análisis de IA.
+    Obtiene estadísticas resumidas de los análisis de IA de la empresa activa.
 
     Query params:
     - days: Cantidad de días a incluir en las estadísticas (default: 30)
     """
+    company = _api_company(request, db)
+    if company is None:
+        return JSONResponse(status_code=401, content=_UNAUTHORIZED)
+
     start_date = datetime.utcnow() - timedelta(days=days)
 
-    query = db.query(AIAnalysisLog).filter(AIAnalysisLog.created_at >= start_date)
+    # Cláusula común: logs de propiedades de la empresa activa
+    in_company = AIAnalysisLog.property.has(Property.company_id == company.id)
+
+    query = db.query(AIAnalysisLog).filter(
+        in_company,
+        AIAnalysisLog.created_at >= start_date
+    )
 
     total_calls = query.count()
     success_count = query.filter(AIAnalysisLog.status == "success").count()
@@ -158,6 +201,7 @@ async def get_ai_stats_summary(
     tokens_sum = db.query(
         func.sum(AIAnalysisLog.total_tokens)
     ).filter(
+        in_company,
         AIAnalysisLog.created_at >= start_date,
         AIAnalysisLog.status == "success"
     ).scalar() or 0
@@ -166,6 +210,7 @@ async def get_ai_stats_summary(
     total_cost = db.query(
         func.sum(AIAnalysisLog.estimated_cost)
     ).filter(
+        in_company,
         AIAnalysisLog.created_at >= start_date,
         AIAnalysisLog.status == "success"
     ).scalar() or 0
@@ -174,6 +219,7 @@ async def get_ai_stats_summary(
     avg_response_time = db.query(
         func.avg(AIAnalysisLog.response_time_seconds)
     ).filter(
+        in_company,
         AIAnalysisLog.created_at >= start_date,
         AIAnalysisLog.status == "success"
     ).scalar() or 0
@@ -194,6 +240,7 @@ async def get_ai_stats_summary(
         func.sum(AIAnalysisLog.estimated_cost).label('total_cost'),
         func.sum(AIAnalysisLog.total_tokens).label('total_tokens')
     ).filter(
+        in_company,
         AIAnalysisLog.created_at >= start_date,
         AIAnalysisLog.status == "success"
     ).group_by(AIAnalysisLog.model_name).all()
@@ -226,15 +273,20 @@ async def get_ai_stats_summary(
 
 @router.get("/api/ai-logs/stats/daily", response_class=JSONResponse)
 async def get_ai_stats_daily(
+    request: Request,
     days: int = Query(30, ge=1, le=365),
     db: Session = Depends(get_db)
 ):
     """
-    Obtiene estadísticas diarias de análisis de IA (útil para gráficos).
+    Obtiene estadísticas diarias de análisis de IA de la empresa activa (útil para gráficos).
 
     Query params:
     - days: Cantidad de días a incluir (default: 30)
     """
+    company = _api_company(request, db)
+    if company is None:
+        return JSONResponse(status_code=401, content=_UNAUTHORIZED)
+
     start_date = datetime.utcnow() - timedelta(days=days)
 
     daily_stats = db.query(
@@ -246,6 +298,7 @@ async def get_ai_stats_daily(
             func.nullif(AIAnalysisLog.status == "success", False)
         ).label('success_count')
     ).filter(
+        AIAnalysisLog.property.has(Property.company_id == company.id),
         AIAnalysisLog.created_at >= start_date
     ).group_by(
         func.date(AIAnalysisLog.created_at)
@@ -271,16 +324,21 @@ async def get_ai_stats_daily(
 @router.get("/api/ai-logs/property/{property_id}/history", response_class=JSONResponse)
 async def get_property_ai_history(
     property_id: int,
+    request: Request,
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db)
 ):
     """
-    Obtiene el historial de análisis de IA para una propiedad específica.
+    Obtiene el historial de análisis de IA para una propiedad de la empresa activa.
     """
-    property_item = db.query(Property).filter(Property.id == property_id).first()
+    company = _api_company(request, db)
+    if company is None:
+        return JSONResponse(status_code=401, content=_UNAUTHORIZED)
+
+    property_item = get_property_in_company(db, property_id, company.id)
 
     if not property_item:
-        return {"error": "Propiedad no encontrada"}, 404
+        return JSONResponse(status_code=404, content={"error": "Propiedad no encontrada"})
 
     logs = db.query(AIAnalysisLog).filter(
         AIAnalysisLog.property_id == property_id,

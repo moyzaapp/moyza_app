@@ -16,6 +16,16 @@ from app.db.deps import get_db
 from fastapi import Form
 from fastapi.responses import RedirectResponse
 
+from app.web.dependencies.company import get_active_company
+from app.web.utils.flash import set_flash
+from app.services.company_scope import (
+    scope_clients,
+    scope_properties,
+    get_client_in_company,
+    add_to_company,
+    remove_from_company,
+)
+
 router = APIRouter()
 
 
@@ -24,15 +34,17 @@ router = APIRouter()
 async def clients_page(request: Request, db: Session = Depends(get_db)):
 
     current_user = request.state.user
+    company = get_active_company(request)
 
-    base_query = db.query(Client)
+    # Solo clientes de la empresa activa
+    base_query = scope_clients(db.query(Client), company.id)
 
     # Agentes ven solo clientes cuyas propiedades tienen asignadas
     if not is_admin(current_user):
         agent = get_agent_from_user(current_user, db)
         if agent:
             client_ids = (
-                db.query(Property.client_id)
+                scope_properties(db.query(Property.client_id), company.id)
                 .filter(
                     Property.agent_id == agent.id,
                     Property.client_id.isnot(None)
@@ -90,6 +102,8 @@ async def create_client(
     if denied:
         return denied
 
+    active_company = get_active_company(request)
+
     # El correo es opcional: una cadena vacía se guarda como NULL
     email = (email or "").strip() or None
 
@@ -100,6 +114,18 @@ async def create_client(
         ).first()
 
         if existing_client:
+            # Un cliente puede tener inmuebles en ambas empresas: si ya existe
+            # en la otra, se le añade a la activa en vez de duplicar la ficha.
+            if add_to_company(db, existing_client, active_company.id):
+                db.commit()
+                response = RedirectResponse(url="/clients", status_code=302)
+                set_flash(
+                    response,
+                    "success",
+                    f"{existing_client.name} ya existía como cliente y se ha añadido a {active_company.name}."
+                )
+                return response
+
             return RedirectResponse(
                 url="/clients?error=email_exists",
                 status_code=302
@@ -113,6 +139,7 @@ async def create_client(
     )
 
     db.add(client)
+    add_to_company(db, client, active_company.id)
 
     db.commit()
 
@@ -140,9 +167,8 @@ async def update_client(
     # El correo es opcional: una cadena vacía se guarda como NULL
     email = (email or "").strip() or None
 
-    client = db.query(Client).filter(
-        Client.id == client_id
-    ).first()
+    # Solo se pueden editar clientes de la empresa activa
+    client = get_client_in_company(db, client_id, get_active_company(request).id)
 
     if client:
 
@@ -183,8 +209,20 @@ async def delete_client(
     if denied:
         return denied
 
-    properties = db.query(Property).filter(
-        Property.client_id == client_id
+    active_company = get_active_company(request)
+
+    client = get_client_in_company(db, client_id, active_company.id)
+
+    if not client:
+        return RedirectResponse(
+            url="/clients",
+            status_code=302
+        )
+
+    # No se puede dar de baja si tiene propiedades en la empresa activa
+    properties = scope_properties(
+        db.query(Property).filter(Property.client_id == client_id),
+        active_company.id
     ).count()
 
     if properties > 0:
@@ -193,15 +231,23 @@ async def delete_client(
             status_code=302
         )
 
-    client = db.query(Client).filter(
-        Client.id == client_id
-    ).first()
-
-    if client:
-
-        db.delete(client)
-
+    # Si el cliente también está en la otra empresa, solo se le quita de
+    # esta; la ficha se elimina únicamente cuando no queda en ninguna.
+    if len(client.companies) > 1:
+        remove_from_company(db, client, active_company.id)
         db.commit()
+
+        response = RedirectResponse(url="/clients", status_code=302)
+        set_flash(
+            response,
+            "success",
+            f"{client.name} se ha quitado de {active_company.name}. Sigue activo en sus otras empresas."
+        )
+        return response
+
+    db.delete(client)
+
+    db.commit()
 
     return RedirectResponse(
         url="/clients",
