@@ -23,7 +23,13 @@ class UserCreate(BaseModel):
 
     phone: Optional[str] = None
 
+    # Texto libre heredado; se rellena automáticamente con los nombres de
+    # las empresas asignadas. Se mantiene por compatibilidad con la API.
     company: Optional[str] = None
+
+    # Empresas a las que pertenece el usuario (ids de `companies`).
+    # Vacío = empresa por defecto (MOYZA).
+    company_ids: list[int] = []
 
     @field_validator("phone", "company")
     @classmethod
@@ -61,6 +67,9 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = None
 
     company: Optional[str] = None
+
+    # Empresas asignadas (ids de `companies`). Vacío = empresa por defecto.
+    company_ids: list[int] = []
 
     @field_validator("full_name")
     @classmethod

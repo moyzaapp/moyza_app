@@ -9,13 +9,32 @@ from app.models.role import Role
 from app.schemas.user import UserCreate, UserUpdate
 from app.core.password import hash_password
 from app.services.user_email_service import send_welcome_email
+from app.services.company_service import resolve_companies, companies_label
+
+
+def _apply_companies(db: Session, user: User, agent: Optional[Agent], company_ids: list[int]):
+    """Asigna las empresas al usuario y, si existe, a su ficha de agente."""
+    companies = resolve_companies(db, company_ids)
+
+    user.companies = list(companies)
+    user.company = companies_label(companies)
+
+    if agent is not None:
+        agent.companies = list(companies)
+        agent.company = user.company
 
 
 def create_user(
     db: Session,
     user: UserCreate,
-    background_tasks: Optional[BackgroundTasks] = None
+    background_tasks: Optional[BackgroundTasks] = None,
+    company_name: Optional[str] = None,
 ):
+    """Crea el usuario (y su ficha de agente si aplica) y envía la bienvenida.
+
+    `company_name` marca el correo de bienvenida con la empresa desde la que
+    el admin crea al usuario (MOYZA o MOES PREMIUM).
+    """
 
     existing_user = (
     db.query(User)
@@ -49,6 +68,10 @@ def create_user(
     )
 
     db.add(db_user)
+
+    # Empresas del usuario (y texto heredado `company`)
+    _apply_companies(db, db_user, None, user.company_ids)
+
     db.commit()
     db.refresh(db_user)
 
@@ -63,10 +86,17 @@ def create_user(
                 name=user.full_name,
                 email=user.email,
                 phone=user.phone,
-                company=user.company
+                company=db_user.company
                 # dni y zone son opcionales: se completan después
             )
+            # La ficha de agente hereda las empresas del usuario
+            db_agent.companies = list(db_user.companies)
             db.add(db_agent)
+            db.commit()
+        else:
+            # Ficha previa: alinear sus empresas con las del usuario
+            existing_agent.companies = list(db_user.companies)
+            existing_agent.company = db_user.company
             db.commit()
 
     # Correo de bienvenida con las credenciales. user.password es el texto plano
@@ -79,6 +109,7 @@ def create_user(
             full_name=db_user.full_name,
             password=user.password,
             role_name=role.name,
+            company_name=company_name,
         )
     else:
         send_welcome_email(
@@ -86,6 +117,7 @@ def create_user(
             full_name=db_user.full_name,
             password=user.password,
             role_name=role.name,
+            company_name=company_name,
         )
 
     return db_user
@@ -117,7 +149,6 @@ def update_user(db: Session, user_id: int, data: UserUpdate):
     user.full_name = data.full_name
     user.role_id = data.role_id
     user.phone = data.phone
-    user.company = data.company
 
     agent = db.query(Agent).filter(Agent.email == user.email).first()
 
@@ -127,15 +158,17 @@ def update_user(db: Session, user_id: int, data: UserUpdate):
             # Mantener sincronizados los datos de contacto de la ficha
             agent.name = data.full_name
             agent.phone = data.phone
-            agent.company = data.company
         else:
             # El usuario pasa a ser agente: crear la ficha que faltaba
-            db.add(Agent(
+            agent = Agent(
                 name=data.full_name,
                 email=user.email,
                 phone=data.phone,
-                company=data.company
-            ))
+            )
+            db.add(agent)
+
+    # Empresas del usuario y de su ficha de agente (si la tiene)
+    _apply_companies(db, user, agent, data.company_ids)
 
     db.commit()
     db.refresh(user)

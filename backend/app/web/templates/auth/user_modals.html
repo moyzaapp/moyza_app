@@ -1,3 +1,4 @@
+{% from 'components/company_macros.html' import company_checkboxes %}
 <!-- Modal: editar usuario -->
 <div id="userEditModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4">
     <div class="bg-white rounded-2xl w-full max-w-[500px] max-h-[90vh] overflow-y-auto p-4 sm:p-6 lg:p-8">
@@ -76,18 +77,12 @@
 
             <div class="mb-4 sm:mb-6">
                 <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Empresa <span class="text-gray-400 font-normal">(opcional)</span>
+                    Empresas
                 </label>
-                <select
-                    id="edit_company"
-                    name="company"
-                    class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                >
-                    <option value="">Sin empresa</option>
-                    {% for company in companies %}
-                    <option value="{{ company }}">{{ company }}</option>
-                    {% endfor %}
-                </select>
+                {{ company_checkboxes(all_companies, [], 'edit') }}
+                <p class="mt-2 text-xs text-gray-400">
+                    Si es agente, su ficha de agente queda en las mismas empresas.
+                </p>
             </div>
 
             <div class="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3">
@@ -188,14 +183,14 @@
 
 
 <script>
-function editUser(id, fullName, email, phone, company, roleId) {
+function editUser(id, fullName, email, phone, companyIds, roleId) {
     document.getElementById("userEditForm").reset()
 
     document.getElementById("edit_user_id").value = id
     document.getElementById("edit_email_display").value = email
     document.getElementById("edit_full_name").value = fullName
     document.getElementById("edit_phone").value = phone
-    selectCompany(document.getElementById("edit_company"), company)
+    setCompanyChecks("edit", companyIds)
     document.getElementById("edit_role_id").value = roleId
 
     const modal = document.getElementById("userEditModal")
