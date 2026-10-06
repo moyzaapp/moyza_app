@@ -45,13 +45,13 @@ Vista Previa del Documento - Visita
     <!-- Logo -->
     {% if logo_exists %}
     <div class="text-center mb-6">
-        <img src="/static/logo_moyza.png" alt="MOYZA" class="mx-auto" style="max-height: 80px;">
+        <img src="{{ brand.logo_url }}" alt="{{ brand.name }}" class="mx-auto" style="max-height: 80px;">
     </div>
     {% endif %}
 
     <!-- Título -->
     <h1 class="text-2xl font-bold text-center text-gray-800 mb-6">
-        FICHA DE VISITA INMOBILIARIA MOYZA
+        FICHA DE VISITA INMOBILIARIA {{ brand.name }}
     </h1>
 
     <!-- Fecha y Dirección -->
@@ -156,8 +156,8 @@ Vista Previa del Documento - Visita
         <h2 class="text-base font-bold text-gray-800 mb-3">TÉRMINOS Y CONDICIONES</h2>
         <p class="mb-3">
             El presente documento es emitido por el asesor inmobiliario <strong>{{ agent_name }}</strong>
-            en calidad de representante de la agencia inmobiliaria MOYZA con domicilio fiscal en
-            Avda. Doctor Eduardo García Triviño López 9, 23009 (Jaén).
+            en calidad de representante de la agencia inmobiliaria {{ brand.name }} con domicilio fiscal en
+            {{ brand.fiscal_address }}.
         </p>
         <p class="mb-3">
             El interesado declara que ha visitado el inmueble con fecha <strong>{{ visit_date }}</strong> a las <strong>{{ visit_time }}</strong> horas
@@ -192,21 +192,14 @@ Vista Previa del Documento - Visita
     <div class="mb-6 text-xs leading-relaxed">
         <h2 class="text-base font-bold text-gray-800 mb-3">AUTORIZACIÓN DE USO DE DATOS PERSONALES CONFORME AL REGLAMENTO GENERAL DE PROTECCIÓN DE DATOS (RGPD)</h2>
         <p class="mb-3">
-            En nombre de la empresa Inmobiliaria MOYZA tratamos la información que nos facilita con el fin de prestarles
-            el servicio solicitado y realizar la facturación del mismo. Los datos proporcionados se conservarán mientras
-            se mantenga la relación comercial o durante los meses necesarios para cumplir con las obligaciones legales.
-            Los datos no se cederán a terceros salvo en los casos en que exista una obligación legal. Usted tiene derecho
-            a obtener confirmación sobre si en Inmobiliaria MOYZA estamos tratando sus datos personales, por tanto tiene
-            derecho a acceder a sus datos personales, rectificar los datos inexactos o solicitar su supresión cuando los
-            datos ya no sean necesarios.
+            {{ brand.rgpd_text }}
         </p>
         <p class="mb-3">
             Asimismo solicito su autorización para ofrecerle productos y servicios relacionados con los solicitados y
             fidelizarle como cliente.
         </p>
         <p class="font-bold">
-            Autorizo a que mis datos sean tratados por Inmobiliaria MOYZA hasta que finalice la operación o se
-            comunique por mi parte rescindir la misma.
+            {{ brand.rgpd_consent_text }}
         </p>
     </div>
 
@@ -214,10 +207,10 @@ Vista Previa del Documento - Visita
 
     <!-- PIE DE PÁGINA -->
     <div class="text-xs text-gray-600">
-        <p><strong>Responsable:</strong> Moyza 2012 S.L.</p>
-        <p><strong>C.I.F.:</strong> B16914012</p>
-        <p><strong>Dirección postal:</strong> Avda. Doctor Eduardo García Triviño López 9, 23009 (Jaén)</p>
-        <p><strong>Tlf:</strong> 642 497 955 / 953 940 956</p>
+        <p><strong>Responsable:</strong> {{ brand.legal_name }}</p>
+        <p><strong>C.I.F.:</strong> {{ brand.tax_id }}</p>
+        <p><strong>Dirección postal:</strong> {{ brand.fiscal_address }}</p>
+        <p><strong>Tlf:</strong> {{ brand.phone }}</p>
     </div>
 
 </div>

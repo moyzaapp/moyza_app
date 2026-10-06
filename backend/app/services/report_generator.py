@@ -109,10 +109,11 @@ def generate_property_report(
     # HEADER
     # =========================
 
-    logo_path = _first_existing_path(
-        "app/static/logo_moyza.png",
-        "backend/app/static/logo_moyza.png"
-    )
+    # Identidad de la empresa propietaria del inmueble (MOYZA o MOES PREMIUM)
+    from app.services.company_service import branding_for
+    brand = branding_for(getattr(property_item, "company", None))
+
+    logo_path = brand.logo_fs_path
     if logo_path:
         logo = Image(logo_path)
         logo_height = 2.5 * cm
@@ -425,7 +426,7 @@ def generate_property_report(
 
     elements.append(
         Paragraph(
-            "Documento generado automáticamente por MOYZA",
+            f"Documento generado automáticamente por {_safe_text(brand.name)}",
             ParagraphStyle(
                 "Footer",
                 parent=styles["BodyText"],

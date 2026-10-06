@@ -8,6 +8,9 @@ from sqlalchemy.orm import joinedload
 from app.core.security import decode_token
 from app.db.session import SessionLocal
 from app.models.user import User
+from app.web.dependencies.company import ACTIVE_COMPANY_COOKIE
+from app.web.dependencies.company import get_allowed_companies
+from app.web.dependencies.company import resolve_active_company
 
 
 PUBLIC_PATHS = [
@@ -83,7 +86,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         try:
 
             user = db.query(User).options(
-                joinedload(User.role)
+                joinedload(User.role),
+                joinedload(User.companies)
             ).filter(
                 User.email == email
             ).first()
@@ -101,6 +105,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
             # Usuario disponible globalmente
             request.state.user = user
+
+            # Contexto de empresa (MOYZA / MOES): qué empresas puede ver
+            # el usuario y cuál está activa según la cookie.
+            allowed = get_allowed_companies(user, db)
+
+            request.state.allowed_companies = allowed
+
+            request.state.company = resolve_active_company(
+                allowed,
+                request.cookies.get(ACTIVE_COMPANY_COOKIE)
+            )
 
         finally:
 

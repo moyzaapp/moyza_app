@@ -4,6 +4,10 @@ Servicio de recordatorio de compradores sin gestión.
 Identifica compradores cuya última gestión (follow-up o creación de alerta)
 supera el umbral de horas configurado, y envía un email de recordatorio al
 agente responsable con el listado de compradores pendientes.
+
+Multiempresa: los recordatorios se agrupan por agente Y empresa. Un agente
+que trabaja en MOYZA y en MOES PREMIUM recibe un correo por cada empresa,
+cada uno con la marca correspondiente.
 """
 import logging
 from datetime import datetime, timedelta
@@ -15,7 +19,9 @@ from sqlalchemy.orm import Session
 from app.models.agent import Agent
 from app.models.alert_follow_up import AlertFollowUp
 from app.models.alert_reminder_log import AlertReminderLog
+from app.models.company import Company
 from app.models.property_alert import PropertyAlert
+from app.services.company_service import branding_for
 from app.services.gmail_service import GmailService
 
 logger = logging.getLogger(__name__)
@@ -37,11 +43,15 @@ def _last_action_subquery(db: Session):
     )
 
 
-def get_pending_buyers_by_agent(db: Session, hours_threshold: int) -> dict[int, list[dict]]:
+def get_pending_buyers_by_agent(
+    db: Session,
+    hours_threshold: int
+) -> dict[tuple[int, int], list[dict]]:
     """
-    Devuelve un dict {agent_id: [lista de compradores pendientes]}.
+    Devuelve un dict {(agent_id, company_id): [lista de compradores pendientes]}.
     Un comprador aparece si tiene al menos una alerta activa cuya
-    última gestión supera `hours_threshold` horas.
+    última gestión supera `hours_threshold` horas. La empresa es la de la
+    propiedad de la alerta.
     """
     cutoff = datetime.utcnow() - timedelta(hours=hours_threshold)
 
@@ -58,7 +68,7 @@ def get_pending_buyers_by_agent(db: Session, hours_threshold: int) -> dict[int, 
         .all()
     )
 
-    result: dict[int, list[dict]] = {}
+    result: dict[tuple[int, int], list[dict]] = {}
 
     for alert in alerts:
         last_action = max(
@@ -74,12 +84,18 @@ def get_pending_buyers_by_agent(db: Session, hours_threshold: int) -> dict[int, 
             "hours_elapsed": int((datetime.utcnow() - last_action).total_seconds() // 3600),
         }
 
-        result.setdefault(alert.agent_id, []).append(entry)
+        company_id = alert.property.company_id if alert.property else None
+        result.setdefault((alert.agent_id, company_id), []).append(entry)
 
     return result
 
 
-def _build_email_body(agent_name: str, buyers: list[dict], hours_threshold: int) -> str:
+def _build_email_body(
+    agent_name: str,
+    buyers: list[dict],
+    hours_threshold: int,
+    system_name: str = "sistema MOYZA",
+) -> str:
     rows = ""
     for b in sorted(buyers, key=lambda x: x["last_action_at"]):
         rows += f"""
@@ -110,7 +126,7 @@ def _build_email_body(agent_name: str, buyers: list[dict], hours_threshold: int)
         <tbody>{rows}</tbody>
       </table>
       <p style="margin-top:24px;font-size:13px;color:#888;">
-        Este es un recordatorio automático del sistema Moyza.
+        Este es un recordatorio automático del {system_name}.
       </p>
     </body></html>
     """
@@ -120,36 +136,43 @@ def run_buyer_reminders(
     db: Session,
     gmail_service: GmailService,
     hours_threshold: int,
-    sender_name: Optional[str] = "Sistema Moyza",
+    sender_name: Optional[str] = None,
 ):
     """
     Punto de entrada principal llamado desde el scheduler.
-    Consulta compradores pendientes y envía un email por agente.
+    Consulta compradores pendientes y envía un email por agente y empresa.
     Registra una fila en alert_reminder_logs por cada comprador/alerta procesada.
+
+    `sender_name` se mantiene por compatibilidad; el remitente visible lo
+    define cada empresa (`companies.email_sender_name`).
     """
     logger.info(
         f"Iniciando recordatorio de compradores (umbral: {hours_threshold}h, "
         f"estados: {REMINDER_STATUSES})"
     )
 
-    pending_by_agent = get_pending_buyers_by_agent(db, hours_threshold)
+    pending_by_group = get_pending_buyers_by_agent(db, hours_threshold)
 
-    if not pending_by_agent:
+    if not pending_by_group:
         logger.info("No hay compradores pendientes de atención. No se envían recordatorios.")
         return
 
-    agents = (
-        db.query(Agent)
-        .filter(Agent.id.in_(pending_by_agent.keys()))
-        .all()
-    )
-    agents_by_id = {a.id: a for a in agents}
+    agent_ids = {agent_id for agent_id, _ in pending_by_group.keys()}
+    agents_by_id = {
+        a.id: a for a in db.query(Agent).filter(Agent.id.in_(agent_ids)).all()
+    }
+
+    company_ids = {cid for _, cid in pending_by_group.keys() if cid is not None}
+    companies_by_id = {
+        c.id: c for c in db.query(Company).filter(Company.id.in_(company_ids)).all()
+    } if company_ids else {}
 
     sent, skipped = 0, 0
     executed_at = datetime.utcnow()
 
-    for agent_id, buyers in pending_by_agent.items():
+    for (agent_id, company_id), buyers in pending_by_group.items():
         agent = agents_by_id.get(agent_id)
+        brand = branding_for(companies_by_id.get(company_id))
 
         if not agent:
             logger.warning(f"Agente {agent_id} no encontrado, omitiendo.")
@@ -185,8 +208,8 @@ def run_buyer_reminders(
             skipped += len(buyers)
             continue
 
-        subject = f"[Moyza] {len(buyers)} comprador(es) pendiente(s) de atención"
-        body = _build_email_body(agent.name, buyers, hours_threshold)
+        subject = f"[{brand.name}] {len(buyers)} comprador(es) pendiente(s) de atención"
+        body = _build_email_body(agent.name, buyers, hours_threshold, brand.system_name)
         success = gmail_service.send_email(agent.email, subject, body)
 
         for b in buyers:
@@ -208,5 +231,5 @@ def run_buyer_reminders(
 
     db.commit()
     logger.info(
-        f"Recordatorios completados: {sent} agentes notificados, {skipped} omitidos."
+        f"Recordatorios completados: {sent} correos enviados (agente × empresa), {skipped} omitidos."
     )

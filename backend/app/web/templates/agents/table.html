@@ -1,3 +1,4 @@
+{% from 'components/company_macros.html' import company_badges %}
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
     {% if can_manage %}
@@ -9,7 +10,7 @@
             <input
                 type="text"
                 name="search"
-                placeholder="Buscar por nombre, correo, DNI, teléfono, zona o empresa..."
+                placeholder="Buscar por nombre, correo, DNI, teléfono o zona..."
                 value="{{ search or '' }}"
                 class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
@@ -61,7 +62,7 @@
                 </th>
 
                 <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
-                    Empresa
+                    Empresas
                 </th>
 
                 <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-right text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
@@ -99,7 +100,7 @@
                 </td>
 
                 <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
-                    {{ agent.company or '-' }}
+                    {{ company_badges(agent.companies) }}
                 </td>
 
                 <td class="px-3 sm:px-6 py-3 sm:py-4">
@@ -126,7 +127,7 @@
                                 {{ (agent.dni or "") | tojson }},
                                 {{ (agent.phone or "") | tojson }},
                                 {{ (agent.zone or "") | tojson }},
-                                {{ (agent.company or "") | tojson }},
+                                {{ (agent.companies | map(attribute="id") | list) | tojson }},
                                 {{ (agent.signature_filepath or "") | tojson }},
                                 {{ (agent.signature_uploaded_at | madrid_dt("%d/%m/%Y %H:%M") if agent.signature_uploaded_at else "") | tojson }}
                             )'

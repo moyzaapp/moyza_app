@@ -24,6 +24,16 @@ class Buyer(Base):
 
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
+    # Empresa en la que se captó al comprador (MOYZA o MOES)
+    company_id = Column(
+        Integer,
+        ForeignKey("companies.id"),
+        nullable=False,
+        index=True
+    )
+
+    company = relationship("Company", back_populates="buyers")
+
     alerts = relationship(
         "PropertyAlert",
         back_populates="buyer",

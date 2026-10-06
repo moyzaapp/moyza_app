@@ -24,6 +24,21 @@ from app.models.agent import Agent
 from app.models.property import Property
 
 from app.web.dependencies.auth import is_admin, get_agent_from_user, deny_if_not_admin
+from app.web.dependencies.company import get_active_company
+from app.services.company_scope import (
+    scope_agents,
+    scope_properties,
+    get_agent_in_company,
+    add_to_company,
+    remove_from_company,
+)
+from app.services.company_service import (
+    list_active_companies,
+    resolve_companies,
+    companies_label,
+    company_ids_from_form,
+)
+from app.web.utils.flash import set_flash
 
 
 router = APIRouter()
@@ -61,6 +76,7 @@ async def agents_page(
     error = request.query_params.get("error")
 
     current_user = request.state.user
+    company = get_active_company(request)
 
     search = (request.query_params.get("search") or "").strip()
 
@@ -68,11 +84,11 @@ async def agents_page(
     # y es el único que puede crear o eliminar agentes
     can_manage = is_admin(current_user)
 
-    # Si es admin, mostrar todos los agentes
+    # Si es admin, mostrar todos los agentes de la empresa activa
     # Si es agente, mostrar solo su propio perfil
     if can_manage:
 
-        base_query = db.query(Agent)
+        base_query = scope_agents(db.query(Agent), company.id)
 
         if search:
             pattern = f"%{search}%"
@@ -102,7 +118,9 @@ async def agents_page(
             "current_user": current_user,
             "error": error,
             "search": search,
-            "can_manage": can_manage
+            "can_manage": can_manage,
+            # Empresas asignables en el formulario de agente
+            "all_companies": list_active_companies(db),
         }
     )
 
@@ -125,6 +143,16 @@ async def create_agent(
     if denied:
         return denied
 
+    active_company = get_active_company(request)
+
+    # Empresas marcadas en el formulario; sin ninguna, la empresa activa
+    form = await request.form()
+    selected_companies = resolve_companies(
+        db,
+        company_ids_from_form(form),
+        fallback=[active_company]
+    )
+
     # Solo el nombre es obligatorio; el resto es opcional.
     # Se normaliza aquí para no depender de la validación de FastAPI, que
     # devolvería un 422 sin plantilla (la página "se caía").
@@ -145,6 +173,28 @@ async def create_agent(
         ).first()
 
         if existing_agent:
+            # Un agente puede trabajar en ambas empresas: si ya existe en la
+            # otra, se le añade a las marcadas en vez de duplicar la ficha.
+            try:
+                added = [
+                    c.name for c in selected_companies
+                    if add_to_company(db, existing_agent, c.id)
+                ]
+                if added:
+                    existing_agent.company = companies_label(existing_agent.companies)
+                    db.commit()
+                    response = RedirectResponse(url="/agents", status_code=302)
+                    set_flash(
+                        response,
+                        "success",
+                        f"{existing_agent.name} ya existía como agente y se ha añadido a {', '.join(added)}."
+                    )
+                    return response
+            except Exception:
+                db.rollback()
+                logger.exception("Error añadiendo agente existente a empresa: email=%s", email)
+                return RedirectResponse(url="/agents?error=save_failed", status_code=302)
+
             return RedirectResponse(
                 url="/agents?error=email_exists",
                 status_code=302
@@ -157,8 +207,9 @@ async def create_agent(
             dni=_clean(dni),
             phone=_clean(phone),
             zone=_clean(zone),
-            company=_clean(company)
+            company=companies_label(selected_companies)
         )
+        agent.companies = list(selected_companies)
 
         db.add(agent)
 
@@ -208,9 +259,8 @@ async def update_agent(
             status_code=302
         )
 
-    agent = db.query(Agent).filter(
-        Agent.id == agent_id
-    ).first()
+    # Solo se pueden editar agentes de la empresa activa
+    agent = get_agent_in_company(db, agent_id, get_active_company(request).id)
 
     if not agent:
         return RedirectResponse(
@@ -242,7 +292,17 @@ async def update_agent(
         agent.dni = _clean(dni)
         agent.phone = _clean(phone)
         agent.zone = _clean(zone)
-        agent.company = _clean(company)
+
+        # Solo el admin puede cambiar las empresas del agente; un agente que
+        # edita su propio perfil no puede darse acceso a otra empresa.
+        if is_admin(getattr(request.state, "user", None)):
+            form = await request.form()
+            agent.companies = list(resolve_companies(
+                db,
+                company_ids_from_form(form),
+                fallback=list(agent.companies)
+            ))
+        agent.company = companies_label(agent.companies)
 
         db.commit()
 
@@ -273,8 +333,20 @@ async def delete_agent(
     if denied:
         return denied
 
-    properties = db.query(Property).filter(
-        Property.agent_id == agent_id
+    active_company = get_active_company(request)
+
+    agent = get_agent_in_company(db, agent_id, active_company.id)
+
+    if not agent:
+        return RedirectResponse(
+            url="/agents?error=agent_not_found",
+            status_code=302
+        )
+
+    # No se puede dar de baja si tiene propiedades en la empresa activa
+    properties = scope_properties(
+        db.query(Property).filter(Property.agent_id == agent_id),
+        active_company.id
     ).count()
 
     if properties > 0:
@@ -283,15 +355,23 @@ async def delete_agent(
             status_code=302
         )
 
-    agent = db.query(Agent).filter(
-        Agent.id == agent_id
-    ).first()
-
-    if agent:
-
-        db.delete(agent)
-
+    # Si el agente también trabaja en la otra empresa, solo se le quita de
+    # esta; la ficha se elimina únicamente cuando no queda en ninguna.
+    if len(agent.companies) > 1:
+        remove_from_company(db, agent, active_company.id)
         db.commit()
+
+        response = RedirectResponse(url="/agents", status_code=302)
+        set_flash(
+            response,
+            "success",
+            f"{agent.name} se ha quitado de {active_company.name}. Sigue activo en sus otras empresas."
+        )
+        return response
+
+    db.delete(agent)
+
+    db.commit()
 
     return RedirectResponse(
         url="/agents",
@@ -310,9 +390,7 @@ async def upload_agent_signature(
     Endpoint para subir la firma del agente.
     signature_data viene como base64 string desde el canvas del frontend
     """
-    agent = db.query(Agent).filter(
-        Agent.id == agent_id
-    ).first()
+    agent = get_agent_in_company(db, agent_id, get_active_company(request).id)
 
     if not agent:
         return RedirectResponse(

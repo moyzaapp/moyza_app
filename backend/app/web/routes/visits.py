@@ -26,6 +26,13 @@ from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, get_agent_from_user
 from app.core.constants import PhoneCountryCodes
 from app.services.visit_whatsapp_log_service import log_whatsapp_attempt
+from app.services.company_scope import (
+    scope_visits,
+    scope_properties,
+    get_visit_in_company,
+    get_property_in_company,
+)
+from app.web.dependencies.company import get_active_company
 
 
 router = APIRouter()
@@ -43,9 +50,9 @@ async def visits_page(
 ):
     current_user = request.state.user
 
-    # Si es admin, mostrar todas las visitas
+    # Si es admin, mostrar todas las visitas de la empresa activa
     # Si es agente, mostrar solo visitas de sus propiedades
-    visits_query = db.query(PropertyVisit)
+    visits_query = scope_visits(db.query(PropertyVisit), get_active_company(request).id)
 
     if not is_admin(current_user):
         agent = get_agent_from_user(current_user, db)
@@ -78,9 +85,12 @@ async def select_property(
 
     current_user = request.state.user
 
-    properties_query = db.query(Property).filter(
-        Property.status != PropertyStatus.ARCHIVED,
-        Property.available_clause()
+    properties_query = scope_properties(
+        db.query(Property).filter(
+            Property.status != PropertyStatus.ARCHIVED,
+            Property.available_clause()
+        ),
+        get_active_company(request).id
     )
 
     # Si no es admin, filtrar solo sus propiedades
@@ -110,11 +120,7 @@ async def new_visit(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    property_item = (
-        db.query(Property)
-        .filter(Property.id == property_id)
-        .first()
-    )
+    property_item = get_property_in_company(db, property_id, get_active_company(request).id)
 
     if not property_item:
         response = RedirectResponse(url="/properties", status_code=302)
@@ -147,7 +153,7 @@ async def create_visit(
 ):
     from app.services.visit_audit_service import log_visit_event
 
-    property_item = db.query(Property).filter(Property.id == property_id).first()
+    property_item = get_property_in_company(db, property_id, get_active_company(request).id)
 
     if not property_item or not property_item.is_available:
         response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
@@ -254,9 +260,7 @@ async def download_visit_sheet(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
+    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
 
     if not visit or not visit.visit_sheet_filepath:
         response = RedirectResponse(url="/properties", status_code=302)
@@ -283,9 +287,7 @@ async def send_visit_sheet_whatsapp(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
+    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
 
     redirect_url = request.headers.get("referer") or "/visits"
 
@@ -405,11 +407,8 @@ async def preview_visit(
     FASE 2 del nuevo flujo legal.
     """
     from app.services.visit_audit_service import log_visit_event
-    from pathlib import Path
 
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
+    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -445,16 +444,17 @@ async def preview_visit(
             event_data={'viewed_at': datetime.utcnow().isoformat()}
         )
 
+    # Identidad de la empresa propietaria del inmueble: el preview debe
+    # coincidir exactamente con el PDF que se firmará.
+    from app.services.company_service import branding_for
+    brand = branding_for(property_item.company)
+
     # Preparar datos para el template
     visit_date = visit.created_at.strftime("%d/%m/%Y") if visit.created_at else datetime.now().strftime("%d/%m/%Y")
     visit_time = visit.created_at.strftime("%H:%M") if visit.created_at else datetime.now().strftime("%H:%M")
-    agent_name = property_item.agent.name if property_item.agent else "Agente MOYZA"
+    agent_name = property_item.agent.name if property_item.agent else f"Agente {brand.name}"
 
-    # Verificar si existe el logo
-    logo_path = Path("app/static/logo_moyza.png")
-    if not logo_path.exists():
-        logo_path = Path("backend/app/static/logo_moyza.png")
-    logo_exists = logo_path.exists()
+    logo_exists = brand.logo_fs_path is not None
 
     return templates.TemplateResponse(
         request=request,
@@ -467,6 +467,7 @@ async def preview_visit(
             "visit_time": visit_time,
             "agent_name": agent_name,
             "logo_exists": logo_exists,
+            "brand": brand,
             "current_user": request.state.user
         }
     )
@@ -482,9 +483,7 @@ async def signature_visit(
     Muestra el canvas de firma digital.
     FASE 3 del nuevo flujo legal.
     """
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
+    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -524,9 +523,7 @@ async def complete_visit_page(
     Página de confirmación que finaliza el proceso y genera el PDF.
     FASE 4 del nuevo flujo legal.
     """
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
+    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -566,9 +563,7 @@ async def edit_visit(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
+    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -597,9 +592,7 @@ async def update_visit(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
+    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -718,9 +711,7 @@ async def delete_visit(
 ):
     import os
 
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
+    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
 
     response = RedirectResponse(url="/visits", status_code=302)
 
@@ -752,9 +743,7 @@ async def generate_visit_pdf(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
+    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
 
     redirect_url = request.headers.get("referer") or "/visits"
 

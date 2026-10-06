@@ -20,6 +20,8 @@ from reportlab.platypus.flowables import HRFlowable
 from reportlab.lib.units import cm
 from xml.sax.saxutils import escape
 
+from app.services.company_service import branding_for
+
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +46,17 @@ def generate_visit_sheet(
     property_item,
     visit,
     agent,
-    output_path
+    output_path,
+    company=None
 ):
     """
-    Genera la Ficha de Visita Inmobiliaria en PDF según el formato oficial de MOYZA
+    Genera la Ficha de Visita Inmobiliaria en PDF con la identidad de la
+    empresa propietaria del inmueble (MOYZA o MOES PREMIUM).
+
+    `company` es opcional: por defecto se usa la empresa de la propiedad.
     """
+
+    brand = branding_for(company or getattr(property_item, "company", None))
 
     doc = SimpleDocTemplate(
         output_path,
@@ -108,10 +116,7 @@ def generate_visit_sheet(
     # HEADER CON LOGO
     # =========================
 
-    logo_path = _first_existing_path(
-        "app/static/logo_moyza.png",
-        "backend/app/static/logo_moyza.png"
-    )
+    logo_path = brand.logo_fs_path
     if logo_path:
         logo = Image(logo_path)
         logo_height = 2 * cm
@@ -128,7 +133,7 @@ def generate_visit_sheet(
 
     elements.append(
         Paragraph(
-            "FICHA DE VISITA INMOBILIARIA MOYZA",
+            f"FICHA DE VISITA INMOBILIARIA {_safe_text(brand.name)}",
             title_style
         )
     )
@@ -292,13 +297,13 @@ def generate_visit_sheet(
     # TEXTO LEGAL
     # =========================
 
-    agent_name = agent.name if agent else "Agente MOYZA"
+    agent_name = _safe_text(agent.name) if agent else f"Agente {_safe_text(brand.name)}"
     visit_time = visit.created_at.strftime("%H:%M") if visit.created_at else datetime.now().strftime("%H:%M")
 
     legal_text = f"""
     El presente documento es emitido por el asesor inmobiliario <b>{agent_name}</b>
-    en calidad de representante de la agencia inmobiliaria MOYZA con domicilio fiscal en
-    Avda. Doctor Eduardo García Triviño López 9, 23009 (Jaén).
+    en calidad de representante de la agencia inmobiliaria {_safe_text(brand.name)} con domicilio fiscal en
+    {_safe_text(brand.fiscal_address)}.
     <br/><br/>
     El interesado declara que ha visitado el inmueble con fecha <b>{visit_date}</b> a las <b>{visit_time}</b> horas
     con esta agencia y que no lo había visitado antes, acompañado por el agente de la inmobiliaria.
@@ -434,11 +439,11 @@ def generate_visit_sheet(
 
     elements.append(Spacer(1, 5))
 
-    footer_text = """
-    <b>Responsable:</b> Moyza 2012 S.L.<br/>
-    <b>C.I.F.:</b> B16914012<br/>
-    <b>Dirección postal:</b> Avda. Doctor Eduardo García Triviño López 9, 23009 (Jaén)<br/>
-    <b>Tlf:</b> 642 497 955 / 953 940 956
+    footer_text = f"""
+    <b>Responsable:</b> {_safe_text(brand.legal_name)}<br/>
+    <b>C.I.F.:</b> {_safe_text(brand.tax_id)}<br/>
+    <b>Dirección postal:</b> {_safe_text(brand.fiscal_address)}<br/>
+    <b>Tlf:</b> {_safe_text(brand.phone)}
     """
 
     elements.append(
@@ -454,22 +459,15 @@ def generate_visit_sheet(
     # AUTORIZACIÓN RGPD
     # =========================
 
-    rgpd_text = """
+    rgpd_text = f"""
     <b>AUTORIZACIÓN DE USO DE DATOS PERSONALES CONFORME AL REGLAMENTO GENERAL DE PROTECCIÓN DE DATOS (RGPD)</b>
     <br/><br/>
-    En nombre de la empresa Inmobiliaria MOYZA tratamos la información que nos facilita con el fin de prestarles
-    el servicio solicitado y realizar la facturación del mismo. Los datos proporcionados se conservarán mientras
-    se mantenga la relación comercial o durante los meses necesarios para cumplir con las obligaciones legales.
-    Los datos no se cederán a terceros salvo en los casos en que exista una obligación legal. Usted tiene derecho
-    a obtener confirmación sobre si en Inmobiliaria MOYZA estamos tratando sus datos personales, por tanto tiene
-    derecho a acceder a sus datos personales, rectificar los datos inexactos o solicitar su supresión cuando los
-    datos ya no sean necesarios.
+    {_safe_text(brand.rgpd_text)}
     <br/><br/>
     Asimismo solicito su autorización para ofrecerle productos y servicios relacionados con los solicitados y
     fidelizarle como cliente.
     <br/><br/>
-    <b>Autorizo a que mis datos sean tratados por Inmobiliaria MOYZA hasta que finalice la operación o se
-    comunique por mi parte rescindir la misma.</b>
+    <b>{_safe_text(brand.rgpd_consent_text)}</b>
     """
 
     elements.append(
@@ -515,7 +513,7 @@ def generate_visit_sheet(
             ip_masked = f"{ip_parts[0]}.{ip_parts[1]}.xxx.xxx"
             validation_metadata += f"IP de validación: {ip_masked}<br/>"
 
-    validation_metadata += f"ID de documento: MOYZA-VISIT-{visit.id}-{property_item.id}<br/>"
+    validation_metadata += f"ID de documento: {_safe_text(brand.document_id(visit.id, property_item.id))}<br/>"
 
     validation_style = ParagraphStyle(
         "ValidationStyle",

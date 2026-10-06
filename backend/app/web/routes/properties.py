@@ -34,7 +34,16 @@ from app.services.ai_valuation import AIValuationService
 
 from pathlib import Path
 
+from app.services.company_scope import (
+    scope_properties,
+    scope_agents,
+    scope_clients,
+    get_property_in_company,
+    get_agent_in_company,
+    get_client_in_company,
+)
 from app.services.property_metrics import PropertyMetricsService
+from app.web.dependencies.company import get_active_company
 from app.services.report_generator import generate_property_report
 from app.web.utils.flash import set_flash
 from app.web.utils.property_form import extract_fields
@@ -142,6 +151,7 @@ async def properties_page(
 ):
 
     current_user = request.state.user
+    company = get_active_company(request)
 
     # Filtro por tarjeta: 'activas' | 'no_disponible' | '' (todas)
     filtro = filtro if filtro in ("activas", "no_disponible") else ""
@@ -158,9 +168,12 @@ async def properties_page(
     show_others_tab = not admin_view and agent is not None
     tab = "others" if (tab == "others" and show_others_tab) else "mine"
 
-    # Si es admin, mostrar todas las propiedades
+    # Si es admin, mostrar todas las propiedades de la empresa activa
     # Si es agente, mostrar solo sus propiedades
-    base_query = db.query(Property).filter(Property.status != PropertyStatus.ARCHIVED)
+    base_query = scope_properties(
+        db.query(Property).filter(Property.status != PropertyStatus.ARCHIVED),
+        company.id
+    )
 
     if not admin_view:
         if agent:
@@ -169,9 +182,10 @@ async def properties_page(
             # Si no es admin y no tiene agente asociado, no mostrar nada
             base_query = base_query.filter(Property.id == -1)
 
-    clients = db.query(Client).all()
+    # Selectores del formulario: solo clientes y agentes de la empresa activa
+    clients = scope_clients(db.query(Client), company.id).order_by(Client.name).all()
 
-    agents = db.query(Agent).all()
+    agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name).all()
 
     # Una propiedad No disponible no cuenta como Activa aunque su status sea Activa.
     is_not_available = Property.not_available_clause()
@@ -226,10 +240,13 @@ async def properties_page(
     other_count = 0
 
     if show_others_tab:
-        others_base = db.query(Property).filter(
-            Property.status == PropertyStatus.ACTIVE,
-            Property.available_clause(),
-            or_(Property.agent_id != agent.id, Property.agent_id.is_(None)),
+        others_base = scope_properties(
+            db.query(Property).filter(
+                Property.status == PropertyStatus.ACTIVE,
+                Property.available_clause(),
+                or_(Property.agent_id != agent.id, Property.agent_id.is_(None)),
+            ),
+            company.id
         )
         other_count = others_base.count()
 
@@ -312,6 +329,8 @@ async def create_property(
     if denied:
         return denied
 
+    company = get_active_company(request)
+
     # Campos replicados de la tabla externa de propiedades
     form = await request.form()
     external_fields, field_errors = extract_fields(form)
@@ -319,6 +338,17 @@ async def create_property(
     if field_errors:
         response = RedirectResponse(url="/properties", status_code=302)
         set_flash(response, "error", field_errors[0])
+        return response
+
+    # El cliente y el agente deben pertenecer a la empresa activa
+    if not get_client_in_company(db, client_id, company.id):
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", f"El cliente seleccionado no pertenece a {company.name}")
+        return response
+
+    if not get_agent_in_company(db, agent_id, company.id):
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", f"El agente seleccionado no pertenece a {company.name}")
         return response
 
     try:
@@ -331,6 +361,7 @@ async def create_property(
             client_id=client_id,
             agent_id=agent_id,
             status=PropertyStatus.ACTIVE,
+            company_id=company.id,
             **external_fields
         )
 
@@ -386,13 +417,24 @@ async def update_property(
         set_flash(response, "error", field_errors[0])
         return response
 
-    property = db.query(Property).filter(
-        Property.id == property_id
-    ).first()
+    company = get_active_company(request)
+
+    property = get_property_in_company(db, property_id, company.id)
 
     if not property:
         response = RedirectResponse(url="/properties", status_code=302)
         set_flash(response, "error", "Propiedad no encontrada")
+        return response
+
+    # El cliente y el agente deben pertenecer a la empresa activa
+    if not get_client_in_company(db, client_id, company.id):
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "error", f"El cliente seleccionado no pertenece a {company.name}")
+        return response
+
+    if not get_agent_in_company(db, agent_id, company.id):
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "error", f"El agente seleccionado no pertenece a {company.name}")
         return response
 
     try:
@@ -470,9 +512,7 @@ async def delete_property(
     if denied:
         return denied
 
-    property = db.query(Property).filter(
-        Property.id == property_id
-    ).first()
+    property = get_property_in_company(db, property_id, get_active_company(request).id)
 
     if not property:
         response = RedirectResponse(url="/properties", status_code=302)
@@ -520,11 +560,8 @@ async def property_detail(
         db: Session = Depends(get_db)
     ):
 
-    property_item = (
-        db.query(Property)
-        .filter(Property.id == property_id)
-        .first()
-    )
+    # Una propiedad de la otra empresa no existe para esta vista
+    property_item = get_property_in_company(db, property_id, get_active_company(request).id)
 
     if not property_item:
         return RedirectResponse(
@@ -645,6 +682,11 @@ async def create_interaction(
 
     current_user = request.state.user
 
+    if not get_property_in_company(db, property_id, get_active_company(request).id):
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
+
     if not PropertyInteractionType.is_valid(interaction_type):
         logger.warning(
             "Tipo de interacción inválido: property_id=%s interaction_type=%s",
@@ -691,11 +733,7 @@ async def generate_report(
         db: Session = Depends(get_db)
     ):
 
-    property_item = (
-        db.query(Property)
-        .filter(Property.id == property_id)
-        .first()
-    )
+    property_item = get_property_in_company(db, property_id, get_active_company(request).id)
 
     if not property_item:
         response = RedirectResponse(url="/properties", status_code=302)
@@ -764,15 +802,34 @@ async def properties_last_update(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Última actividad sobre propiedades: precio, estado o interacción."""
-    from app.models.property_price_history import PropertyPriceHistory
-    from app.models.property_status_history import PropertyStatusHistory
-    from app.models.property_change_log import PropertyChangeLog
+    """Última actividad sobre propiedades de la empresa activa: precio, estado o cambio."""
+    from app.web.dependencies.company import get_api_user, resolve_company_for_api
 
-    t1 = db.query(func.max(PropertyPriceHistory.created_at)).scalar()
-    t2 = db.query(func.max(PropertyStatusHistory.created_at)).scalar()
-    t3 = db.query(func.max(Property.market_entry_date)).scalar()
-    t4 = db.query(func.max(PropertyChangeLog.created_at)).scalar()
+    # Las rutas /api no pasan por AuthMiddleware: resolver usuario y empresa aquí
+    user = get_api_user(request, db)
+    company = resolve_company_for_api(request, user, db) if user else None
+
+    if company is None:
+        return JSONResponse({"last_update": None})
+
+    in_company = Property.company_id == company.id
+
+    t1 = (
+        db.query(func.max(PropertyPriceHistory.created_at))
+        .join(Property, Property.id == PropertyPriceHistory.property_id)
+        .filter(in_company).scalar()
+    )
+    t2 = (
+        db.query(func.max(PropertyStatusHistory.created_at))
+        .join(Property, Property.id == PropertyStatusHistory.property_id)
+        .filter(in_company).scalar()
+    )
+    t3 = db.query(func.max(Property.market_entry_date)).filter(in_company).scalar()
+    t4 = (
+        db.query(func.max(PropertyChangeLog.created_at))
+        .join(Property, Property.id == PropertyChangeLog.property_id)
+        .filter(in_company).scalar()
+    )
 
     candidates = [t for t in [t1, t2, t3, t4] if t is not None]
     result = max(candidates) if candidates else None

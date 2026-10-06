@@ -1,0 +1,40 @@
+{#
+  Macros de empresa (MOYZA / MOES PREMIUM) para formularios y listados.
+
+  company_badges(items)      -> chips con el punto de color de cada empresa
+  company_checkboxes(...)    -> grupo de checkboxes `company_ids` para asignar empresas
+#}
+
+{% macro company_badges(items) %}
+    {% if items %}
+    <div class="flex flex-wrap gap-1">
+        {% for c in items %}
+        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 whitespace-nowrap">
+            <span class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: {{ c.primary_color or '#000000' }}"></span>
+            {{ c.name }}
+        </span>
+        {% endfor %}
+    </div>
+    {% else %}
+    <span class="text-gray-400">—</span>
+    {% endif %}
+{% endmacro %}
+
+{% macro company_checkboxes(all_companies, selected_ids, id_prefix) %}
+    <div class="flex flex-wrap gap-2 sm:gap-3" data-company-group="{{ id_prefix }}">
+        {% for c in all_companies %}
+        <label class="inline-flex items-center gap-2 border border-gray-300 rounded-xl px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm select-none">
+            <input
+                type="checkbox"
+                name="company_ids"
+                value="{{ c.id }}"
+                id="{{ id_prefix }}_company_{{ c.id }}"
+                class="rounded border-gray-300"
+                {% if c.id in selected_ids %}checked{% endif %}
+            >
+            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background-color: {{ c.primary_color or '#000000' }}"></span>
+            <span>{{ c.name }}</span>
+        </label>
+        {% endfor %}
+    </div>
+{% endmacro %}

@@ -18,6 +18,8 @@ from app.models.agent import Agent
 from app.services.performance_report_service import PerformanceReportService
 from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, require_admin_role
+from app.web.dependencies.company import get_active_company
+from app.services.company_scope import scope_agents, get_agent_in_company
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -96,7 +98,12 @@ async def performance_reports(
     # No mostrar botón "siguiente" si el período siguiente es futuro
     show_next = next_start <= current_start
 
-    agents = db.query(Agent).order_by(Agent.name.asc()).all()
+    # Solo agentes de la empresa activa
+    agents = (
+        scope_agents(db.query(Agent), get_active_company(request).id)
+        .order_by(Agent.name.asc())
+        .all()
+    )
 
     agents_data = []
     for agent in agents:
@@ -171,6 +178,11 @@ async def save_targets(
         except (ValueError, TypeError):
             return None
 
+    if not get_agent_in_company(db, agent_id, get_active_company(request).id):
+        response = RedirectResponse(url="/alerts-dashboard?tab=rendimiento", status_code=302)
+        set_flash(response, "error", "Agente no encontrado en la empresa activa")
+        return response
+
     ps, _ = _parse_period(period_type, period_start_str)
 
     svc = PerformanceReportService(db)
@@ -229,6 +241,11 @@ async def save_notes(
     if not is_admin(current_user):
         response = RedirectResponse(url="/alerts", status_code=302)
         set_flash(response, "error", "Acceso no autorizado")
+        return response
+
+    if not get_agent_in_company(db, agent_id, get_active_company(request).id):
+        response = RedirectResponse(url="/alerts-dashboard?tab=rendimiento", status_code=302)
+        set_flash(response, "error", "Agente no encontrado en la empresa activa")
         return response
 
     ps, pe = _parse_period(period_type, period_start_str)

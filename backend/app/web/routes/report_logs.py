@@ -11,8 +11,34 @@ from app.models.visit_whatsapp_log import VisitWhatsappLog
 from app.models.property import Property
 from app.models.report import Report
 from app.services.report_job_service import ReportJobService
+from app.services.company_scope import scope_properties, scope_agents
+from app.models.agent import Agent
+from app.web.dependencies.company import get_active_company
+from app.web.dependencies.company import get_api_user
+from app.web.dependencies.company import resolve_company_for_api
 
 router = APIRouter()
+
+
+def _scope_report_logs(query, company_id: int):
+    return query.filter(ReportJobLog.property.has(Property.company_id == company_id))
+
+
+def _scope_reminder_logs(query, company_id: int):
+    agent_ids = scope_agents(query.session.query(Agent.id), company_id).subquery()
+    return query.filter(AlertReminderLog.agent_id.in_(agent_ids))
+
+
+def _scope_visit_whatsapp_logs(query, company_id: int):
+    return query.filter(VisitWhatsappLog.property.has(Property.company_id == company_id))
+
+
+def _api_company(request: Request, db: Session):
+    """Empresa activa para los endpoints /api (sin AuthMiddleware). None si no hay sesión."""
+    user = get_api_user(request, db)
+    if not user:
+        return None
+    return resolve_company_for_api(request, user, db)
 
 
 
@@ -27,24 +53,29 @@ async def report_logs_page(
     visit_whatsapp_status: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    query = db.query(ReportJobLog)
+    company = get_active_company(request)
+
+    query = _scope_report_logs(db.query(ReportJobLog), company.id)
     if status:
         query = query.filter(ReportJobLog.status == status)
     if property_id:
         query = query.filter(ReportJobLog.property_id == property_id)
     logs = query.order_by(ReportJobLog.job_run_at.desc()).limit(limit).all()
 
-    reminder_query = db.query(AlertReminderLog)
+    reminder_query = _scope_reminder_logs(db.query(AlertReminderLog), company.id)
     if reminder_status:
         reminder_query = reminder_query.filter(AlertReminderLog.status == reminder_status)
     reminder_logs = reminder_query.order_by(AlertReminderLog.executed_at.desc()).limit(limit).all()
 
-    visit_whatsapp_query = db.query(VisitWhatsappLog)
+    visit_whatsapp_query = _scope_visit_whatsapp_logs(db.query(VisitWhatsappLog), company.id)
     if visit_whatsapp_status:
         visit_whatsapp_query = visit_whatsapp_query.filter(VisitWhatsappLog.status == visit_whatsapp_status)
     visit_whatsapp_logs = visit_whatsapp_query.order_by(VisitWhatsappLog.attempted_at.desc()).limit(limit).all()
 
-    properties = db.query(Property).filter(Property.auto_send_report == True).all()
+    properties = scope_properties(
+        db.query(Property).filter(Property.auto_send_report == True),
+        company.id
+    ).all()
 
     return templates.TemplateResponse(
         request=request,
@@ -67,15 +98,20 @@ async def report_logs_page(
 
 @router.get("/api/report-logs", response_class=JSONResponse)
 async def get_report_logs_api(
+    request: Request,
     status: Optional[str] = Query(None),
     property_id: Optional[int] = Query(None),
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
-    API endpoint para obtener logs de reportes en formato JSON.
+    API endpoint para obtener logs de reportes en formato JSON (empresa activa).
     """
-    query = db.query(ReportJobLog)
+    company = _api_company(request, db)
+    if company is None:
+        return JSONResponse(status_code=401, content={"logs": [], "total": 0})
+
+    query = _scope_report_logs(db.query(ReportJobLog), company.id)
 
     if status:
         query = query.filter(ReportJobLog.status == status)
@@ -126,11 +162,16 @@ async def retry_failed_report(
 
 @router.get("/api/reminder-logs")
 async def get_reminder_logs_api(
+    request: Request,
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
-    query = db.query(AlertReminderLog)
+    company = _api_company(request, db)
+    if company is None:
+        return JSONResponse(status_code=401, content={"logs": [], "total": 0})
+
+    query = _scope_reminder_logs(db.query(AlertReminderLog), company.id)
     if status:
         query = query.filter(AlertReminderLog.status == status)
     logs = query.order_by(AlertReminderLog.executed_at.desc()).limit(limit).all()
@@ -154,15 +195,21 @@ async def get_reminder_logs_api(
 
 
 @router.get("/api/report-logs/stats")
-async def get_report_stats(db: Session = Depends(get_db)):
+async def get_report_stats(request: Request, db: Session = Depends(get_db)):
     """
-    Endpoint para obtener estadísticas de los reportes.
+    Endpoint para obtener estadísticas de los reportes de la empresa activa.
     """
-    total_logs = db.query(ReportJobLog).count()
-    success_count = db.query(ReportJobLog).filter(ReportJobLog.status == "success").count()
-    failed_count = db.query(ReportJobLog).filter(ReportJobLog.status == "failed").count()
-    pending_count = db.query(ReportJobLog).filter(ReportJobLog.status == "pending").count()
-    skipped_count = db.query(ReportJobLog).filter(ReportJobLog.status == "skipped").count()
+    company = _api_company(request, db)
+    if company is None:
+        return JSONResponse(status_code=401, content={"error": "No autenticado"})
+
+    base = _scope_report_logs(db.query(ReportJobLog), company.id)
+
+    total_logs = base.count()
+    success_count = base.filter(ReportJobLog.status == "success").count()
+    failed_count = base.filter(ReportJobLog.status == "failed").count()
+    pending_count = base.filter(ReportJobLog.status == "pending").count()
+    skipped_count = base.filter(ReportJobLog.status == "skipped").count()
 
     return {
         "total": total_logs,

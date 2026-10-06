@@ -59,7 +59,9 @@ async def auth_page(
     if isinstance(admin_user, RedirectResponse):
         return admin_user
 
-    users = db.query(User).all()
+    from app.services.company_service import list_active_companies
+
+    users = db.query(User).order_by(User.full_name).all()
 
     roles = db.query(Role).all()
 
@@ -75,9 +77,14 @@ async def auth_page(
             "users": users,
             "roles": roles,
             "permissions": permissions,
-            "current_user": current_user
+            "current_user": current_user,
+            # Empresas asignables en los formularios de usuario
+            "all_companies": list_active_companies(db),
         }
     )
+
+
+from app.services.company_service import company_ids_from_form as _company_ids_from_form
 
 
 
@@ -175,6 +182,8 @@ async def create_user_endpoint(
 
     response = RedirectResponse(url="/auth", status_code=303)
 
+    form = await request.form()
+
     try:
         user_data = UserCreate(
             email=email,
@@ -182,10 +191,18 @@ async def create_user_endpoint(
             password=password,
             role_id=role_id,
             phone=phone,
-            company=company
+            company=company,
+            company_ids=_company_ids_from_form(form),
         )
 
-        create_user(db, user_data, background_tasks)
+        # El correo de bienvenida lleva la marca de la empresa activa del admin
+        active_company = getattr(request.state, "company", None)
+        create_user(
+            db,
+            user_data,
+            background_tasks,
+            company_name=active_company.name if active_company else None,
+        )
         set_flash(response, "success", "Usuario creado correctamente. Se envió el correo de bienvenida.")
 
     except ValidationError as e:
@@ -217,12 +234,15 @@ async def update_user_endpoint(
 
     response = RedirectResponse(url="/auth", status_code=303)
 
+    form = await request.form()
+
     try:
         user_data = UserUpdate(
             full_name=full_name,
             role_id=role_id,
             phone=phone,
-            company=company
+            company=company,
+            company_ids=_company_ids_from_form(form),
         )
 
         update_user(db, user_id, user_data)
@@ -262,11 +282,14 @@ async def change_password_endpoint(
     try:
         user = change_user_password(db, user_id, password)
 
+        active_company = getattr(request.state, "company", None)
+
         background_tasks.add_task(
             send_password_changed_email,
             email=user.email,
             full_name=user.full_name,
             password=password,
+            company_name=active_company.name if active_company else None,
         )
 
         set_flash(
