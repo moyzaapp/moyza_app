@@ -576,15 +576,19 @@
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
-                                <input type="tel" name="buyer_phone"
+                                <input type="tel" name="buyer_phone" id="buyerPhoneInput"
                                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                                <input type="email" name="buyer_email"
+                                <input type="email" name="buyer_email" id="buyerEmailInput"
                                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
                             </div>
                         </div>
+
+                        <!-- Aviso: ya existe un comprador con ese teléfono o correo -->
+                        <div id="buyerMatchBanner" class="hidden"></div>
+                        <input type="hidden" name="confirm_new_buyer" id="confirmNewBuyer">
                     </div>
                 </div>
 
@@ -622,10 +626,14 @@
                     </div>
                 </div>
 
+                <!-- Aviso: ya existe una alerta para este comprador y esta propiedad -->
+                <div id="dupBanner" class="hidden"></div>
+                <input type="hidden" name="confirm_duplicate" id="confirmDuplicate">
+
                 <!-- Origen -->
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-2">Origen / Portal</label>
-                    <input type="text" name="source" placeholder="Ej: Idealista, Fotocasa, Web, Llamada"
+                    <input type="text" name="source" id="alertSourceInput" placeholder="Ej: Idealista, Fotocasa, Web, Llamada"
                         class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                 </div>
 
@@ -649,7 +657,7 @@
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Prioridad</label>
-                        <select name="priority" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
+                        <select name="priority" id="alertPrioritySelect" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
                             <option value="NORMAL">Normal</option>
                             <option value="ALTA">Alta</option>
                             <option value="BAJA">Baja</option>
@@ -659,7 +667,7 @@
 
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-2">Mensaje / Notas</label>
-                    <textarea name="message" rows="3"
+                    <textarea name="message" id="alertMessageInput" rows="3"
                         class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"></textarea>
                 </div>
             </div>
@@ -669,7 +677,7 @@
                     class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
                     Cancelar
                 </button>
-                <button type="submit"
+                <button type="submit" id="createAlertSubmit"
                     class="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
                     Crear Alerta
                 </button>
@@ -678,6 +686,7 @@
     </div>
 </div>
 
+<script src="/static/js/alert-duplicates.js"></script>
 <script>
 
 // ---- Modales ----
@@ -759,6 +768,8 @@ function setBuyerMode(mode) {
         buyerNameInput.setAttribute('required', 'required');
         clearBuyerSelection();
     }
+
+    if (window.alertDupRefresh) window.alertDupRefresh();
 }
 
 // ---- Autocompletado compradores ----
@@ -830,7 +841,11 @@ function setBuyerMode(mode) {
         selected.classList.remove('hidden');
 
         hideResults();
+        if (window.alertDupRefresh) window.alertDupRefresh();
     }
+
+    // Permite seleccionar un comprador desde fuera (aviso de comprador ya registrado)
+    window.selectExistingBuyer = selectBuyer;
 
     window.clearBuyerSelection = function () {
         hidden.value = '';
@@ -838,6 +853,7 @@ function setBuyerMode(mode) {
         input.classList.remove('hidden');
         input.value = '';
         if (currentBuyerMode === 'existing') input.focus();
+        if (window.alertDupRefresh) window.alertDupRefresh();
     };
 
     input.addEventListener('input', function () {
@@ -945,6 +961,7 @@ function setBuyerMode(mode) {
         selectedMeta.textContent = [property.address, property.city].filter(Boolean).join(' · ');
         selected.classList.remove('hidden');
         hideResults();
+        if (window.alertDupRefresh) window.alertDupRefresh();
     }
 
     window.clearPropertySelection = function () {
@@ -953,6 +970,7 @@ function setBuyerMode(mode) {
         input.classList.remove('hidden');
         input.value = '';
         input.focus();
+        if (window.alertDupRefresh) window.alertDupRefresh();
     };
 
     input.addEventListener('input', function () {
@@ -1013,6 +1031,108 @@ function setBuyerMode(mode) {
             document.getElementById('buyerSearch').focus();
             alert('Selecciona un comprador de la lista o cambia a "Nuevo comprador"');
         }
+    });
+})();
+
+// ---- Validación de duplicados (comprador + propiedad, comprador repetido) ----
+(function () {
+    const form = document.getElementById('createAlertForm');
+    if (!form || !window.AlertDuplicates) return;
+
+    const buyerHidden = document.getElementById('buyerIdHidden');
+    const propertyHidden = document.getElementById('propertyId');
+    const dupBanner = document.getElementById('dupBanner');
+    const confirmDuplicate = document.getElementById('confirmDuplicate');
+    const buyerMatchBanner = document.getElementById('buyerMatchBanner');
+    const confirmNewBuyer = document.getElementById('confirmNewBuyer');
+    const submitBtn = document.getElementById('createAlertSubmit');
+    const phoneInput = document.getElementById('buyerPhoneInput');
+    const emailInput = document.getElementById('buyerEmailInput');
+
+    let alertRequest = 0;   // descarta respuestas de consultas antiguas
+    let buyerRequest = 0;
+    let hasOpenDuplicate = false;
+    let hasBuyerMatch = false;
+
+    function contactPayload() {
+        return {
+            source: document.getElementById('alertSourceInput').value,
+            notes: document.getElementById('alertMessageInput').value,
+            priority: document.getElementById('alertPrioritySelect').value
+        };
+    }
+
+    function updateSubmit() {
+        if (currentBuyerMode === 'existing' && hasOpenDuplicate) {
+            AlertDuplicates.setForceMode(submitBtn, confirmDuplicate, true, 'Crear de todas formas');
+            confirmNewBuyer.value = '';
+        } else if (currentBuyerMode === 'new' && hasBuyerMatch) {
+            AlertDuplicates.setForceMode(submitBtn, confirmNewBuyer, true, 'Crear como comprador nuevo');
+            confirmDuplicate.value = '';
+        } else {
+            AlertDuplicates.setForceMode(submitBtn, null, false);
+            confirmDuplicate.value = '';
+            confirmNewBuyer.value = '';
+        }
+    }
+
+    // Comprador existente + propiedad: ¿ya hay alerta?
+    window.alertDupRefresh = function () {
+        const requestId = ++alertRequest;
+        const buyerId = buyerHidden.value;
+        const propertyId = propertyHidden.value;
+
+        if (currentBuyerMode !== 'existing' || !buyerId || !propertyId) {
+            hasOpenDuplicate = false;
+            AlertDuplicates.renderAlertBanner(dupBanner, null);
+            // En modo "nuevo" manda el aviso de comprador repetido; en "existente" se limpia
+            refreshBuyerMatch();
+            return;
+        }
+
+        AlertDuplicates.checkAlerts(buyerId, propertyId).then(function (data) {
+            if (requestId !== alertRequest) return;
+            hasOpenDuplicate = AlertDuplicates.renderAlertBanner(dupBanner, data, {
+                forceLabel: 'Crear de todas formas',
+                getContactPayload: contactPayload
+            });
+            updateSubmit();
+        });
+    };
+
+    // Comprador nuevo: ¿ya existe alguien con ese teléfono o correo?
+    function refreshBuyerMatch() {
+        const requestId = ++buyerRequest;
+        const phone = (phoneInput.value || '').trim();
+        const email = (emailInput.value || '').trim();
+
+        if (currentBuyerMode !== 'new' || (!phone && !email)) {
+            hasBuyerMatch = false;
+            AlertDuplicates.renderBuyerBanner(buyerMatchBanner, []);
+            updateSubmit();
+            return;
+        }
+
+        AlertDuplicates.checkBuyer(phone, email).then(function (buyers) {
+            if (requestId !== buyerRequest) return;
+            hasBuyerMatch = AlertDuplicates.renderBuyerBanner(buyerMatchBanner, buyers, {
+                forceLabel: 'Crear como comprador nuevo',
+                onUse: function (buyer) {
+                    setBuyerMode('existing');
+                    window.selectExistingBuyer(buyer);
+                }
+            });
+            updateSubmit();
+        });
+    }
+
+    let buyerTimer = null;
+    [phoneInput, emailInput].forEach(function (el) {
+        el.addEventListener('input', function () {
+            clearTimeout(buyerTimer);
+            buyerTimer = setTimeout(refreshBuyerMatch, 400);
+        });
+        el.addEventListener('blur', refreshBuyerMatch);
     });
 })();
 </script>
