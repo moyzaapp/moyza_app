@@ -40,6 +40,15 @@ from app.services.company_scope import (
     get_buyer_in_company,
     get_property_in_company,
 )
+from app.services.alert_duplicate_service import (
+    find_duplicate_alerts,
+    find_matching_buyers,
+    serialize_duplicates,
+    serialize_buyer,
+    duplicate_note,
+    new_contact_note,
+    append_note,
+)
 from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, get_agent_from_user, require_admin_role
 from app.web.dependencies.company import get_active_company
@@ -622,6 +631,62 @@ async def search_properties(
     return JSONResponse(content={"results": results})
 
 
+@router.get("/alerts/check-duplicate")
+async def check_duplicate_alert(
+    request: Request,
+    buyer_id: int = Query(...),
+    property_id: int = Query(...),
+    db: Session = Depends(get_db)
+):
+    """Alertas ya registradas para el mismo comprador y propiedad.
+
+    Lo consulta el formulario de nueva alerta en cuanto conoce ambos ids,
+    para avisar antes de enviar. Devuelve las abiertas y las cerradas
+    recientes por separado. Solo admin.
+
+    NOTA: debe declararse antes de /alerts/{alert_id}.
+    """
+
+    current_user = request.state.user
+
+    if not is_admin(current_user):
+        return JSONResponse(status_code=403, content={"open": [], "recent_closed": []})
+
+    company_id = get_active_company(request).id
+
+    if not get_buyer_in_company(db, buyer_id, company_id):
+        return JSONResponse(content={"open": [], "recent_closed": []})
+
+    duplicates = find_duplicate_alerts(db, company_id, buyer_id, property_id)
+
+    return JSONResponse(content=serialize_duplicates(db, duplicates))
+
+
+@router.get("/alerts/check-buyer")
+async def check_existing_buyer(
+    request: Request,
+    phone: str = "",
+    email: str = "",
+    db: Session = Depends(get_db)
+):
+    """Compradores ya registrados con el mismo teléfono o correo.
+
+    Lo consulta el modo "Nuevo comprador" del formulario para evitar dar de
+    alta dos veces a la misma persona. Solo admin.
+
+    NOTA: debe declararse antes de /alerts/{alert_id}.
+    """
+
+    current_user = request.state.user
+
+    if not is_admin(current_user):
+        return JSONResponse(status_code=403, content={"results": []})
+
+    buyers = find_matching_buyers(db, get_active_company(request).id, phone=phone, email=email)
+
+    return JSONResponse(content={"results": [serialize_buyer(b) for b in buyers]})
+
+
 @router.get("/alerts/{alert_id}", response_class=HTMLResponse)
 async def alert_detail(
     alert_id: int,
@@ -710,9 +775,20 @@ async def create_alert(
     message: str = Form(None),
     priority: str = Form(AlertPriority.NORMAL),
     business_type: str = Form(None),
+    confirm_duplicate: str = Form(None),
+    confirm_new_buyer: str = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Crear nueva alerta con comprador existente o nuevo (solo admin)"""
+    """Crear nueva alerta con comprador existente o nuevo (solo admin).
+
+    Validación de duplicados:
+    - Comprador existente: si ya hay una alerta abierta para ese comprador y
+      esa propiedad, no se crea salvo que llegue ``confirm_duplicate``. Al
+      confirmar, se deja constancia en el mensaje.
+    - Comprador nuevo: si ya hay un comprador con el mismo teléfono o correo,
+      no se crea salvo que llegue ``confirm_new_buyer``.
+    El formulario avisa antes de enviar; esto es la red de seguridad.
+    """
 
     current_user = request.state.user
 
@@ -721,11 +797,13 @@ async def create_alert(
         set_flash(response, "error", "Solo administradores pueden crear alertas")
         return response
 
+    company_id = get_active_company(request).id
+
     # Resolver comprador: existente o nuevo
     buyer = None
 
     if buyer_id:
-        buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
+        buyer = get_buyer_in_company(db, buyer_id, company_id)
         if not buyer:
             response = RedirectResponse(url="/alerts", status_code=302)
             set_flash(response, "error", "Comprador no encontrado")
@@ -737,18 +815,32 @@ async def create_alert(
             set_flash(response, "error", "El nombre del comprador es obligatorio")
             return response
 
+        if not confirm_new_buyer:
+            matches = find_matching_buyers(db, company_id, phone=buyer_phone, email=buyer_email)
+            if matches:
+                existing = matches[0]
+                contact = existing.phone or existing.email or ""
+                response = RedirectResponse(url="/alerts", status_code=302)
+                set_flash(
+                    response,
+                    "warning",
+                    f"Ya existe un comprador con ese teléfono o correo: {existing.name} ({contact}). "
+                    "Selecciónalo como comprador existente o confirma que es otra persona."
+                )
+                return response
+
         buyer = Buyer(
             name=buyer_name,
             phone=(buyer_phone or "").strip() or None,
             email=(buyer_email or "").strip() or None,
             created_by=current_user.id,
-            company_id=get_active_company(request).id
+            company_id=company_id
         )
         db.add(buyer)
         db.flush()  # obtener buyer.id antes del commit
 
     # Obtener la propiedad y su agente (solo de la empresa activa)
-    property_item = get_property_in_company(db, property_id, get_active_company(request).id)
+    property_item = get_property_in_company(db, property_id, company_id)
 
     if not property_item:
         db.rollback()
@@ -767,6 +859,25 @@ async def create_alert(
         response = RedirectResponse(url="/alerts", status_code=302)
         set_flash(response, "error", "La propiedad no tiene agente asignado")
         return response
+
+    # Duplicados: solo aplica a compradores existentes (uno nuevo no tiene alertas)
+    if buyer_id:
+        open_duplicates = find_duplicate_alerts(db, company_id, buyer.id, property_id)["open"]
+        if open_duplicates:
+            existing = open_duplicates[0]
+            if not confirm_duplicate:
+                db.rollback()
+                fecha = existing.created_at.strftime("%d/%m/%Y") if existing.created_at else ""
+                response = RedirectResponse(url="/alerts", status_code=302)
+                set_flash(
+                    response,
+                    "warning",
+                    f"Ya existe una alerta abierta (#{existing.id}, {fecha}) para {buyer.name} "
+                    "en esta propiedad. No se ha creado otra. Si quieres repetirla, "
+                    "confírmalo en el formulario."
+                )
+                return response
+            message = append_note(message, duplicate_note(existing))
 
     try:
         alert = PropertyAlert(
@@ -947,6 +1058,68 @@ async def add_follow_up(
         logger.exception("Error agregando seguimiento: alert_id=%s", alert_id)
         response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)
         set_flash(response, "error", "Ocurrió un error al agregar el seguimiento")
+        return response
+
+
+@router.post("/alerts/{alert_id}/register-contact")
+async def register_contact_on_alert(
+    alert_id: int,
+    request: Request,
+    source: str = Form(None),
+    notes: str = Form(None),
+    priority: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    """Registra un nuevo contacto del comprador sobre una alerta ya abierta.
+
+    Es la alternativa a crear una alerta duplicada: deja constancia en el
+    mensaje de la alerta (fecha, origen, quién lo registró), la vuelve a
+    marcar como no leída para el agente y sube la prioridad si el nuevo
+    contacto llega con una más alta. No crea seguimientos, así que no
+    altera la cola secuencial ni la etapa del comprador. Solo admin.
+    """
+
+    current_user = request.state.user
+
+    if not is_admin(current_user):
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Solo administradores pueden registrar contactos")
+        return response
+
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
+
+    if not alert:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Alerta no encontrada")
+        return response
+
+    if alert.status not in OPEN_ALERT_STATUSES:
+        response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)
+        set_flash(response, "error", "La alerta está cerrada; reactívala o crea una nueva")
+        return response
+
+    try:
+        alert.message = append_note(
+            alert.message,
+            new_contact_note(source, current_user.full_name, notes),
+        )
+        if not alert.source and source and source.strip():
+            alert.source = source.strip()
+        if priority == AlertPriority.ALTA and alert.priority != AlertPriority.ALTA:
+            alert.priority = AlertPriority.ALTA
+        alert.read_at = None  # el agente la verá como nueva
+
+        db.commit()
+
+        response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)
+        set_flash(response, "success", "Nuevo contacto registrado en la alerta existente")
+        return response
+
+    except Exception:
+        db.rollback()
+        logger.exception("Error registrando contacto: alert_id=%s", alert_id)
+        response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)
+        set_flash(response, "error", "Ocurrió un error al registrar el contacto")
         return response
 
 

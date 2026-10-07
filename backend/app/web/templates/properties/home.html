@@ -36,12 +36,12 @@ Propiedades
 
 </div>
 
-{# Tarjetas: cada una filtra la tabla; un segundo clic quita el filtro #}
+{# Tarjetas: cada una filtra la tabla (Activas por defecto) #}
 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6 sm:mb-8">
 
     <a
-        href="{{ '/properties' if filtro == 'activas' else '/properties?filtro=activas' }}"
-        title="{{ 'Quitar filtro' if filtro == 'activas' else 'Ver solo propiedades activas' }}"
+        href="/properties?filtro=activas"
+        title="Ver propiedades activas disponibles"
         class="block bg-white rounded-2xl p-4 sm:p-6 border-2 hover:shadow-lg transition-all
                {% if filtro == 'activas' %}border-green-500 ring-2 ring-green-100{% else %}border-gray-200 hover:border-green-300{% endif %}"
     >
@@ -67,8 +67,8 @@ Propiedades
     </a>
 
     <a
-        href="{{ '/properties' if filtro == 'no_disponible' else '/properties?filtro=no_disponible' }}"
-        title="{{ 'Quitar filtro' if filtro == 'no_disponible' else 'Ver solo propiedades no disponibles' }}"
+        href="/properties?filtro=no_disponible"
+        title="Ver propiedades no disponibles"
         class="block bg-white rounded-2xl p-4 sm:p-6 border-2 hover:shadow-lg transition-all
                {% if filtro == 'no_disponible' %}border-gray-500 ring-2 ring-gray-100{% else %}border-gray-200 hover:border-gray-400{% endif %}"
     >
