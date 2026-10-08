@@ -28,11 +28,11 @@
       ('evolucion', 'Evolución'),
       ('compradores', 'Compradores'),
     ] %}
-    <nav class="flex gap-1 mb-6 border-b border-gray-200 overflow-x-auto" aria-label="Pestañas de Resultados Comerciales">
+    <nav class="flex gap-1 mb-6 border-b border-gray-200" aria-label="Pestañas de Resultados Comerciales">
       {% for key, label in tab_items %}
       <a href="/commercial-results?tab={{ key }}"
          {% if tab == key %}aria-current="page"{% endif %}
-         class="px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors -mb-px whitespace-nowrap
+         class="px-3 sm:px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors -mb-px whitespace-nowrap
                 {% if tab == key %}bg-white border border-b-white border-gray-200 text-blue-600{% else %}text-gray-500 hover:text-gray-700{% endif %}">
         {{ label }}
       </a>

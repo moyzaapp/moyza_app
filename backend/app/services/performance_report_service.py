@@ -76,6 +76,9 @@ SNAPSHOT_METRIC_KEYS = (
     "calidad_cartera",
 )
 
+# Años navegables: fuera de este rango se vuelve al período en curso
+MIN_PERIOD_YEAR = 2000
+
 MONTH_NAMES = (
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
@@ -257,6 +260,9 @@ class PerformanceReportService:
             try:
                 start = cls.normalize_start(period_type, datetime.strptime(period_start_str, "%Y-%m-%d"))
             except ValueError:
+                start = current_start
+            # Fechas absurdas (año 1, 9999...) desbordan la navegación
+            if not MIN_PERIOD_YEAR <= start.year <= current_start.year + 1:
                 start = current_start
 
         _, end = cls.period_bounds(period_type, start)

@@ -145,6 +145,7 @@ async def commercial_results(
     tab: str = Query(default=TAB_PERFORMANCE),
     period_type: str = Query(default=PeriodType.DEFAULT),
     period_start: str = Query(default=""),
+    year: str = Query(default=""),
     open_agent: str = Query(default="", alias="open"),
     db: Session = Depends(get_db),
 ):
@@ -177,6 +178,17 @@ async def commercial_results(
             "agents_data": svc.agents_period_data(agents, period),
             # Tras guardar objetivos o notas se reabre el panel de ese agente
             "open_agent_id": int(open_agent) if open_agent.isdigit() else None,
+        })
+
+    elif tab == TAB_EVOLUTION:
+        # Año elegido (por defecto el en curso); la navegación reutiliza el período anual
+        year_period = svc.period(PeriodType.YEARLY, f"{year}-01-01" if year.isdigit() else "")
+        if year_period.start > year_period.current_start:
+            year_period = svc.period(PeriodType.YEARLY, "")
+        agents = _company_agents(db, company.id)
+        context.update({
+            "year_period": year_period,
+            "evolution": svc.yearly_evolution(year_period.start.year, agents),
         })
 
     elif tab == TAB_BUYERS:

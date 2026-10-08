@@ -94,6 +94,11 @@ class TestPeriod:
     def test_tipo_invalido_es_semana(self):
         assert svc_cls.period("DAILY", "", now=NOW).period_type == "WEEKLY"
 
+    @pytest.mark.parametrize("value", ["0001-01-01", "9999-12-31", "1999-12-31"])
+    def test_anios_fuera_de_rango_vuelven_al_en_curso(self, value):
+        p = svc_cls.period("WEEKLY", value, now=NOW)
+        assert p.start == datetime(2026, 10, 5)
+
     def test_fecha_invalida_es_periodo_en_curso(self):
         assert svc_cls.period("MONTHLY", "2026-13-45", now=NOW).start == datetime(2026, 10, 1)
 
