@@ -53,6 +53,9 @@ BREAKDOWN_KEYS = {
     "cierres": ("cierres_venta", "cierres_alquiler"),
 }
 
+# Métricas de la pestaña Rendimiento, en orden de presentación
+RESULT_METRICS = ("captaciones_crm", "bajadas", "cierres", "contactos", "hojas_visita")
+
 # Indicadores de la pestaña Evolución (orden del selector)
 EVOLUTION_INDICATORS = ("captaciones_crm", "cierres", "bajadas")
 
@@ -495,7 +498,12 @@ class PerformanceReportService:
                 "metrics": metrics,
                 "target": target,
                 "report": report,
-                "objectives": self.objective_rows(metrics, target, period.period_type),
+                "values": {key: self.metric_value(metrics, key) for key in RESULT_METRICS},
+                "details": {key: self.breakdown(metrics, key) for key in BREAKDOWN_KEYS},
+                "objectives": {
+                    row["key"]: row
+                    for row in self.objective_rows(metrics, target, period.period_type)
+                },
                 "completion": self.completion_pct(metrics, target, period.period_type),
                 "admin_notes": report.admin_notes if report else "",
                 "is_locked": report.is_locked if report else False,

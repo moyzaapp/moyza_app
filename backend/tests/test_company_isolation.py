@@ -146,8 +146,11 @@ def moes_data(db, moes):
 # ---------------------------------------------------------------------------
 
 PAGES = [
-    "/properties", "/alerts", "/alerts?tab=buyers", "/alerts-dashboard", "/clients",
-    "/agents", "/visits", "/visits/select-property", "/reports", "/performance-reports",
+    "/properties", "/alerts", "/alerts?tab=buyers", "/clients",
+    "/agents", "/visits", "/visits/select-property", "/reports",
+    "/commercial-results", "/commercial-results?tab=evolucion", "/commercial-results?tab=compradores",
+    "/commercial-results?tab=rendimiento&period_type=MONTHLY",
+    "/commercial-results?tab=rendimiento&period_type=YEARLY",
     "/dashboard", "/report-logs", "/ai-logs-dashboard", "/auth",
 ]
 

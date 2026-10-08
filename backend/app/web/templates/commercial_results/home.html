@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Resultados Comerciales - {{ brand_name }}{% endblock %}
+
+{% block content %}
+
+{# Colores fijos del desglose en toda la sección: venta = marca, alquiler = ámbar #}
+{% set sale_color = brand_color %}
+{% set rent_color = '#F59E0B' %}
+
+<div class="flex-1 p-4 sm:p-6 lg:p-8">
+  <div class="max-w-7xl mx-auto">
+
+    <!-- Header -->
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+      <div>
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">Resultados Comerciales</h1>
+        <p class="text-gray-600 mt-1">Objetivos, resultados y compradores del equipo · {{ brand_name }}</p>
+      </div>
+      <a href="/alerts" class="text-blue-600 hover:text-blue-800 hover:underline text-sm">
+        Ver Compradores →
+      </a>
+    </div>
+
+    <!-- Tabs -->
+    {% set tab_items = [
+      ('rendimiento', 'Rendimiento'),
+      ('evolucion', 'Evolución'),
+      ('compradores', 'Compradores'),
+    ] %}
+    <nav class="flex gap-1 mb-6 border-b border-gray-200 overflow-x-auto" aria-label="Pestañas de Resultados Comerciales">
+      {% for key, label in tab_items %}
+      <a href="/commercial-results?tab={{ key }}"
+         {% if tab == key %}aria-current="page"{% endif %}
+         class="px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors -mb-px whitespace-nowrap
+                {% if tab == key %}bg-white border border-b-white border-gray-200 text-blue-600{% else %}text-gray-500 hover:text-gray-700{% endif %}">
+        {{ label }}
+      </a>
+      {% endfor %}
+    </nav>
+
+    {% if tab == 'rendimiento' %}
+      {% include "commercial_results/_performance.html" %}
+    {% elif tab == 'evolucion' %}
+      {% include "commercial_results/_evolution.html" %}
+    {% else %}
+      {% include "commercial_results/_buyers.html" %}
+    {% endif %}
+
+  </div>
+</div>
+
+{% endblock %}
