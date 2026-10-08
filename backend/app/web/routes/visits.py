@@ -17,6 +17,7 @@ from app.web.template_env import templates
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
+from app.models.agent import Agent
 from app.models.property import Property
 from app.models.property_visit import PropertyVisit
 from app.services.visit_sheet_generator import generate_visit_sheet
@@ -27,11 +28,15 @@ from app.web.dependencies.auth import is_admin, get_agent_from_user
 from app.core.constants import PhoneCountryCodes
 from app.services.visit_whatsapp_log_service import log_whatsapp_attempt
 from app.services.company_scope import (
+    scope_agents,
     scope_visits,
     scope_properties,
     get_visit_in_company,
     get_property_in_company,
 )
+from app.services.visit_agents import VisitAgentsError
+from app.services.visit_agents import parse_visit_agents
+from app.services.visit_agents import visit_agents_locked
 from app.web.dependencies.company import get_active_company
 
 
@@ -40,6 +45,43 @@ logger = logging.getLogger(__name__)
 
 # Importe de honorarios: dígitos con separadores opcionales (2500, 2.500, 2500,50)
 PURCHASE_FEES_PATTERN = re.compile(r"\d[\d.,]*")
+
+
+def _visit_agents_context(request: Request, db: Session, property_item, visit=None) -> dict:
+    """Datos de la sección "Agentes de la visita" (alta y edición).
+
+    - `agents`: agentes de la empresa activa (seleccionables).
+    - `principal_agent`: el que figura como "Realizada por" para un usuario
+      agente (él mismo en el alta; el de la visita en la edición).
+    - `selected_agent_id` / `selected_companion_agent_id`: valores iniciales
+      de los selects (el admin parte del captador en el alta).
+    """
+    current_user = request.state.user
+    current_agent = get_agent_from_user(current_user, db)
+
+    agents = (
+        scope_agents(db.query(Agent), get_active_company(request).id)
+        .order_by(Agent.name)
+        .all()
+    )
+
+    if visit is not None:
+        principal_agent = visit.agent or current_agent
+        selected_agent_id = visit.agent_id or property_item.agent_id
+        selected_companion_agent_id = visit.companion_agent_id
+    else:
+        principal_agent = current_agent
+        selected_agent_id = property_item.agent_id
+        selected_companion_agent_id = None
+
+    return {
+        "agents": agents,
+        "current_agent": current_agent,
+        "is_admin": bool(is_admin(current_user)),
+        "principal_agent": principal_agent,
+        "selected_agent_id": selected_agent_id,
+        "selected_companion_agent_id": selected_companion_agent_id,
+    }
 
 
 
@@ -132,6 +174,16 @@ async def new_visit(
         set_flash(response, "error", "No se pueden registrar visitas en una propiedad No disponible")
         return response
 
+    agents_context = _visit_agents_context(request, db, property_item)
+    current_agent = agents_context["current_agent"]
+
+    # Propiedad captada por otro agente: se avisa, pero no se bloquea
+    is_foreign_property = (
+        not agents_context["is_admin"]
+        and current_agent is not None
+        and property_item.agent_id != current_agent.id
+    )
+
     return templates.TemplateResponse(
         request=request,
         name="properties/visit_form.html",
@@ -140,7 +192,9 @@ async def new_visit(
             "property": property_item,
             "current_user": request.state.user,
             "phone_countries": PhoneCountryCodes.choices(),
-            "default_country_code": PhoneCountryCodes.DEFAULT
+            "default_country_code": PhoneCountryCodes.DEFAULT,
+            "is_foreign_property": is_foreign_property,
+            **agents_context
         }
     )
 
@@ -191,6 +245,13 @@ async def create_visit(
         return response
 
     try:
+        agent_id, companion_agent_id = parse_visit_agents(form, request, db, property_item)
+    except VisitAgentsError as e:
+        response = RedirectResponse(url=f"/visits/new/{property_id}", status_code=302)
+        set_flash(response, "error", str(e))
+        return response
+
+    try:
         # Crear visita en estado 'draft' para seguir el nuevo flujo legal
         visit = PropertyVisit(
             property_id=property_id,
@@ -208,6 +269,8 @@ async def create_visit(
             garage_feedback=form.get("garage_feedback"),
             notes=notes,
             created_by=request.state.user.id,
+            agent_id=agent_id,
+            companion_agent_id=companion_agent_id,
             visit_status='draft'  # Nuevo flujo: inicia en draft
         )
 
@@ -224,7 +287,9 @@ async def create_visit(
             event_data={
                 'property_id': property_id,
                 'visitor_name': visit.visitor_name,
-                'generate_sheet': generate_sheet
+                'generate_sheet': generate_sheet,
+                'agent_id': visit.agent_id,
+                'companion_agent_id': visit.companion_agent_id
             }
         )
 
@@ -581,7 +646,9 @@ async def edit_visit(
             "current_user": request.state.user,
             "phone_countries": PhoneCountryCodes.choices(),
             "phone_country_code": phone_country_code,
-            "phone_local_number": phone_local_number
+            "phone_local_number": phone_local_number,
+            "agents_locked": visit_agents_locked(visit),
+            **_visit_agents_context(request, db, visit.property, visit=visit)
         }
     )
 
@@ -630,7 +697,26 @@ async def update_visit(
         set_flash(response, "error", "Los honorarios deben ser solo el importe (ej: 2500)")
         return response
 
+    # Agentes: fijos si la visita ya está firmada/completada (decisión 9)
     try:
+        agent_id, companion_agent_id = parse_visit_agents(
+            form,
+            request,
+            db,
+            visit.property,
+            visit=visit,
+            locked=visit_agents_locked(visit)
+        )
+    except VisitAgentsError as e:
+        response = RedirectResponse(url=f"/visits/edit/{visit_id}", status_code=302)
+        set_flash(response, "error", str(e))
+        return response
+
+    previous_agents = (visit.agent_id, visit.companion_agent_id)
+
+    try:
+        visit.agent_id = agent_id
+        visit.companion_agent_id = companion_agent_id
         visit.visitor_name = visitor_name
         visit.dni = form.get("dni") or None
         visit.phone = phone
@@ -646,6 +732,22 @@ async def update_visit(
         visit.notes = notes
 
         db.commit()
+
+        if previous_agents != (agent_id, companion_agent_id):
+            from app.services.visit_audit_service import log_visit_event
+
+            log_visit_event(
+                visit=visit,
+                event_type='agents_updated',
+                db=db,
+                request=request,
+                event_data={
+                    'previous_agent_id': previous_agents[0],
+                    'previous_companion_agent_id': previous_agents[1],
+                    'agent_id': agent_id,
+                    'companion_agent_id': companion_agent_id
+                }
+            )
 
         # Si tenía PDF, regenerarlo automáticamente con los datos actualizados
         if had_pdf:

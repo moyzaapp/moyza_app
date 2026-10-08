@@ -1,0 +1,162 @@
+{# Sección "Agentes de la visita" (alta y edición).
+   Contexto: agents, is_admin, current_agent, principal_agent, selected_agent_id,
+   selected_companion_agent_id y, en edición, visit + agents_locked. #}
+<div class="col-span-full border border-gray-200 rounded-xl p-3 sm:p-4" id="visit-agents">
+
+    <p class="text-xs sm:text-sm font-semibold text-gray-800 mb-3">
+        Agentes de la visita
+    </p>
+
+    {% if agents_locked %}
+
+    <div class="flex items-start gap-2 text-xs sm:text-sm text-gray-700">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+        <div>
+            <p>
+                Realizada por: <span class="font-medium">{{ visit.signing_agent.name if visit.signing_agent else '-' }}</span>{% if visit.companion_agent %} · con <span class="font-medium">{{ visit.companion_agent.name }}</span>{% endif %}
+            </p>
+            <p class="text-xs text-gray-500 mt-1">Fijado al firmar la ficha</p>
+        </div>
+    </div>
+
+    {% else %}
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+
+        <div>
+
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                Realizada por
+            </label>
+
+            {% if is_admin %}
+
+            <select
+                name="agent_id"
+                id="visit-agent-select"
+                required
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
+            >
+                <option value="">Selecciona un agente</option>
+                {% for agent in agents %}
+                <option value="{{ agent.id }}" {% if agent.id == selected_agent_id %}selected{% endif %}>{{ agent.name }}</option>
+                {% endfor %}
+            </select>
+
+            {% elif principal_agent %}
+
+            <input type="hidden" name="agent_id" id="visit-agent-select" value="{{ principal_agent.id }}">
+            <p class="w-full border border-gray-200 bg-gray-50 p-2 sm:p-3 rounded-xl text-sm sm:text-base text-gray-800">
+                {{ principal_agent.name }}
+            </p>
+
+            {% else %}
+
+            <p class="w-full border border-red-200 bg-red-50 p-2 sm:p-3 rounded-xl text-xs sm:text-sm text-red-700">
+                Tu usuario no está vinculado a una ficha de agente; no puedes registrar visitas.
+            </p>
+
+            {% endif %}
+
+        </div>
+
+        <div>
+
+            <span class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                Modalidad
+            </span>
+
+            <div class="flex flex-wrap items-center gap-4 sm:gap-6 py-2 sm:py-3">
+                <label class="inline-flex items-center gap-2 text-sm sm:text-base text-gray-700 cursor-pointer">
+                    <input
+                        type="radio"
+                        name="visit_mode"
+                        value="solo"
+                        class="visit-mode-radio w-4 h-4"
+                        {% if not selected_companion_agent_id %}checked{% endif %}
+                    >
+                    Solo
+                </label>
+                <label class="inline-flex items-center gap-2 text-sm sm:text-base text-gray-700 cursor-pointer">
+                    <input
+                        type="radio"
+                        name="visit_mode"
+                        value="acompanado"
+                        class="visit-mode-radio w-4 h-4"
+                        {% if selected_companion_agent_id %}checked{% endif %}
+                    >
+                    Acompañado
+                </label>
+            </div>
+
+        </div>
+
+        <div class="sm:col-span-2 {% if not selected_companion_agent_id %}hidden{% endif %}" id="companion-agent-wrapper">
+
+            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                Agente acompañante
+            </label>
+
+            <select
+                name="companion_agent_id"
+                id="companion-agent-select"
+                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
+            >
+                <option value="">Selecciona un agente</option>
+                {% for agent in agents %}
+                {% if is_admin or not principal_agent or agent.id != principal_agent.id %}
+                <option value="{{ agent.id }}" {% if agent.id == selected_companion_agent_id %}selected{% endif %}>{{ agent.name }}</option>
+                {% endif %}
+                {% endfor %}
+            </select>
+
+        </div>
+
+    </div>
+
+    <script>
+    (function () {
+        var wrapper = document.getElementById('companion-agent-wrapper');
+        var companion = document.getElementById('companion-agent-select');
+        var principal = document.getElementById('visit-agent-select');
+        var radios = document.querySelectorAll('.visit-mode-radio');
+
+        function accompanied() {
+            var checked = document.querySelector('.visit-mode-radio:checked');
+            return checked && checked.value === 'acompanado';
+        }
+
+        function syncMode() {
+            var on = accompanied();
+            wrapper.classList.toggle('hidden', !on);
+            companion.required = on;
+            if (!on) companion.value = '';
+        }
+
+        // El acompañante no puede ser el mismo agente que realizó la visita
+        function syncPrincipal() {
+            if (!principal) return;
+            Array.prototype.forEach.call(companion.options, function (opt) {
+                var same = opt.value !== '' && opt.value === principal.value;
+                opt.disabled = same;
+                if (same && opt.selected) companion.value = '';
+            });
+        }
+
+        radios.forEach(function (radio) {
+            radio.addEventListener('change', syncMode);
+        });
+        if (principal && principal.tagName === 'SELECT') {
+            principal.addEventListener('change', syncPrincipal);
+        }
+
+        syncMode();
+        syncPrincipal();
+    })();
+    </script>
+
+    {% endif %}
+
+</div>
