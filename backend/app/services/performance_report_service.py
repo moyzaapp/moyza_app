@@ -220,6 +220,11 @@ class PerformanceReportService:
         return period_start + timedelta(days=7 * steps)
 
     @classmethod
+    def previous_period_start(cls, period_type: str, now: Optional[datetime] = None) -> datetime:
+        """Inicio del período cerrado justo antes del que está en curso (para congelar)."""
+        return cls.shift_period(period_type, cls.current_period_start(period_type, now), -1)
+
+    @classmethod
     def is_current_period(cls, period_type: str, period_start: datetime, now: Optional[datetime] = None) -> bool:
         return cls.normalize_start(period_type, period_start) == cls.current_period_start(period_type, now)
 
