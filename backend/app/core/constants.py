@@ -308,3 +308,68 @@ class FollowUpActionType:
     @classmethod
     def is_valid(cls, value: str) -> bool:
         return value in cls.values()
+
+
+class PeriodType:
+    """Tipos de período de los informes de rendimiento por agente."""
+
+    WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+    YEARLY = "YEARLY"
+
+    DEFAULT = WEEKLY
+
+    @classmethod
+    def values(cls):
+        return (cls.WEEKLY, cls.MONTHLY, cls.YEARLY)
+
+    @classmethod
+    def is_valid(cls, value: str) -> bool:
+        return value in cls.values()
+
+    @classmethod
+    def labels(cls):
+        return {cls.WEEKLY: "Semana", cls.MONTHLY: "Mes", cls.YEARLY: "Año"}
+
+
+class PerformanceObjectives:
+    """Métricas con objetivo según el tipo de período (PLAN_RESULTADOS_COMERCIALES §2.3).
+
+    Una sola fuente para formularios, barras de progreso y % de cumplimiento.
+    El resto de métricas se muestran como resultado, sin objetivo. Los
+    objetivos son totales: el desglose venta / alquiler es solo de resultados.
+    """
+
+    WEEKLY = ("captaciones_crm", "bajadas")
+    MONTHLY = ("captaciones_crm", "bajadas", "cierres")
+    YEARLY = ("captaciones_crm", "bajadas", "cierres")
+
+    # Métrica -> columna de `agent_performance_targets`. Contactos y hojas de
+    # visita conservan su columna como histórico (decisión §5-5).
+    TARGET_FIELDS = {
+        "contactos": "target_contactos",
+        "bajadas": "target_bajadas",
+        "captaciones_crm": "target_captaciones_crm",
+        "cierres": "target_cierres",
+        "hojas_visita": "target_hojas_visita",
+    }
+
+    LABELS = {
+        "contactos": "Contactos",
+        "bajadas": "Bajadas",
+        "captaciones_crm": "Captaciones CRM",
+        "cierres": "Cierres",
+        "hojas_visita": "Hojas de Visita",
+    }
+
+    @classmethod
+    def for_period(cls, period_type) -> tuple:
+        return {
+            PeriodType.WEEKLY: cls.WEEKLY,
+            PeriodType.MONTHLY: cls.MONTHLY,
+            PeriodType.YEARLY: cls.YEARLY,
+        }.get(period_type, ())
+
+    @classmethod
+    def target_field(cls, metric_key: str) -> str:
+        return cls.TARGET_FIELDS[metric_key]

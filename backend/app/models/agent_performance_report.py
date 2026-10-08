@@ -25,7 +25,15 @@ class AgentPerformanceReport(Base):
         nullable=False
     )
 
-    period_type = Column(String, nullable=False)   # WEEKLY / MONTHLY
+    # Métricas de la empresa en la que se calcularon (las de sus propiedades)
+    company_id = Column(
+        Integer,
+        ForeignKey("companies.id"),
+        nullable=False,
+        index=True
+    )
+
+    period_type = Column(String, nullable=False)   # WEEKLY / MONTHLY / YEARLY
     period_start = Column(DateTime, nullable=False)
     period_end = Column(DateTime, nullable=False)
 
@@ -37,6 +45,15 @@ class AgentPerformanceReport(Base):
     cierres = Column(Integer, default=0)
     hojas_visita = Column(Integer, default=0)
     calidad_cartera = Column(Float, nullable=True)
+
+    # Desglose venta / alquiler. NULL en los snapshots anteriores al desglose:
+    # su total sigue en la columna agregada y se muestra como "otros".
+    captaciones_venta = Column(Integer, nullable=True)
+    captaciones_alquiler = Column(Integer, nullable=True)
+    bajadas_venta = Column(Integer, nullable=True)
+    bajadas_alquiler = Column(Integer, nullable=True)
+    cierres_venta = Column(Integer, nullable=True)
+    cierres_alquiler = Column(Integer, nullable=True)
 
     # Congelamiento: True cuando el período cerró y las métricas son finales
     is_locked = Column(Boolean, default=False)

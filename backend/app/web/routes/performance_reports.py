@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timedelta
 
 from fastapi import APIRouter
 from fastapi import Request
@@ -26,33 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_period(period_type: str, period_start_str: str):
-    """Devuelve (period_start, period_end) como datetime a partir de los query params."""
-    svc = PerformanceReportService.__new__(PerformanceReportService)
-
-    if period_type == "MONTHLY":
-        if period_start_str:
-            try:
-                period_start = datetime.strptime(period_start_str, "%Y-%m-%d")
-                period_start = datetime(period_start.year, period_start.month, 1)
-            except ValueError:
-                period_start = svc.current_month_start()
-        else:
-            period_start = svc.current_month_start()
-        _, period_end = svc.month_bounds(period_start)
-    else:
-        if period_start_str:
-            try:
-                period_start = datetime.strptime(period_start_str, "%Y-%m-%d")
-                # Normalizar al lunes de esa semana
-                period_start = period_start - timedelta(days=period_start.weekday())
-                period_start = datetime(period_start.year, period_start.month, period_start.day)
-            except ValueError:
-                period_start = svc.current_week_start()
-        else:
-            period_start = svc.current_week_start()
-        _, period_end = svc.week_bounds(period_start)
-
-    return period_start, period_end
+    """Devuelve (period_start, period_end); la lógica vive en PerformanceReportService.period."""
+    period = PerformanceReportService.period(period_type, period_start_str)
+    return period.start, period.end
 
 
 @router.get("/performance-reports", response_class=HTMLResponse)
@@ -69,70 +44,19 @@ async def performance_reports(
         set_flash(response, "error", "Solo administradores pueden acceder a los reportes")
         return response
 
-    if period_type not in ("WEEKLY", "MONTHLY"):
-        period_type = "WEEKLY"
-
-    ps, pe = _parse_period(period_type, period_start)
-    svc = PerformanceReportService(db)
-    is_current = svc.is_current_period(period_type, ps)
-
-    # Navegación de períodos
-    if period_type == "WEEKLY":
-        prev_start = ps - timedelta(days=7)
-        next_start = ps + timedelta(days=7)
-        current_start = svc.current_week_start()
-    else:
-        import calendar as _cal
-        # Mes anterior
-        if ps.month == 1:
-            prev_start = datetime(ps.year - 1, 12, 1)
-        else:
-            prev_start = datetime(ps.year, ps.month - 1, 1)
-        # Mes siguiente
-        if ps.month == 12:
-            next_start = datetime(ps.year + 1, 1, 1)
-        else:
-            next_start = datetime(ps.year, ps.month + 1, 1)
-        current_start = svc.current_month_start()
-
-    # No mostrar botón "siguiente" si el período siguiente es futuro
-    show_next = next_start <= current_start
+    period = PerformanceReportService.period(period_type, period_start)
+    company_id = get_active_company(request).id
+    svc = PerformanceReportService(db, company_id)
 
     # Solo agentes de la empresa activa
     agents = (
-        scope_agents(db.query(Agent), get_active_company(request).id)
+        scope_agents(db.query(Agent), company_id)
         .order_by(Agent.name.asc())
         .all()
     )
 
-    agents_data = []
-    for agent in agents:
-        # Período actual: calcular en vivo. Período pasado: leer snapshot.
-        report = svc.get_report(agent.id, period_type, ps)
-
-        if is_current or report is None or not report.is_locked:
-            metrics = svc.calculate_metrics(agent.id, ps, pe)
-        else:
-            metrics = {
-                "contactos_venta": report.contactos_venta,
-                "contactos_alquiler": report.contactos_alquiler,
-                "bajadas": report.bajadas,
-                "captaciones_crm": report.captaciones_crm,
-                "cierres": report.cierres,
-                "hojas_visita": report.hojas_visita,
-                "calidad_cartera": report.calidad_cartera,
-            }
-
-        target = svc.get_target(agent.id, period_type, ps)
-
-        agents_data.append({
-            "agent": agent,
-            "metrics": metrics,
-            "target": target,
-            "report": report,
-            "admin_notes": report.admin_notes if report else "",
-            "is_locked": report.is_locked if report else False,
-        })
+    # Período actual: calcular en vivo. Período pasado: leer snapshot.
+    agents_data = svc.agents_period_data(agents, period)
 
     return templates.TemplateResponse(
         request=request,
@@ -140,13 +64,13 @@ async def performance_reports(
         context={
             "request": request,
             "current_user": current_user,
-            "period_type": period_type,
-            "period_start": ps,
-            "period_end": pe,
-            "is_current": is_current,
-            "prev_start": prev_start,
-            "next_start": next_start,
-            "show_next": show_next,
+            "period_type": period.period_type,
+            "period_start": period.start,
+            "period_end": period.end,
+            "is_current": period.is_current,
+            "prev_start": period.prev_start,
+            "next_start": period.next_start,
+            "show_next": period.show_next,
             "agents_data": agents_data,
         },
     )
@@ -185,7 +109,7 @@ async def save_targets(
 
     ps, _ = _parse_period(period_type, period_start_str)
 
-    svc = PerformanceReportService(db)
+    svc = PerformanceReportService(db, get_active_company(request).id)
 
     # Solo se pueden definir objetivos en períodos activos (no cerrados)
     report = svc.get_report(agent_id, period_type, ps)
@@ -249,7 +173,7 @@ async def save_notes(
         return response
 
     ps, pe = _parse_period(period_type, period_start_str)
-    svc = PerformanceReportService(db)
+    svc = PerformanceReportService(db, get_active_company(request).id)
 
     try:
         svc.save_notes(

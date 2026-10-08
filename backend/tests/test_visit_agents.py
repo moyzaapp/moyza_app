@@ -237,7 +237,7 @@ def test_hojas_visita_cuenta_a_ambos_agentes_y_no_al_captador(db_session):
     ])
     db.flush()
 
-    svc = PerformanceReportService(db)
+    svc = PerformanceReportService(db, moyza.id)
     start = datetime.utcnow() - timedelta(days=1)
     end = datetime.utcnow() + timedelta(days=1)
 
@@ -381,9 +381,11 @@ def test_visita_en_propiedad_ajena_la_ven_visitante_y_captador(foreign_visit_dat
     assert "Propiedad propia · visita de otro agente" in captador.get("/visits")[1]
 
     # El captador que no estuvo no suma en hojas_visita; los otros dos sí
+    from app.models.company import Company
     from app.services.performance_report_service import PerformanceReportService
     db = SessionLocal()
-    svc = PerformanceReportService(db)
+    moes = db.query(Company).filter_by(code="MOES").one()
+    svc = PerformanceReportService(db, moes.id)
     start = datetime.utcnow() - timedelta(days=1)
     end = datetime.utcnow() + timedelta(days=1)
     hojas = {

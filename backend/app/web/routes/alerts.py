@@ -1393,7 +1393,7 @@ async def alerts_dashboard(
         if period_type not in ("WEEKLY", "MONTHLY"):
             period_type = "WEEKLY"
 
-        svc = PerformanceReportService(db)
+        svc = PerformanceReportService(db, company.id)
 
         if period_type == "MONTHLY":
             if period_start:
