@@ -179,6 +179,23 @@ class PropertyVisit(Base):
         nullable=True
     )
 
+    # Agente que realizó la visita (acompañó al cliente). Figura y firma en
+    # la ficha. Puede ser NULL en visitas antiguas sin atribución.
+    agent_id = Column(
+        Integer,
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
+    # Segundo agente cuando la visita se hizo entre dos. Opcional.
+    companion_agent_id = Column(
+        Integer,
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow
@@ -187,6 +204,16 @@ class PropertyVisit(Base):
     # Relaciones
     property = relationship("Property", back_populates="visits")
     creator = relationship("User")
+    agent = relationship(
+        "Agent",
+        foreign_keys=[agent_id],
+        back_populates="visits_as_agent"
+    )
+    companion_agent = relationship(
+        "Agent",
+        foreign_keys=[companion_agent_id],
+        back_populates="visits_as_companion"
+    )
     audit_logs = relationship("VisitAuditLog", back_populates="visit", cascade="all, delete-orphan")
     otp_verifications = relationship("VisitOTPVerification", back_populates="visit", cascade="all, delete-orphan")
     whatsapp_logs = relationship("VisitWhatsappLog", back_populates="visit", cascade="all, delete-orphan")
@@ -204,3 +231,23 @@ class PropertyVisit(Base):
         """Honorarios para el informe, siempre con el formato '€2500 + IVA'."""
         amount = self.clean_purchase_fees(self.purchase_fees)
         return f"€{amount} + IVA" if amount else None
+
+    @builtins.property
+    def signing_agent(self):
+        """Agente que figura y firma en la ficha.
+
+        El que realizó la visita; en visitas antiguas sin atribución, el
+        agente captador de la propiedad.
+        """
+        if self.agent is not None:
+            return self.agent
+        return self.property.agent if self.property is not None else None
+
+    @builtins.property
+    def participating_agent_ids(self):
+        """Ids de los agentes que participaron (principal y acompañante)."""
+        return {
+            agent_id
+            for agent_id in (self.agent_id, self.companion_agent_id)
+            if agent_id is not None
+        }

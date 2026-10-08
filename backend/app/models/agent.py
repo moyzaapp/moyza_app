@@ -56,3 +56,19 @@ class Agent(Base):
         secondary="agent_companies",
         back_populates="agents"
     )
+
+    # Visitas realizadas como agente principal y como acompañante.
+    # `foreign_keys` explícito: property_visits tiene dos FK a agents.
+    visits_as_agent = relationship(
+        "PropertyVisit",
+        foreign_keys="PropertyVisit.agent_id",
+        back_populates="agent",
+        passive_deletes=True
+    )
+
+    visits_as_companion = relationship(
+        "PropertyVisit",
+        foreign_keys="PropertyVisit.companion_agent_id",
+        back_populates="companion_agent",
+        passive_deletes=True
+    )
