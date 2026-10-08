@@ -227,7 +227,7 @@ async def save_targets(
     agent_id: int,
     request: Request,
     period_type: str = Form(...),
-    period_start_str: str = Form(...),
+    period_start_str: str = Form(""),
     db: Session = Depends(get_db),
 ):
     current_user = request.state.user
@@ -293,7 +293,7 @@ async def save_notes(
     agent_id: int,
     request: Request,
     period_type: str = Form(...),
-    period_start_str: str = Form(...),
+    period_start_str: str = Form(""),
     admin_notes: str = Form(None),
     db: Session = Depends(get_db),
 ):

@@ -12,7 +12,7 @@
 
   <div class="flex items-center gap-2">
     <a href="/commercial-results?tab=evolucion&year={{ yp.prev_start.year }}"
-       class="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors" aria-label="Año anterior">
+       class="p-3 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors" aria-label="Año anterior">
       <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
       </svg>
@@ -20,13 +20,13 @@
     <span class="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-semibold text-gray-800">{{ ev.year }}</span>
     {% if yp.show_next %}
     <a href="/commercial-results?tab=evolucion&year={{ yp.next_start.year }}"
-       class="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors" aria-label="Año siguiente">
+       class="p-3 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors" aria-label="Año siguiente">
       <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
       </svg>
     </a>
     {% else %}
-    <span class="p-2 rounded-lg border border-gray-100 opacity-30 cursor-not-allowed" aria-hidden="true">
+    <span class="p-3 rounded-xl border border-gray-100 opacity-30 cursor-not-allowed" aria-hidden="true">
       <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
       </svg>
@@ -51,7 +51,7 @@
   <label class="flex items-center gap-2 text-sm text-gray-600">
     Agente
     <select id="evo-agent"
-            class="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500">
       <option value="all">Todos</option>
       {% for a in ev.agents %}
       <option value="{{ a.id }}">{{ a.name }}</option>
@@ -61,7 +61,7 @@
   {% endif %}
 
   {% if yp.is_current %}
-  <span class="sm:ml-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+  <span class="sm:ml-auto inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
     <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
     Año en curso · mes actual en tiempo real
   </span>
@@ -75,12 +75,12 @@
 </div>
 {% else %}
 
-<p id="evo-chart-error" class="hidden mb-4 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+<p id="evo-chart-error" class="hidden mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
   No se pudo cargar la librería de gráficas. Los datos siguen disponibles en las tablas.
 </p>
 
 <!-- Cumplimiento anual -->
-<section class="bg-white rounded-2xl border border-gray-200 shadow-sm mb-5" aria-labelledby="evo-completion-title">
+<section class="bg-white rounded-2xl border border-gray-200 mb-5" aria-labelledby="evo-completion-title">
   <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
     <h2 id="evo-completion-title" class="text-lg font-bold text-gray-800">Cumplimiento anual</h2>
     <p class="text-xs text-gray-500 mt-0.5">Media de los % de los objetivos anuales (captaciones, bajadas y cierres)</p>
@@ -108,7 +108,7 @@
 </section>
 
 <!-- Gráfica 1: resultados por agente en el año -->
-<section class="bg-white rounded-2xl border border-gray-200 shadow-sm mb-5" aria-labelledby="evo-agents-title">
+<section class="bg-white rounded-2xl border border-gray-200 mb-5" aria-labelledby="evo-agents-title">
   <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
     <h2 id="evo-agents-title" class="text-lg font-bold text-gray-800">
       <span class="evo-indicator-label">{{ ev.indicators.values() | first }}</span> por agente · {{ ev.year }}
@@ -116,8 +116,8 @@
     <p class="text-xs text-gray-500 mt-0.5">Venta y alquiler apilados; la marca azul discontinua es el objetivo anual del agente</p>
   </div>
   <div class="p-4 sm:p-6">
-    <p class="evo-empty hidden text-sm text-gray-500 mb-3">Sin datos de este indicador en {{ ev.year }}.</p>
-    <div class="relative" style="height: {{ [ev.agents | length * 48 + 70, 180] | max }}px">
+    <p id="evo-agents-empty" class="hidden py-10 text-center text-sm text-gray-500">Sin datos de este indicador en {{ ev.year }}.</p>
+    <div id="evo-agents-wrap" class="relative" style="height: {{ [ev.agents | length * 48 + 70, 180] | max }}px">
       <canvas id="evo-agents-chart" role="img" aria-label="Resultados por agente en {{ ev.year }}; los datos están en la tabla siguiente"></canvas>
     </div>
     <details class="mt-4 group">
@@ -143,7 +143,7 @@
 </section>
 
 <!-- Gráfica 2: evolución mensual -->
-<section class="bg-white rounded-2xl border border-gray-200 shadow-sm" aria-labelledby="evo-monthly-title">
+<section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="evo-monthly-title">
   <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
     <h2 id="evo-monthly-title" class="text-lg font-bold text-gray-800">
       Evolución mensual · <span class="evo-indicator-label">{{ ev.indicators.values() | first }}</span> ·
@@ -152,8 +152,8 @@
     <p class="text-xs text-gray-500 mt-0.5" id="evo-monthly-help">Equipo: venta y alquiler apilados, con la línea azul del total</p>
   </div>
   <div class="p-4 sm:p-6">
-    <p class="evo-empty hidden text-sm text-gray-500 mb-3">Sin datos de este indicador en {{ ev.year }}.</p>
-    <div class="relative h-72">
+    <p id="evo-monthly-empty" class="hidden py-10 text-center text-sm text-gray-500">Sin datos de este indicador en {{ ev.year }} para la selección.</p>
+    <div id="evo-monthly-wrap" class="relative h-72">
       <canvas id="evo-monthly-chart" role="img" aria-label="Evolución mensual en {{ ev.year }}; los datos están en la tabla siguiente"></canvas>
     </div>
     <details class="mt-4">

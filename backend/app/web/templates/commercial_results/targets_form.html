@@ -27,12 +27,12 @@
       <label for="{{ field }}-{{ item.agent.id }}" class="text-xs text-gray-500">{{ metric_labels[key] }}</label>
       <input type="number" id="{{ field }}-{{ item.agent.id }}" name="{{ field }}" min="0" step="1" inputmode="numeric"
              value="{{ current if current is not none else '' }}"
-             class="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+             class="mt-1 w-full border rounded-xl border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500">
     </div>
     {% endfor %}
   </div>
   <button type="submit"
-          class="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+          class="w-full bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
     Guardar objetivos
   </button>
 </form>

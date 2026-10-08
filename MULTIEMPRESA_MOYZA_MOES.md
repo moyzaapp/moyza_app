@@ -166,7 +166,55 @@ docker restart moyza_backend
 Rollback: `docker exec moyza_backend alembic downgrade r1s2t3u4v5w6` con el
 código anterior desplegado (elimina las dos columnas y sus índices).
 
-## 7. Pendientes conocidos
+## 7. Resultados Comerciales (rendimiento por empresa)
+
+Detalle en `PLAN_RESULTADOS_COMERCIALES.md`. La sección "Dashboard
+Compradores" pasa a ser **Resultados Comerciales** (`/commercial-results`,
+solo admin) con tres pestañas: Rendimiento (semana / mes / año), Evolución
+(gráficas del año con Chart.js local en `static/js/chart.umd.js`) y
+Compradores. `/alerts-dashboard` y `/performance-reports` redirigen con 301
+conservando los query params.
+
+- Todas las métricas se calculan con las propiedades de la empresa activa.
+  Un agente que está en las dos empresas tiene resultados, objetivos y
+  snapshots separados en cada una.
+- Captaciones, bajadas y cierres se desglosan en venta / alquiler (el
+  cierre usa el tipo de la alerta y, si falta, el de la propiedad).
+- Objetivos por período (`PerformanceObjectives` en `core/constants.py`):
+  semana = captaciones y bajadas; mes y año = captaciones, bajadas y
+  cierres. Los objetivos antiguos de contactos y hojas de visita se quedan
+  en la tabla como histórico.
+- Nuevo job `freeze_yearly_reports` (1 de enero, 00:01); semanal y mensual
+  congelan ahora un snapshot por empresa y agente.
+
+Despliegue (migración `t3u4v5w6x7y8_add_company_and_breakdown_to_performance`:
+`company_id` en objetivos y snapshots con backfill a MOYZA, clave única por
+agente + empresa + período, y 6 columnas de desglose que quedan NULL en los
+snapshots existentes; sus totales no cambian):
+
+```bash
+docker exec moyza_db pg_dump -U <usuario> -d <bd> -Fc > backup_pre_resultados_$(date +%F).dump
+docker exec moyza_backend alembic upgrade head
+docker exec moyza_db psql -U <usuario> -d <bd> -c "
+  select company_id, period_type, count(*) from agent_performance_reports group by 1, 2;
+  select company_id, period_type, count(*) from agent_performance_targets group by 1, 2;"
+docker restart moyza_backend
+```
+
+Resultado esperado: todas las filas existentes con el `company_id` de MOYZA y
+los mismos totales que antes. Los snapshots anteriores se muestran "sin
+desglose" (en las gráficas, su total cuenta como "otros").
+
+Rollback: `docker exec moyza_backend alembic downgrade s2t3u4v5w6x7` con el
+código anterior desplegado. **Borra los objetivos y snapshots de MOES**: la
+clave antigua no admite el mismo agente y período en dos empresas.
+
+```bash
+# Tests (servicio sin app; rutas contra la app levantada)
+docker exec moyza_backend python -m pytest tests/test_performance_service.py tests/test_commercial_results.py tests/test_scheduler.py -q
+```
+
+## 8. Pendientes conocidos
 
 - Datos legales y logo reales de MOES PREMIUM (sección 4).
 - Eliminar las columnas heredadas `users.company` y `agents.company` cuando ya

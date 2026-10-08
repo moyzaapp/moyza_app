@@ -111,6 +111,11 @@
     const maxValue = Math.max(0, ...totals.map((t) => t.total), ...targets.map((t) => t || 0));
 
     fillAgentsTable(totals);
+    // Estado vacío: no se pintan ejes sin datos
+    const empty = sum(totals.map((t) => t.total)) === 0;
+    toggleEmpty('evo-agents', empty);
+    if (empty && charts.agents) { charts.agents.destroy(); charts.agents = null; }
+    if (empty) return;
 
     if (!hasChart) return;
     if (charts.agents) charts.agents.destroy();
@@ -197,6 +202,10 @@
       : 'Agente: una línea por tipo de operación';
 
     fillMonthlyTable(series);
+    const empty = sum(series.total) === 0;
+    toggleEmpty('evo-monthly', empty);
+    if (empty && charts.monthly) { charts.monthly.destroy(); charts.monthly = null; }
+    if (empty) return;
 
     if (!hasChart) return;
     if (charts.monthly) charts.monthly.destroy();
@@ -294,6 +303,11 @@
     return tr;
   }
 
+  function toggleEmpty(prefix, empty) {
+    document.getElementById(`${prefix}-empty`).classList.toggle('hidden', !empty);
+    document.getElementById(`${prefix}-wrap`).classList.toggle('hidden', empty);
+  }
+
   function updateLabels() {
     const label = data.indicators[state.indicator];
     document.querySelectorAll('.evo-indicator-label').forEach((el) => { el.textContent = label; });
@@ -301,8 +315,6 @@
     const select = document.getElementById('evo-agent');
     document.getElementById('evo-agent-label').textContent = select.options[select.selectedIndex].text;
 
-    const empty = sum(agentTotals(state.indicator).map((t) => t.total)) === 0;
-    document.querySelectorAll('.evo-empty').forEach((el) => el.classList.toggle('hidden', !empty));
 
     document.querySelectorAll('.evo-indicator').forEach((btn) => {
       const active = btn.dataset.indicator === state.indicator;

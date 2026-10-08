@@ -2,7 +2,7 @@
 
 <!-- Métricas Generales -->
 <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-  <div class="bg-white rounded-xl border border-gray-200 p-6">
+  <div class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
     <div class="flex items-center justify-between">
       <div>
         <p class="text-sm text-gray-600">Total Alertas</p>
@@ -16,21 +16,21 @@
     </div>
   </div>
 
-  <div class="bg-white rounded-xl border border-gray-200 p-6">
+  <div class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
     <div class="flex items-center justify-between">
       <div>
         <p class="text-sm text-gray-600">Pendientes</p>
-        <p class="text-3xl font-bold text-yellow-600">{{ pending_alerts }}</p>
+        <p class="text-3xl font-bold text-amber-600">{{ pending_alerts }}</p>
       </div>
-      <div class="bg-yellow-100 p-3 rounded-lg">
-        <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div class="bg-amber-100 p-3 rounded-lg">
+        <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
         </svg>
       </div>
     </div>
   </div>
 
-  <div class="bg-white rounded-xl border border-gray-200 p-6">
+  <div class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
     <div class="flex items-center justify-between">
       <div>
         <p class="text-sm text-gray-600">En Proceso</p>
@@ -44,7 +44,7 @@
     </div>
   </div>
 
-  <div class="bg-white rounded-xl border border-gray-200 p-6">
+  <div class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
     <div class="flex items-center justify-between">
       <div>
         <p class="text-sm text-gray-600">Completadas</p>
@@ -58,7 +58,7 @@
     </div>
   </div>
 
-  <div class="bg-white rounded-xl border border-gray-200 p-6">
+  <div class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
     <div class="flex items-center justify-between">
       <div>
         <p class="text-sm text-gray-600">Tiempo Respuesta</p>
@@ -75,7 +75,7 @@
 
 <!-- Alertas Abandonadas -->
 {% if abandoned_alerts %}
-<div class="bg-red-50 border border-red-200 rounded-xl p-6 mb-6">
+<div class="bg-red-50 border border-red-200 rounded-2xl p-4 sm:p-6 mb-6">
   <div class="flex items-start gap-3">
     <div class="bg-red-100 p-2 rounded-lg">
       <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -102,7 +102,7 @@
 {% endif %}
 
 <!-- Desempeño por Agente -->
-<div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+<div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
   <div class="p-6 border-b border-gray-200">
     <h2 class="text-xl font-bold text-gray-800">Desempeño por Agente</h2>
   </div>
@@ -128,21 +128,21 @@
             <td class="px-6 py-4 text-center text-sm text-gray-800">{{ item.total_alerts }}</td>
             <td class="px-6 py-4 text-center">
               {% if item.pending > 0 %}
-              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">{{ item.pending }}</span>
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">{{ item.pending }}</span>
               {% else %}
               <span class="text-gray-400 text-sm">0</span>
               {% endif %}
             </td>
             <td class="px-6 py-4 text-center">
               {% if item.in_progress > 0 %}
-              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">{{ item.in_progress }}</span>
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">{{ item.in_progress }}</span>
               {% else %}
               <span class="text-gray-400 text-sm">0</span>
               {% endif %}
             </td>
             <td class="px-6 py-4 text-center">
               {% if item.completed > 0 %}
-              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">{{ item.completed }}</span>
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">{{ item.completed }}</span>
               {% else %}
               <span class="text-gray-400 text-sm">0</span>
               {% endif %}
@@ -156,11 +156,11 @@
             <td class="px-6 py-4 text-center">
               {% set conversion_rate = (item.completed / item.total_alerts * 100) if item.total_alerts > 0 else 0 %}
               {% if conversion_rate >= 70 %}
-              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">{{ "%.0f"|format(conversion_rate) }}%</span>
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">{{ "%.0f"|format(conversion_rate) }}%</span>
               {% elif conversion_rate >= 40 %}
-              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">{{ "%.0f"|format(conversion_rate) }}%</span>
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">{{ "%.0f"|format(conversion_rate) }}%</span>
               {% else %}
-              <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">{{ "%.0f"|format(conversion_rate) }}%</span>
+              <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">{{ "%.0f"|format(conversion_rate) }}%</span>
               {% endif %}
             </td>
           </tr>
