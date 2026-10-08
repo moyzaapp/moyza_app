@@ -128,10 +128,45 @@ docker exec moyza_backend python -m pytest tests/test_company_context.py -q
 docker exec moyza_backend python -m pytest tests/test_company_isolation.py -q
 ```
 
+```bash
+# Agentes de las visitas (unitarios + integración si la app responde)
+docker exec moyza_backend python -m pytest tests/test_visit_agents.py -q
+```
+
 `pytest` no está en `requirements.txt`; se instala con
 `docker exec moyza_backend pip install pytest` o con `run_tests.sh`.
 
-## 6. Pendientes conocidos
+## 6. Visitas con agente propio y acompañante
+
+Detalle en `PLAN_VISITAS_AGENTES.md`. Cualquier agente puede registrar
+visitas en cualquier propiedad disponible de la empresa activa; la visita
+guarda quién la hizo (`property_visits.agent_id`) y un acompañante opcional
+(`companion_agent_id`). Ambos deben ser agentes de la empresa activa.
+
+- Listado `/visits` del agente: visitas en las que participó y las que otros
+  hicieron a sus propiedades.
+- Ficha PDF y preview: emite y firma el agente de la visita; el acompañante
+  solo aparece en el texto legal. Visitas antiguas sin agente caen al
+  captador.
+- `hojas_visita`: suma 1 al principal y 1 al acompañante; no al captador.
+- Agentes fijos al firmar: en `signed`/`completed` no se pueden cambiar.
+
+Despliegue (migración `s2t3u4v5w6x7_add_agents_to_property_visits`, con
+backfill: agente del usuario creador por email y, si no, el captador):
+
+```bash
+docker exec moyza_backend alembic upgrade head
+docker exec moyza_db psql -U <usuario> -d <bd> -c "
+  select count(*) as total, count(agent_id) as con_agente,
+         count(*) filter (where agent_id is null) as sin_agente
+  from property_visits;"
+docker restart moyza_backend
+```
+
+Rollback: `docker exec moyza_backend alembic downgrade r1s2t3u4v5w6` con el
+código anterior desplegado (elimina las dos columnas y sus índices).
+
+## 7. Pendientes conocidos
 
 - Datos legales y logo reales de MOES PREMIUM (sección 4).
 - Eliminar las columnas heredadas `users.company` y `agents.company` cuando ya
