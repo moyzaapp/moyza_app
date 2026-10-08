@@ -547,7 +547,11 @@ async def preview_visit(
     # Preparar datos para el template
     visit_date = visit.created_at.strftime("%d/%m/%Y") if visit.created_at else datetime.now().strftime("%d/%m/%Y")
     visit_time = visit.created_at.strftime("%H:%M") if visit.created_at else datetime.now().strftime("%H:%M")
-    agent_name = property_item.agent.name if property_item.agent else f"Agente {brand.name}"
+    # Mismo agente que el PDF: el que realizó la visita (o el captador en
+    # visitas antiguas sin atribución) y, si lo hay, el acompañante.
+    signing_agent = visit.signing_agent
+    agent_name = signing_agent.name if signing_agent else f"Agente {brand.name}"
+    companion_agent_name = visit.companion_agent.name if visit.companion_agent else None
 
     logo_exists = brand.logo_fs_path is not None
 
@@ -561,6 +565,7 @@ async def preview_visit(
             "visit_date": visit_date,
             "visit_time": visit_time,
             "agent_name": agent_name,
+            "companion_agent_name": companion_agent_name,
             "logo_exists": logo_exists,
             "brand": brand,
             "current_user": request.state.user
@@ -802,7 +807,8 @@ async def update_visit(
                     generate_visit_sheet(
                         property_item=property_item,
                         visit=visit,
-                        agent=property_item.agent,
+                        agent=visit.signing_agent,
+                        companion_agent=visit.companion_agent,
                         output_path=str(output_path)
                     )
 
@@ -908,7 +914,8 @@ async def generate_visit_pdf(
         generate_visit_sheet(
             property_item=property_item,
             visit=visit,
-            agent=property_item.agent,
+            agent=visit.signing_agent,
+            companion_agent=visit.companion_agent,
             output_path=str(output_path)
         )
 

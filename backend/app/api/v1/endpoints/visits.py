@@ -234,7 +234,8 @@ async def finalize_visit(
         generate_visit_sheet(
             property_item=property_item,
             visit=visit,
-            agent=property_item.agent,
+            agent=visit.signing_agent,
+            companion_agent=visit.companion_agent,
             output_path=str(output_path)
         )
 
