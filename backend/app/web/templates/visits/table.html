@@ -59,14 +59,25 @@
                         {{ visit.visitor_name or '-' }}
                     </td>
 
-                    <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
-                        {% if visit.creator %}
-                            {{ visit.creator.full_name }}
-                        {% elif visit.property and visit.property.agent %}
-                            {{ visit.property.agent.name }}
-                        {% else %}
-                            -
-                        {% endif %}
+                    <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
+                        <div class="flex flex-col gap-1">
+                            <span class="whitespace-nowrap">
+                                {% if visit.agent %}
+                                    {{ visit.agent.name }}{% if visit.companion_agent %} <span class="text-gray-500">· con {{ visit.companion_agent.name }}</span>{% endif %}
+                                {% elif visit.creator %}
+                                    {{ visit.creator.full_name }}
+                                {% elif visit.property and visit.property.agent %}
+                                    {{ visit.property.agent.name }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </span>
+                            {% if current_agent and visit.agent_id and visit.property and visit.property.agent_id == current_agent.id and current_agent.id not in visit.participating_agent_ids %}
+                                <span class="inline-flex w-fit items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
+                                    Propiedad propia · visita de otro agente
+                                </span>
+                            {% endif %}
+                        </div>
                     </td>
 
                     <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">

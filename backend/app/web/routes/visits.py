@@ -14,7 +14,9 @@ from fastapi.responses import RedirectResponse
 from fastapi.responses import FileResponse
 from app.web.template_env import templates
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload
 
 from app.db.deps import get_db
 from app.models.agent import Agent
@@ -31,6 +33,7 @@ from app.services.company_scope import (
     scope_agents,
     scope_visits,
     scope_properties,
+    visit_agent_clause,
     get_visit_in_company,
     get_property_in_company,
 )
@@ -91,16 +94,30 @@ async def visits_page(
     db: Session = Depends(get_db)
 ):
     current_user = request.state.user
+    current_agent = None
 
-    # Si es admin, mostrar todas las visitas de la empresa activa
-    # Si es agente, mostrar solo visitas de sus propiedades
-    visits_query = scope_visits(db.query(PropertyVisit), get_active_company(request).id)
+    # Si es admin, mostrar todas las visitas de la empresa activa.
+    # Si es agente: las visitas en las que participó (principal o
+    # acompañante) y las que otros hicieron a sus propiedades.
+    visits_query = scope_visits(
+        db.query(PropertyVisit).options(
+            joinedload(PropertyVisit.agent),
+            joinedload(PropertyVisit.companion_agent),
+            joinedload(PropertyVisit.creator),
+            joinedload(PropertyVisit.property).joinedload(Property.agent),
+        ),
+        get_active_company(request).id
+    )
 
     if not is_admin(current_user):
-        agent = get_agent_from_user(current_user, db)
-        if agent:
-            # Filtrar visitas por propiedades del agente
-            visits_query = visits_query.join(Property).filter(Property.agent_id == agent.id)
+        current_agent = get_agent_from_user(current_user, db)
+        if current_agent:
+            visits_query = visits_query.filter(
+                or_(
+                    visit_agent_clause(current_agent.id),
+                    PropertyVisit.property.has(Property.agent_id == current_agent.id),
+                )
+            )
         else:
             # Si no tiene agente, no mostrar nada
             visits_query = visits_query.filter(PropertyVisit.id == -1)
@@ -113,7 +130,8 @@ async def visits_page(
         context={
             "request": request,
             "visits": visits,
-            "current_user": current_user
+            "current_user": current_user,
+            "current_agent": current_agent
         }
     )
 
@@ -127,30 +145,42 @@ async def select_property(
 
     current_user = request.state.user
 
-    properties_query = scope_properties(
-        db.query(Property).filter(
-            Property.status != PropertyStatus.ARCHIVED,
-            Property.available_clause()
-        ),
-        get_active_company(request).id
+    # Cualquier agente puede registrar visita en cualquier propiedad
+    # disponible de la empresa activa (decisión 1: sin aprobación previa).
+    properties = (
+        scope_properties(
+            db.query(Property)
+            .options(joinedload(Property.agent))
+            .filter(
+                Property.status != PropertyStatus.ARCHIVED,
+                Property.available_clause()
+            ),
+            get_active_company(request).id
+        )
+        .order_by(Property.title)
+        .all()
     )
 
-    # Si no es admin, filtrar solo sus propiedades
+    own_properties = []
+    other_properties = properties
+
+    # Para un agente: primero las suyas, después el resto de la empresa
     if not is_admin(current_user):
         agent = get_agent_from_user(current_user, db)
         if agent:
-            properties_query = properties_query.filter(Property.agent_id == agent.id)
+            own_properties = [p for p in properties if p.agent_id == agent.id]
+            other_properties = [p for p in properties if p.agent_id != agent.id]
         else:
-            properties_query = properties_query.filter(Property.id == -1)
-
-    properties = properties_query.order_by(Property.title).all()
+            other_properties = []
 
     return templates.TemplateResponse(
         request=request,
         name="visits/select_property.html",
         context={
             "request": request,
-            "properties": properties,
+            "is_admin": bool(is_admin(current_user)),
+            "own_properties": own_properties,
+            "other_properties": other_properties,
             "current_user": current_user
         }
     )
