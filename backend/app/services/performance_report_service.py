@@ -13,6 +13,7 @@ from app.models.property_alert import PropertyAlert
 from app.models.property_price_history import PropertyPriceHistory
 from app.models.property_visit import PropertyVisit
 from app.core.constants import FollowUpActionType
+from app.services.company_scope import visits_for_agent
 
 
 class PerformanceReportService:
@@ -126,11 +127,11 @@ class PerformanceReportService:
             .count()
         )
 
+        # Visitas en las que participó el agente (principal o acompañante);
+        # el captador de la propiedad que no estuvo no suma.
         hojas_visita = (
-            db.query(PropertyVisit)
-            .join(Property, Property.id == PropertyVisit.property_id)
+            visits_for_agent(db.query(PropertyVisit), agent_id)
             .filter(
-                Property.agent_id == agent_id,
                 PropertyVisit.created_at >= period_start,
                 PropertyVisit.created_at <= period_end,
             )
