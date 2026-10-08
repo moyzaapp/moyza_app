@@ -46,6 +46,9 @@ from app.web.dependencies.company import get_active_company
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Estados de una visita sin firmar: se edita desde la vista previa y vuelve a ella
+UNSIGNED_VISIT_STATUSES = ("draft", "preview")
+
 # Importe de honorarios: dígitos con separadores opcionales (2500, 2.500, 2500,50)
 PURCHASE_FEES_PATTERN = re.compile(r"\d[\d.,]*")
 
@@ -828,6 +831,13 @@ async def update_visit(
                 response = RedirectResponse(url="/visits", status_code=302)
                 set_flash(response, "warning", "Visita actualizada, pero no se pudo regenerar el PDF")
                 return response
+
+        # Una visita aún sin firmar se editó desde su vista previa: se vuelve
+        # a ella para seguir el flujo (aceptar términos y firmar).
+        if visit.visit_status in UNSIGNED_VISIT_STATUSES:
+            response = RedirectResponse(url=f"/visits/preview/{visit.id}", status_code=302)
+            set_flash(response, "success", "Datos de la visita actualizados. Revisa el documento antes de firmar")
+            return response
 
         response = RedirectResponse(url="/visits", status_code=302)
         set_flash(response, "success", "Visita actualizada correctamente")

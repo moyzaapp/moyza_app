@@ -23,8 +23,8 @@
   const INK = '#374151';      // gray-700
   const MUTED = '#6B7280';    // gray-500
   const GRID = '#F3F4F6';     // gray-100
-  // Total y objetivo en azul: se distinguen de venta aunque la marca sea negra
-  const ACCENT = '#2563EB';   // blue-600
+  // Total y objetivo en gris-900 (skill: references/charts.md); venta es blue-600
+  const ACCENT = '#111827';   // gray-900
 
   // El JSON llega con las claves ordenadas alfabéticamente: el orden lo da la plantilla
   const firstButton = document.querySelector('.evo-indicator[aria-checked="true"]');
@@ -198,7 +198,7 @@
     const team = state.agent === 'all';
 
     document.getElementById('evo-monthly-help').textContent = team
-      ? 'Equipo: venta y alquiler apilados, con la línea azul del total'
+      ? 'Equipo: venta y alquiler apilados, con la línea negra del total'
       : 'Agente: una línea por tipo de operación';
 
     fillMonthlyTable(series);
@@ -319,7 +319,7 @@
     document.querySelectorAll('.evo-indicator').forEach((btn) => {
       const active = btn.dataset.indicator === state.indicator;
       btn.setAttribute('aria-checked', String(active));
-      btn.classList.toggle('bg-blue-600', active);
+      btn.classList.toggle('bg-gray-900', active);
       btn.classList.toggle('text-white', active);
       btn.classList.toggle('text-gray-600', !active);
       btn.classList.toggle('hover:bg-gray-50', !active);

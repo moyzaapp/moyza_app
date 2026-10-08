@@ -4,8 +4,11 @@
 
 {% block content %}
 
-{# Colores fijos del desglose en toda la sección: venta = marca, alquiler = ámbar #}
-{% set sale_color = brand_color %}
+{# Colores fijos del desglose en toda la sección (skill: references/charts.md):
+   venta = blue-600, alquiler = amber-500. La marca no se usa en series: el negro
+   de MOYZA se confunde con el marcador de objetivo. #}
+{% import "components/ui_macros.html" as ui %}
+{% set sale_color = '#2563EB' %}
 {% set rent_color = '#F59E0B' %}
 
 <div class="max-w-7xl mx-auto">
@@ -22,21 +25,13 @@
     </div>
 
     <!-- Tabs -->
-    {% set tab_items = [
-      ('rendimiento', 'Rendimiento'),
-      ('evolucion', 'Evolución'),
-      ('compradores', 'Compradores'),
-    ] %}
-    <nav class="flex gap-1 mb-6 border-b border-gray-200" aria-label="Pestañas de Resultados Comerciales">
-      {% for key, label in tab_items %}
-      <a href="/commercial-results?tab={{ key }}"
-         {% if tab == key %}aria-current="page"{% endif %}
-         class="px-3 sm:px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors -mb-px whitespace-nowrap
-                {% if tab == key %}bg-white border border-b-white border-gray-200 text-blue-600{% else %}text-gray-500 hover:text-gray-700{% endif %}">
-        {{ label }}
-      </a>
-      {% endfor %}
-    </nav>
+    <div class="mb-6">
+      {{ ui.tabs([
+        ('rendimiento', 'Rendimiento', '/commercial-results?tab=rendimiento', none),
+        ('evolucion', 'Evolución', '/commercial-results?tab=evolucion', none),
+        ('compradores', 'Compradores', '/commercial-results?tab=compradores', none),
+      ], tab, label='Pestañas de Resultados Comerciales') }}
+    </div>
 
     {% if tab == 'rendimiento' %}
       {% include "commercial_results/_performance.html" %}
