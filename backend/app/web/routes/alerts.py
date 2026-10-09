@@ -98,6 +98,70 @@ def _get_agent_open_alerts_ordered(agent_id: int, db: Session, company_id: int):
     )
 
 
+def can_access_buyer(buyer: Buyer, current_user, db: Session) -> bool:
+    """El admin accede a todos los compradores. El agente, a los que registró
+    él, a los que tienen su ficha asignada como agente responsable del perfil
+    de búsqueda, o a los que tienen alguna alerta suya."""
+    if is_admin(current_user):
+        return True
+
+    if current_user and buyer.created_by == current_user.id:
+        return True
+
+    agent = get_agent_from_user(current_user, db)
+    if not agent:
+        return False
+
+    if buyer.search_criteria and buyer.search_criteria.agent_id == agent.id:
+        return True
+
+    return (
+        db.query(PropertyAlert.id)
+        .filter(PropertyAlert.buyer_id == buyer.id, PropertyAlert.agent_id == agent.id)
+        .first()
+        is not None
+    )
+
+
+def visible_buyers_query(db: Session, current_user, company_id: int):
+    """Compradores de la empresa que el usuario puede ver en listados y buscadores.
+
+    El admin ve todos. El agente ve los que registró él, los que tienen su
+    ficha como agente responsable del perfil de búsqueda, y aquellos cuyas
+    alertas suyas ya iniciaron seguimiento (status distinto de PENDING), así
+    la lista se va llenando a medida que gestiona alertas.
+    """
+    query = scope_buyers(db.query(Buyer), company_id)
+
+    if is_admin(current_user):
+        return query
+
+    conditions = [Buyer.created_by == current_user.id]
+
+    agent = get_agent_from_user(current_user, db)
+    if agent:
+        started_buyer_ids = (
+            scope_alerts(db.query(PropertyAlert.buyer_id), company_id)
+            .filter(
+                PropertyAlert.buyer_id.isnot(None),
+                PropertyAlert.status != AlertStatus.PENDING,
+                PropertyAlert.agent_id == agent.id,
+            )
+            .subquery()
+        )
+        assigned_buyer_ids = (
+            db.query(BuyerSearchCriteria.buyer_id)
+            .filter(BuyerSearchCriteria.agent_id == agent.id)
+            .subquery()
+        )
+        conditions += [
+            Buyer.id.in_(started_buyer_ids),
+            Buyer.id.in_(assigned_buyer_ids),
+        ]
+
+    return query.filter(or_(*conditions))
+
+
 def _alert_has_followup(alert_id: int, db: Session) -> bool:
     return (
         db.query(AlertFollowUp)
@@ -219,32 +283,7 @@ async def alerts_page(
     if is_admin(current_user):
         agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
 
-    # Lista de compradores: el admin ve siempre el listado completo de la
-    # empresa activa. Para el agente, en cambio, solo aparecen los compradores
-    # cuyas alertas ya iniciaron seguimiento (status distinto de PENDING), así
-    # la lista se va llenando a medida que va gestionando sus alertas.
-    if is_admin(current_user):
-        buyers = scope_buyers(db.query(Buyer), company.id).order_by(Buyer.name.asc()).all()
-    else:
-        agent = get_agent_from_user(current_user, db)
-        if agent:
-            started_buyer_ids = (
-                scope_alerts(db.query(PropertyAlert.buyer_id), company.id)
-                .filter(
-                    PropertyAlert.buyer_id.isnot(None),
-                    PropertyAlert.status != AlertStatus.PENDING,
-                    PropertyAlert.agent_id == agent.id,
-                )
-                .subquery()
-            )
-            buyers = (
-                scope_buyers(db.query(Buyer), company.id)
-                .filter(Buyer.id.in_(started_buyer_ids))
-                .order_by(Buyer.name.asc())
-                .all()
-            )
-        else:
-            buyers = []
+    buyers = visible_buyers_query(db, current_user, company.id).order_by(Buyer.name.asc()).all()
 
     # Conteo por tipo de operación de los compradores que efectivamente
     # aparecen en `buyers` (no del total de alertas del sistema), para que el
@@ -342,12 +381,11 @@ async def search_buyers(
     q: str = "",
     db: Session = Depends(get_db)
 ):
-    """Autocompletado de compradores para el formulario de nueva alerta."""
+    """Autocompletado de compradores para el formulario de nueva alerta.
+
+    El agente solo encuentra los compradores que puede ver."""
 
     current_user = request.state.user
-
-    if not is_admin(current_user):
-        return JSONResponse(status_code=403, content={"results": []})
 
     term = (q or "").strip()
 
@@ -357,7 +395,7 @@ async def search_buyers(
     like = f"%{term}%"
 
     buyers = (
-        scope_buyers(db.query(Buyer), get_active_company(request).id)
+        visible_buyers_query(db, current_user, get_active_company(request).id)
         .filter(
             or_(
                 Buyer.name.ilike(like),
@@ -392,14 +430,12 @@ async def create_buyer(
     notes: str = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Crear nuevo comprador sin alerta asociada (solo admin)"""
+    """Crear nuevo comprador sin alerta asociada (admin y agentes).
+
+    El comprador queda registrado a nombre del usuario (`created_by`), que es
+    lo que le da acceso al agente que lo creó."""
 
     current_user = request.state.user
-
-    if not is_admin(current_user):
-        response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "error", "Solo administradores pueden crear compradores")
-        return response
 
     name = (name or "").strip()
     if not name:
@@ -451,14 +487,22 @@ async def create_buyer_with_criteria(
     notes: str = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Crea o selecciona un comprador, guarda sus criterios y va a los matches."""
+    """Crea o selecciona un comprador, guarda sus criterios y va a los matches.
+
+    Admin y agentes. El agente queda siempre como agente responsable del
+    perfil (no puede asignárselo a otro) y solo puede elegir compradores a
+    los que ya tiene acceso."""
 
     current_user = request.state.user
+    admin_view = is_admin(current_user)
 
-    if not is_admin(current_user):
-        response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "error", "Acceso no autorizado")
-        return response
+    if not admin_view:
+        own_agent = get_agent_from_user(current_user, db)
+        if not own_agent:
+            response = RedirectResponse(url="/alerts", status_code=302)
+            set_flash(response, "error", "Tu usuario no tiene ficha de agente asociada")
+            return response
+        agent_id = own_agent.id
 
     form_data = await request.form()
     zones = form_data.getlist("zones")
@@ -480,7 +524,7 @@ async def create_buyer_with_criteria(
         # Resolver comprador
         if buyer_id:
             buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
-            if not buyer:
+            if not buyer or not can_access_buyer(buyer, current_user, db):
                 response = RedirectResponse(url="/alerts", status_code=302)
                 set_flash(response, "error", "Comprador no encontrado")
                 return response
@@ -582,16 +626,13 @@ async def search_properties(
     """Autocompletado de propiedades para el formulario de nueva alerta.
 
     Devuelve como máximo PROPERTY_SEARCH_LIMIT coincidencias por título,
-    dirección o ciudad. Solo admin, igual que la creación de alertas.
+    dirección o ciudad. Admin y agentes: solo expone título, dirección,
+    ciudad y agente (los mismos datos que "Resto de propiedades"), nunca el
+    propietario.
 
     NOTA: debe declararse antes de /alerts/{alert_id}, o FastAPI intentaría
     resolver "search-properties" como un id y devolvería 422.
     """
-
-    current_user = request.state.user
-
-    if not is_admin(current_user):
-        return JSONResponse(status_code=403, content={"results": []})
 
     term = (q or "").strip()
 
@@ -642,19 +683,18 @@ async def check_duplicate_alert(
 
     Lo consulta el formulario de nueva alerta en cuanto conoce ambos ids,
     para avisar antes de enviar. Devuelve las abiertas y las cerradas
-    recientes por separado. Solo admin.
+    recientes por separado. Admin, y agentes sobre compradores a los que
+    tienen acceso.
 
     NOTA: debe declararse antes de /alerts/{alert_id}.
     """
 
     current_user = request.state.user
 
-    if not is_admin(current_user):
-        return JSONResponse(status_code=403, content={"open": [], "recent_closed": []})
-
     company_id = get_active_company(request).id
 
-    if not get_buyer_in_company(db, buyer_id, company_id):
+    buyer = get_buyer_in_company(db, buyer_id, company_id)
+    if not buyer or not can_access_buyer(buyer, current_user, db):
         return JSONResponse(content={"open": [], "recent_closed": []})
 
     duplicates = find_duplicate_alerts(db, company_id, buyer_id, property_id)
@@ -672,17 +712,19 @@ async def check_existing_buyer(
     """Compradores ya registrados con el mismo teléfono o correo.
 
     Lo consulta el modo "Nuevo comprador" del formulario para evitar dar de
-    alta dos veces a la misma persona. Solo admin.
+    alta dos veces a la misma persona. Al agente solo se le muestran
+    coincidencias entre los compradores a los que tiene acceso, para no
+    exponer los compradores de otros agentes.
 
     NOTA: debe declararse antes de /alerts/{alert_id}.
     """
 
     current_user = request.state.user
 
-    if not is_admin(current_user):
-        return JSONResponse(status_code=403, content={"results": []})
-
-    buyers = find_matching_buyers(db, get_active_company(request).id, phone=phone, email=email)
+    buyers = [
+        b for b in find_matching_buyers(db, get_active_company(request).id, phone=phone, email=email)
+        if can_access_buyer(b, current_user, db)
+    ]
 
     return JSONResponse(content={"results": [serialize_buyer(b) for b in buyers]})
 
@@ -779,7 +821,10 @@ async def create_alert(
     confirm_new_buyer: str = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Crear nueva alerta con comprador existente o nuevo (solo admin).
+    """Crear nueva alerta con comprador existente o nuevo (admin y agentes).
+
+    La alerta se asigna siempre al agente de la propiedad, la cree quien la
+    cree. El agente solo puede usar compradores a los que tiene acceso.
 
     Validación de duplicados:
     - Comprador existente: si ya hay una alerta abierta para ese comprador y
@@ -792,11 +837,6 @@ async def create_alert(
 
     current_user = request.state.user
 
-    if not is_admin(current_user):
-        response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "error", "Solo administradores pueden crear alertas")
-        return response
-
     company_id = get_active_company(request).id
 
     # Resolver comprador: existente o nuevo
@@ -804,7 +844,7 @@ async def create_alert(
 
     if buyer_id:
         buyer = get_buyer_in_company(db, buyer_id, company_id)
-        if not buyer:
+        if not buyer or not can_access_buyer(buyer, current_user, db):
             response = RedirectResponse(url="/alerts", status_code=302)
             set_flash(response, "error", "Comprador no encontrado")
             return response
@@ -816,7 +856,12 @@ async def create_alert(
             return response
 
         if not confirm_new_buyer:
-            matches = find_matching_buyers(db, company_id, phone=buyer_phone, email=buyer_email)
+            # Mismo criterio que /alerts/check-buyer: al agente solo se le
+            # avisa de coincidencias con compradores a los que tiene acceso
+            matches = [
+                b for b in find_matching_buyers(db, company_id, phone=buyer_phone, email=buyer_email)
+                if can_access_buyer(b, current_user, db)
+            ]
             if matches:
                 existing = matches[0]
                 contact = existing.phone or existing.email or ""
@@ -900,7 +945,17 @@ async def create_alert(
         db.commit()
 
         response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "success", f"Alerta de comprador creada para {buyer.name}")
+        own_agent = None if is_admin(current_user) else get_agent_from_user(current_user, db)
+        if own_agent and property_item.agent_id != own_agent.id:
+            # La alerta va al agente de la propiedad: no aparecerá en la lista de quien la creó
+            set_flash(
+                response,
+                "success",
+                f"Alerta creada para {buyer.name} y asignada a {property_item.agent.name}, "
+                "agente de la propiedad"
+            )
+        else:
+            set_flash(response, "success", f"Alerta de comprador creada para {buyer.name}")
         return response
 
     except Exception:
@@ -1370,27 +1425,10 @@ async def buyer_detail(
         return response
 
     # Agente solo puede ver compradores relacionados con él
-    if not is_admin(current_user):
-        agent = get_agent_from_user(current_user, db)
-        has_access = False
-        if agent:
-            via_criteria = (
-                db.query(BuyerSearchCriteria)
-                .filter(BuyerSearchCriteria.buyer_id == buyer_id,
-                        BuyerSearchCriteria.agent_id == agent.id)
-                .first()
-            )
-            via_alert = (
-                db.query(PropertyAlert)
-                .filter(PropertyAlert.buyer_id == buyer_id,
-                        PropertyAlert.agent_id == agent.id)
-                .first()
-            )
-            has_access = bool(via_criteria or via_alert)
-        if not has_access:
-            response = RedirectResponse(url="/alerts", status_code=302)
-            set_flash(response, "error", "No tienes acceso a este comprador")
-            return response
+    if not can_access_buyer(buyer, current_user, db):
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "No tienes acceso a este comprador")
+        return response
 
     company = get_active_company(request)
 
@@ -1409,6 +1447,12 @@ async def buyer_detail(
     business_types = filter_values["business_types"]
 
     agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
+
+    # Para el agente: su propia ficha (las propiedades de otros agentes se
+    # muestran como recomendadas pero sin enlace al detalle, que incluye
+    # datos del propietario).
+    own_agent = None if is_admin(current_user) else get_agent_from_user(current_user, db)
+
     buyer_alerts = (
         db.query(PropertyAlert)
         .filter(PropertyAlert.buyer_id == buyer_id)
@@ -1426,6 +1470,7 @@ async def buyer_detail(
             "buyer": buyer,
             "criteria": criteria,
             "matching_properties": matching_properties,
+            "own_agent": own_agent,
             "buyer_alerts": buyer_alerts,
             "agents": agents,
             "zones": zones,
@@ -1457,27 +1502,10 @@ async def update_buyer_contact(
         set_flash(response, "error", "Comprador no encontrado")
         return response
 
-    if not is_admin(current_user):
-        agent = get_agent_from_user(current_user, db)
-        has_access = False
-        if agent:
-            via_criteria = (
-                db.query(BuyerSearchCriteria)
-                .filter(BuyerSearchCriteria.buyer_id == buyer_id,
-                        BuyerSearchCriteria.agent_id == agent.id)
-                .first()
-            )
-            via_alert = (
-                db.query(PropertyAlert)
-                .filter(PropertyAlert.buyer_id == buyer_id,
-                        PropertyAlert.agent_id == agent.id)
-                .first()
-            )
-            has_access = bool(via_criteria or via_alert)
-        if not has_access:
-            response = RedirectResponse(url="/alerts", status_code=302)
-            set_flash(response, "error", "No tienes acceso a este comprador")
-            return response
+    if not can_access_buyer(buyer, current_user, db):
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "No tienes acceso a este comprador")
+        return response
 
     buyer.name = name.strip()
     buyer.phone = phone.strip() if phone and phone.strip() else None
@@ -1506,20 +1534,31 @@ async def save_search_criteria(
     notes: str = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Crear o actualizar el perfil de búsqueda de un comprador (solo admin)."""
+    """Crear o actualizar el perfil de búsqueda de un comprador.
+
+    Admin y agentes con acceso al comprador. Para el agente, el agente
+    responsable del perfil es siempre su propia ficha."""
 
     current_user = request.state.user
-
-    if not is_admin(current_user):
-        response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "error", "Acceso no autorizado")
-        return response
 
     buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
     if not buyer:
         response = RedirectResponse(url="/alerts?tab=buyers", status_code=302)
         set_flash(response, "error", "Comprador no encontrado")
         return response
+
+    if not can_access_buyer(buyer, current_user, db):
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "No tienes acceso a este comprador")
+        return response
+
+    if not is_admin(current_user):
+        own_agent = get_agent_from_user(current_user, db)
+        if not own_agent:
+            response = RedirectResponse(url=f"/buyers/{buyer_id}", status_code=302)
+            set_flash(response, "error", "Tu usuario no tiene ficha de agente asociada")
+            return response
+        agent_id = own_agent.id
 
     # Zonas y ciudades vienen como lista de checkboxes
     form_data = await request.form()
