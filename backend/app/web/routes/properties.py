@@ -24,6 +24,7 @@ from app.db.deps import get_db
 from app.models.property import Property
 from app.models.client import Client
 from app.models.agent import Agent
+from app.models.company import Company
 from app.models.property_price_history import PropertyPriceHistory
 from app.models.property_interaction import PropertyInteraction
 from app.models.property_status_history import PropertyStatusHistory
@@ -142,11 +143,58 @@ def _build_change_logs(property_obj, new_values: dict, user_id: int, db) -> list
     return logs
 
 
+def _readonly_property_rows(query, search: str) -> list[dict]:
+    """Filas de solo lectura para "Resto de propiedades" y "Propiedades de {otra empresa}".
+
+    Se construyen con `with_entities` sobre columnas explícitas (sin
+    `Property.client`/`client_id`) para que el propietario ni siquiera se
+    cargue desde el backend, en vez de depender de que la plantilla
+    simplemente no lo muestre. Incluye el nombre del agente captador.
+    """
+    query = query.outerjoin(Agent, Agent.id == Property.agent_id)
+
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                Property.title.ilike(pattern),
+                Property.address.ilike(pattern),
+                Property.city.ilike(pattern),
+                Property.referencia.ilike(pattern),
+            )
+        )
+
+    rows = (
+        query
+        .with_entities(
+            Property.id,
+            Property.title,
+            Property.address,
+            Property.city,
+            Property.zona,
+            Property.property_type,
+            Property.business_type,
+            Property.price,
+            Property.moneda,
+            Property.status,
+            Property.m2_utiles,
+            Property.m2_construidos,
+            Property.num_dormitorios,
+            Property.num_banos_aseos,
+            Agent.name.label("agent_name"),
+        )
+        .order_by(Property.price.desc().nullslast(), Property.title.asc())
+        .all()
+    )
+    return [dict(row._mapping) for row in rows]
+
+
 @router.get("/properties", response_class=HTMLResponse)
 async def properties_page(
     request: Request,
     tab: str = Query(default="mine"),
     filtro: str = Query(default="activas"),
+    company_id: int | None = Query(default=None),
     db: Session = Depends(get_db)
 ):
 
@@ -167,7 +215,25 @@ async def properties_page(
     # La pestaña "Resto de propiedades" solo aplica a agentes: el admin ya ve
     # el inventario completo en "Mis propiedades".
     show_others_tab = not admin_view and agent is not None
-    tab = "others" if (tab == "others" and show_others_tab) else "mine"
+
+    # "Propiedades de {otra empresa}": inventario activo y disponible de las
+    # demás empresas activas, visible para todos los roles. Es la única
+    # excepción al aislamiento por empresa y se limita a este listado de solo
+    # lectura (sin propietario, sin enlace al detalle, sin visitas ni edición).
+    other_companies = (
+        db.query(Company)
+        .filter(Company.is_active.is_(True), Company.id != company.id)
+        .order_by(Company.id)
+        .all()
+    )
+
+    if tab == "other_company" and other_companies:
+        selected_other_company = next(
+            (c for c in other_companies if c.id == company_id), other_companies[0]
+        )
+    else:
+        selected_other_company = None
+        tab = "others" if (tab == "others" and show_others_tab) else "mine"
 
     # Si es admin, mostrar todas las propiedades de la empresa activa
     # Si es agente, mostrar solo sus propiedades
@@ -233,10 +299,7 @@ async def properties_page(
     ).all()
 
     # "Resto de propiedades": inventario activo de la empresa que NO está
-    # asociado al agente logueado. Se construye con `with_entities` sobre
-    # columnas explícitas (sin `Property.client`/`client_id`) para que el
-    # objeto de propietario ni siquiera se cargue desde el backend, en vez de
-    # depender de que la plantilla simplemente no lo muestre.
+    # asociado al agente logueado (sin datos del propietario).
     other_properties = []
     other_count = 0
 
@@ -252,42 +315,28 @@ async def properties_page(
         other_count = others_base.count()
 
         if tab == "others":
-            others_query = others_base.outerjoin(Agent, Agent.id == Property.agent_id)
+            other_properties = _readonly_property_rows(others_base, search)
 
-            if search:
-                pattern = f"%{search}%"
-                others_query = others_query.filter(
-                    or_(
-                        Property.title.ilike(pattern),
-                        Property.address.ilike(pattern),
-                        Property.city.ilike(pattern),
-                        Property.referencia.ilike(pattern),
-                    )
-                )
+    # Pestañas de las otras empresas: contador por empresa y filas solo de la
+    # seleccionada. Mismo criterio de inventario que "Resto de propiedades".
+    other_company_tabs = []
 
-            rows = (
-                others_query
-                .with_entities(
-                    Property.id,
-                    Property.title,
-                    Property.address,
-                    Property.city,
-                    Property.zona,
-                    Property.property_type,
-                    Property.business_type,
-                    Property.price,
-                    Property.moneda,
-                    Property.status,
-                    Property.m2_utiles,
-                    Property.m2_construidos,
-                    Property.num_dormitorios,
-                    Property.num_banos_aseos,
-                    Agent.name.label("agent_name"),
-                )
-                .order_by(Property.price.desc().nullslast(), Property.title.asc())
-                .all()
-            )
-            other_properties = [dict(row._mapping) for row in rows]
+    for other in other_companies:
+        other_company_base = scope_properties(
+            db.query(Property).filter(
+                Property.status == PropertyStatus.ACTIVE,
+                Property.available_clause(),
+            ),
+            other.id
+        )
+        other_company_tabs.append({
+            "id": other.id,
+            "name": other.name,
+            "count": other_company_base.count(),
+        })
+
+        if selected_other_company is not None and other.id == selected_other_company.id:
+            other_properties = _readonly_property_rows(other_company_base, search)
 
     return templates.TemplateResponse(
         request=request,
@@ -308,6 +357,10 @@ async def properties_page(
             "show_others_tab": show_others_tab,
             "other_properties": other_properties,
             "other_count": other_count,
+            "is_admin": admin_view,
+            "company_name": company.name,
+            "other_company_tabs": other_company_tabs,
+            "selected_other_company": selected_other_company,
         }
     )
 

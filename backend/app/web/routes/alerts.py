@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case, or_
 
 from app.core.constants import AlertType, PropertyStatus
+from app.core.constants import BusinessType
 from app.core.constants import AlertPriority
 from app.core.constants import AlertStatus
 from app.core.constants import FollowUpActionType
@@ -504,6 +505,13 @@ async def create_buyer_with_criteria(
             return response
         agent_id = own_agent.id
 
+    # Operación obligatoria: solo Venta o Alquiler (no se guarda nada si falta)
+    business_type = (business_type or "").strip()
+    if not BusinessType.is_valid(business_type):
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Selecciona la operación del comprador: Venta o Alquiler")
+        return response
+
     form_data = await request.form()
     zones = form_data.getlist("zones")
     cities_sel = form_data.getlist("cities")
@@ -838,6 +846,15 @@ async def create_alert(
     current_user = request.state.user
 
     company_id = get_active_company(request).id
+
+    # Operación obligatoria: solo Venta o Alquiler (no se guarda nada si falta).
+    # El formulario rápido de la ficha del comprador vuelve a esa ficha.
+    business_type = (business_type or "").strip()
+    if not BusinessType.is_valid(business_type):
+        back_url = f"/buyers/{buyer_id}" if buyer_id else "/alerts"
+        response = RedirectResponse(url=back_url, status_code=302)
+        set_flash(response, "error", "Selecciona la operación de la alerta: Venta o Alquiler")
+        return response
 
     # Resolver comprador: existente o nuevo
     buyer = None
@@ -1559,6 +1576,13 @@ async def save_search_criteria(
             set_flash(response, "error", "Tu usuario no tiene ficha de agente asociada")
             return response
         agent_id = own_agent.id
+
+    # Operación obligatoria: solo Venta o Alquiler (no se guarda nada si falta)
+    business_type = (business_type or "").strip()
+    if not BusinessType.is_valid(business_type):
+        response = RedirectResponse(url=f"/buyers/{buyer_id}?tab=criteria", status_code=302)
+        set_flash(response, "error", "Selecciona la operación del comprador: Venta o Alquiler")
+        return response
 
     # Zonas y ciudades vienen como lista de checkboxes
     form_data = await request.form()

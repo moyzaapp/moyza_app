@@ -5,10 +5,16 @@ Reglas (PLAN_VISITAS_AGENTES.md §2.3 y decisiones §4):
 - `agent_id` (principal) es obligatorio y debe pertenecer a la empresa activa.
 - Un usuario agente no puede elegir el principal: en el alta es él mismo y
   en la edición se conserva el que ya tenía la visita. Solo el admin lo elige.
-- `companion_agent_id` es opcional, de la empresa activa y distinto del
-  principal. Solo se lee si `visit_mode` es "acompanado".
+- `companion_agent_id` es opcional, distinto del principal y puede ser de
+  CUALQUIER empresa activa (un agente de MOES puede acompañar en una visita
+  de MOYZA y al revés). Solo se lee si `visit_mode` es "acompanado".
 - Una visita firmada o completada tiene los agentes fijados: no se lee el form.
 """
+from sqlalchemy.orm import Session
+from sqlalchemy.orm import selectinload
+
+from app.models.agent import Agent
+from app.models.company import Company
 from app.services.company_scope import get_agent_in_company
 from app.web.dependencies.auth import get_agent_from_user
 from app.web.dependencies.auth import is_admin
@@ -45,13 +51,16 @@ def resolve_visit_agents(
     is_admin_user: bool,
     current_agent,
     lookup_agent,
+    lookup_any_agent,
     fixed_agent_id=None,
 ):
     """Valida los agentes enviados en el form y devuelve (agent_id, companion_agent_id).
 
     - `current_agent`: ficha de agente del usuario logueado (o None).
     - `lookup_agent(agent_id)`: devuelve el agente si pertenece a la empresa
-      activa, o None.
+      activa, o None. Valida al principal.
+    - `lookup_any_agent(agent_id)`: devuelve el agente si existe en alguna
+      empresa activa, sin filtrar por la activa, o None. Valida al acompañante.
     - `fixed_agent_id`: principal que un usuario no admin no puede cambiar
       (el de la visita en edición). Si es None, el principal es su agente.
 
@@ -82,8 +91,8 @@ def resolve_visit_agents(
             raise VisitAgentsError("Selecciona el agente acompañante")
         if companion_agent_id == agent_id:
             raise VisitAgentsError("El agente acompañante debe ser distinto del que realizó la visita")
-        if lookup_agent(companion_agent_id) is None:
-            raise VisitAgentsError("El agente acompañante no pertenece a la empresa activa")
+        if lookup_any_agent(companion_agent_id) is None:
+            raise VisitAgentsError("El agente acompañante no existe o ya no pertenece a ninguna empresa")
 
     return agent_id, companion_agent_id
 
@@ -105,10 +114,66 @@ def parse_visit_agents(form, request, db, property_item, visit=None, locked=Fals
     def lookup_agent(agent_id):
         return get_agent_in_company(db, agent_id, company_id)
 
+    def lookup_any_agent(agent_id):
+        return get_agent_in_any_company(db, agent_id)
+
     return resolve_visit_agents(
         form,
         is_admin_user=bool(is_admin(user)),
         current_agent=get_agent_from_user(user, db),
         lookup_agent=lookup_agent,
+        lookup_any_agent=lookup_any_agent,
         fixed_agent_id=visit.agent_id if visit is not None else None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Acompañante de cualquier empresa
+# ---------------------------------------------------------------------------
+
+def get_agent_in_any_company(db: Session, agent_id: int):
+    """Agente que pertenece al menos a una empresa activa, sin mirar la activa."""
+    return (
+        db.query(Agent)
+        .filter(Agent.id == agent_id, Agent.companies.any(Company.is_active.is_(True)))
+        .first()
+    )
+
+
+def companion_agent_groups(db: Session, active_company_id: int) -> list[dict]:
+    """Agentes de todas las empresas activas para el select de acompañante.
+
+    Cada agente aparece una sola vez, agrupado por el conjunto de empresas a
+    las que pertenece: "MOYZA", "MOES PREMIUM" o "MOYZA, MOES PREMIUM". Así
+    no hay dos opciones con el mismo valor y se ve de un vistazo de qué
+    empresa es cada uno. Orden: primero los grupos que incluyen la empresa
+    activa (solo ella y luego compartidos) y después el resto.
+
+    Devuelve [{"label": str, "agents": [Agent, ...]}, ...].
+    """
+    companies = (
+        db.query(Company)
+        .filter(Company.is_active.is_(True))
+        .order_by(Company.id)
+        .all()
+    )
+    names = {c.id: c.name for c in companies}
+
+    agents = (
+        db.query(Agent)
+        .options(selectinload(Agent.companies))
+        .filter(Agent.companies.any(Company.is_active.is_(True)))
+        .order_by(Agent.name)
+        .all()
+    )
+
+    groups: dict[tuple, list] = {}
+    for agent in agents:
+        key = tuple(sorted(c.id for c in agent.companies if c.id in names))
+        groups.setdefault(key, []).append(agent)
+
+    ordered = sorted(groups, key=lambda ids: (active_company_id not in ids, len(ids), ids))
+    return [
+        {"label": ", ".join(names[i] for i in ids), "agents": groups[ids]}
+        for ids in ordered
+    ]

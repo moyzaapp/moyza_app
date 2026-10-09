@@ -80,10 +80,15 @@ def agent(id, name=None):
 
 # Agentes de la empresa activa; el 99 es de la otra empresa
 COMPANY_AGENTS = {1: agent(1), 2: agent(2), 3: agent(3)}
+ALL_AGENTS = {**COMPANY_AGENTS, 99: agent(99)}
 
 
 def lookup(agent_id):
     return COMPANY_AGENTS.get(agent_id)
+
+
+def lookup_any(agent_id):
+    return ALL_AGENTS.get(agent_id)
 
 
 def resolve(form, *, admin=False, current=None, fixed=None):
@@ -92,6 +97,7 @@ def resolve(form, *, admin=False, current=None, fixed=None):
         is_admin_user=admin,
         current_agent=current,
         lookup_agent=lookup,
+        lookup_any_agent=lookup_any,
         fixed_agent_id=fixed,
     )
 
@@ -122,8 +128,15 @@ class TestResolveVisitAgents:
             resolve({"visit_mode": "acompanado", "companion_agent_id": ""}, current=agent(1))
 
     def test_acompanante_de_otra_empresa(self):
+        """El acompañante puede ser de cualquier empresa; el principal no."""
         form = {"visit_mode": "acompanado", "companion_agent_id": "99"}
-        with pytest.raises(VisitAgentsError, match="empresa activa"):
+        assert resolve(form, current=agent(1)) == (1, 99)
+        form_admin = {"agent_id": "2", "visit_mode": "acompanado", "companion_agent_id": "99"}
+        assert resolve(form_admin, admin=True) == (2, 99)
+
+    def test_acompanante_inexistente(self):
+        form = {"visit_mode": "acompanado", "companion_agent_id": "12345"}
+        with pytest.raises(VisitAgentsError, match="acompañante no existe"):
             resolve(form, current=agent(1))
 
     def test_usuario_sin_ficha_de_agente(self):
@@ -394,3 +407,64 @@ def test_visita_en_propiedad_ajena_la_ven_visitante_y_captador(foreign_visit_dat
     }
     db.close()
     assert hojas == {"visitante": 1, "acompanante": 1, "captador": 0}
+
+
+def test_acompanante_de_otra_empresa_en_el_alta(foreign_visit_data):
+    """Una visita de MOES admite como acompañante a un agente solo de MOYZA.
+
+    El select del acompañante agrupa a los agentes por empresa; el principal
+    sigue limitado a la empresa activa.
+    """
+    from app.db.session import SessionLocal
+    from app.models.company import Company
+
+    db = SessionLocal()
+    moyza = db.query(Company).filter_by(code="MOYZA").one()
+    companion = Agent(name=f"{TAG} MOYZA", email="pytest.ajena.moyza@example.com")
+    companion.companies.append(moyza)
+    db.add(companion)
+    db.commit()
+    companion_id = companion.id
+
+    try:
+        visitante = _Client("pytest.ajena.visitante@example.com", "MOES")
+        prop_id = foreign_visit_data["property_id"]
+
+        status, body, _ = visitante.get(f"/visits/new/{prop_id}")
+        assert status == 200
+        assert '<optgroup label="MOES PREMIUM">' in body
+        assert '<optgroup label="MOYZA">' in body
+        assert f'<option value="{companion_id}"' in body
+
+        status, _, headers = visitante.post(f"/visits/create/{prop_id}", {
+            "visitor_name": f"{TAG} CLIENTE MOYZA",
+            "phone_country_code": "34",
+            "phone_number": "600000001",
+            "purchase_fees": "2500",
+            "notes": "test",
+            "generate_sheet": "true",
+            "visit_mode": "acompanado",
+            "companion_agent_id": str(companion_id),
+        })
+        assert status == 302 and "/visits/preview/" in headers.get("location", "")
+
+        db.expire_all()
+        visit = (
+            db.query(PropertyVisit)
+            .filter(PropertyVisit.property_id == prop_id,
+                    PropertyVisit.visitor_name == f"{TAG} CLIENTE MOYZA")
+            .one()
+        )
+        assert visit.agent_id == foreign_visit_data["visitante"]
+        assert visit.companion_agent_id == companion_id
+
+        # El nombre del acompañante se muestra igual en el listado de visitas
+        status, body, _ = visitante.get("/visits")
+        assert status == 200 and f"con {TAG} MOYZA" in body
+    finally:
+        db.query(PropertyVisit).filter(
+            PropertyVisit.companion_agent_id == companion_id
+        ).delete(synchronize_session=False)
+        db.query(Agent).filter(Agent.id == companion_id).delete(synchronize_session=False)
+        db.commit()
+        db.close()

@@ -40,6 +40,7 @@ from app.services.company_scope import (
     get_property_in_company,
 )
 from app.services.visit_agents import VisitAgentsError
+from app.services.visit_agents import companion_agent_groups
 from app.services.visit_agents import parse_visit_agents
 from app.services.visit_agents import visit_agents_locked
 from app.web.dependencies.company import get_active_company
@@ -58,7 +59,9 @@ PURCHASE_FEES_PATTERN = re.compile(r"\d[\d.,]*")
 def _visit_agents_context(request: Request, db: Session, property_item, visit=None) -> dict:
     """Datos de la sección "Agentes de la visita" (alta y edición).
 
-    - `agents`: agentes de la empresa activa (seleccionables).
+    - `agents`: agentes de la empresa activa (select del principal, admin).
+    - `companion_agents`: agentes de todas las empresas activas agrupados
+      por empresa (select del acompañante); ver `companion_agent_groups`.
     - `principal_agent`: el que figura como "Realizada por" para un usuario
       agente (él mismo en el alta; el de la visita en la edición).
     - `selected_agent_id` / `selected_companion_agent_id`: valores iniciales
@@ -67,8 +70,9 @@ def _visit_agents_context(request: Request, db: Session, property_item, visit=No
     current_user = request.state.user
     current_agent = get_agent_from_user(current_user, db)
 
+    company_id = get_active_company(request).id
     agents = (
-        scope_agents(db.query(Agent), get_active_company(request).id)
+        scope_agents(db.query(Agent), company_id)
         .order_by(Agent.name)
         .all()
     )
@@ -84,6 +88,7 @@ def _visit_agents_context(request: Request, db: Session, property_item, visit=No
 
     return {
         "agents": agents,
+        "companion_agents": companion_agent_groups(db, company_id),
         "current_agent": current_agent,
         "is_admin": bool(is_admin(current_user)),
         "principal_agent": principal_agent,

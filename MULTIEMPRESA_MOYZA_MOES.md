@@ -50,6 +50,9 @@ editan desde la interfaz. Se pueden eliminar en una migración futura.
 - La cola secuencial de alertas de un agente es por empresa.
 - Los recordatorios de compradores se envían por agente y empresa.
 - Un agente no puede cambiar sus propias empresas; solo el admin.
+- Única excepción al aislamiento: en `/properties?tab=other_company` todos los
+  roles ven, en solo lectura, las propiedades activas y disponibles de la otra
+  empresa (sin propietario ni enlace al detalle); nada más de ella se expone.
 
 ## 3. Despliegue en producción
 

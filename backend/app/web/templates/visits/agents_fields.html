@@ -1,6 +1,8 @@
 {# Sección "Agentes de la visita" (alta y edición).
-   Contexto: agents, is_admin, current_agent, principal_agent, selected_agent_id,
-   selected_companion_agent_id y, en edición, visit + agents_locked. #}
+   Contexto: agents (empresa activa, principal), companion_agents (todas las
+   empresas, agrupados: [{label, agents}]), is_admin, current_agent,
+   principal_agent, selected_agent_id, selected_companion_agent_id y, en
+   edición, visit + agents_locked. #}
 <div class="col-span-full border border-gray-200 rounded-xl p-3 sm:p-4" id="visit-agents">
 
     <p class="text-xs sm:text-sm font-semibold text-gray-800 mb-3">
@@ -27,17 +29,17 @@
 
         <div>
 
-            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
-                Realizada por
-            </label>
-
             {% if is_admin %}
+
+            <label for="visit-agent-select" class="block text-sm font-medium text-gray-700 mb-1">
+                Realizada por <span class="text-red-500" aria-hidden="true">*</span>
+            </label>
 
             <select
                 name="agent_id"
                 id="visit-agent-select"
                 required
-                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
+                class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
             >
                 <option value="">Selecciona un agente</option>
                 {% for agent in agents %}
@@ -47,6 +49,7 @@
 
             {% elif principal_agent %}
 
+            <span class="block text-sm font-medium text-gray-700 mb-1">Realizada por</span>
             <input type="hidden" name="agent_id" id="visit-agent-select" value="{{ principal_agent.id }}">
             <p class="w-full border border-gray-200 bg-gray-50 p-2 sm:p-3 rounded-xl text-sm sm:text-base text-gray-800">
                 {{ principal_agent.name }}
@@ -54,6 +57,7 @@
 
             {% else %}
 
+            <span class="block text-sm font-medium text-gray-700 mb-1">Realizada por</span>
             <p class="w-full border border-red-200 bg-red-50 p-2 sm:p-3 rounded-xl text-xs sm:text-sm text-red-700">
                 Tu usuario no está vinculado a una ficha de agente; no puedes registrar visitas.
             </p>
@@ -95,22 +99,33 @@
 
         <div class="sm:col-span-2 {% if not selected_companion_agent_id %}hidden{% endif %}" id="companion-agent-wrapper">
 
-            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
-                Agente acompañante
+            <label for="companion-agent-select" class="block text-sm font-medium text-gray-700 mb-1">
+                Agente acompañante <span class="text-red-500" aria-hidden="true">*</span>
             </label>
 
             <select
                 name="companion_agent_id"
                 id="companion-agent-select"
-                class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
+                aria-describedby="companion-agent-help"
+                class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
             >
                 <option value="">Selecciona un agente</option>
-                {% for agent in agents %}
-                {% if is_admin or not principal_agent or agent.id != principal_agent.id %}
-                <option value="{{ agent.id }}" {% if agent.id == selected_companion_agent_id %}selected{% endif %}>{{ agent.name }}</option>
+                {% for group in companion_agents %}
+                {# Un agente no puede acompañarse a sí mismo: no se le ofrece #}
+                {% set group_agents = group.agents | rejectattr('id', 'equalto', principal_agent.id) | list if (not is_admin and principal_agent) else group.agents %}
+                {% if group_agents %}
+                <optgroup label="{{ group.label }}">
+                    {% for agent in group_agents %}
+                    <option value="{{ agent.id }}" {% if agent.id == selected_companion_agent_id %}selected{% endif %}>{{ agent.name }}</option>
+                    {% endfor %}
+                </optgroup>
                 {% endif %}
                 {% endfor %}
             </select>
+
+            <p id="companion-agent-help" class="text-xs text-gray-500 mt-1">
+                Puede ser un agente de cualquier empresa.
+            </p>
 
         </div>
 
