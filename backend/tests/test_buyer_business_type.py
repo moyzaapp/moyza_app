@@ -153,3 +153,72 @@ def test_edicion_de_criterios_exige_operacion(db):
     assert headers.get("location") == f"/buyers/{buyer.id}?tab=matches"
     db.expire_all()
     assert buyer.search_criteria.business_type == "Alquiler"
+
+
+def _available_property_id(db, company_code: str) -> int:
+    from app.models.company import Company
+    from app.models.property import Property
+    from app.core.constants import PropertyStatus
+
+    company = db.query(Company).filter(Company.code == company_code).first()
+    prop = (
+        db.query(Property)
+        .filter(
+            Property.company_id == company.id,
+            Property.status == PropertyStatus.ACTIVE,
+            Property.available_clause(),
+        )
+        .first()
+    )
+    if prop is None:
+        pytest.skip(f"No hay propiedades disponibles en {company_code} para crear alertas")
+    return prop.id
+
+
+def test_nueva_alerta_exige_operacion(db):
+    """El modal de nueva alerta (y el rápido de la ficha del comprador) también
+    exigen Venta o Alquiler; sin operación no se crea ni comprador ni alerta."""
+    client = _Client("MOES")
+    property_id = _available_property_id(db, "MOES")
+
+    name = f"{TAG} ALERTA SIN OPERACION"
+    for business_type in (None, "", "Traspaso"):
+        data = {
+            "property_id": property_id,
+            "buyer_name": name,
+            "buyer_phone": "600000004",
+            "confirm_new_buyer": "1",
+        }
+        if business_type is not None:
+            data["business_type"] = business_type
+        status, headers = client.post("/alerts/create", data)
+        assert status == 302
+        assert headers.get("location") == "/alerts"
+        assert "Venta o Alquiler" in _flash(headers)
+        assert _buyers(db, name) == []
+
+    name = f"{TAG} ALERTA VENTA"
+    status, headers = client.post("/alerts/create", {
+        "property_id": property_id,
+        "buyer_name": name,
+        "buyer_phone": "600000005",
+        "confirm_new_buyer": "1",
+        "business_type": "Venta",
+    })
+    assert status == 302
+    buyers = _buyers(db, name)
+    assert len(buyers) == 1
+    assert len(buyers[0].alerts) == 1
+    assert buyers[0].alerts[0].business_type == "Venta"
+
+    # Formulario rápido: comprador existente sin operación vuelve a su ficha
+    status, headers = client.post("/alerts/create", {
+        "property_id": property_id,
+        "buyer_id": buyers[0].id,
+        "business_type": "",
+    })
+    assert status == 302
+    assert headers.get("location") == f"/buyers/{buyers[0].id}"
+    assert "Venta o Alquiler" in _flash(headers)
+    db.expire_all()
+    assert len(buyers[0].alerts) == 1

@@ -847,6 +847,15 @@ async def create_alert(
 
     company_id = get_active_company(request).id
 
+    # Operación obligatoria: solo Venta o Alquiler (no se guarda nada si falta).
+    # El formulario rápido de la ficha del comprador vuelve a esa ficha.
+    business_type = (business_type or "").strip()
+    if not BusinessType.is_valid(business_type):
+        back_url = f"/buyers/{buyer_id}" if buyer_id else "/alerts"
+        response = RedirectResponse(url=back_url, status_code=302)
+        set_flash(response, "error", "Selecciona la operación de la alerta: Venta o Alquiler")
+        return response
+
     # Resolver comprador: existente o nuevo
     buyer = None
 
