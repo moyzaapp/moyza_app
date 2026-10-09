@@ -78,3 +78,5 @@ storage/**
 
 test.py
 *.png
+# Claude Code: configuración local por máquina
+.claude/settings.local.json
