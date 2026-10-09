@@ -1,24 +1,38 @@
+{#
+  Tabla de solo lectura compartida por "Resto de propiedades" y
+  "Propiedades de {otra empresa}". Sin datos del propietario y sin enlace
+  al detalle. Variables: other_properties, search, readonly_tab,
+  readonly_company_id, readonly_tab_href, readonly_empty_text.
+#}
+{% import "components/ui_macros.html" as ui %}
+{% set readonly_tab_href = readonly_tab_href or "/properties?tab=others" %}
+
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
     <div class="p-3 sm:p-4 border-b border-gray-200 bg-white">
 
         <form method="GET" action="/properties" class="flex items-center gap-3">
 
-            <input type="hidden" name="tab" value="others">
+            <input type="hidden" name="tab" value="{{ readonly_tab or 'others' }}">
+            {% if readonly_company_id %}
+            <input type="hidden" name="company_id" value="{{ readonly_company_id }}">
+            {% endif %}
 
+            <label for="readonly_search" class="sr-only">Buscar propiedades</label>
             <input
-                type="text"
+                type="search"
+                id="readonly_search"
                 name="search"
                 placeholder="Buscar por título, dirección, ciudad o referencia..."
                 value="{{ search or '' }}"
-                class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
+                class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
             >
 
             {% if search %}
 
             <a
-                href="/properties?tab=others"
-                class="text-xs sm:text-sm text-gray-500 hover:text-gray-800 whitespace-nowrap"
+                href="{{ readonly_tab_href }}"
+                class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 whitespace-nowrap"
             >
                 Limpiar
             </a>
@@ -38,35 +52,35 @@
 
             <tr>
 
-                <th data-sort-type="text" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap cursor-pointer select-none hover:text-gray-900">
+                <th scope="col" data-sort-type="text" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap cursor-pointer select-none hover:text-gray-900">
                     Propiedad <span class="sort-indicator text-gray-400">↕</span>
                 </th>
 
-                <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
+                <th scope="col" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap">
                     Ciudad / Zona
                 </th>
 
-                <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
+                <th scope="col" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap">
                     Tipo
                 </th>
 
-                <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-center text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
+                <th scope="col" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-center text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap">
                     Operación
                 </th>
 
-                <th data-sort-type="number" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap cursor-pointer select-none hover:text-gray-900">
+                <th scope="col" data-sort-type="number" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap cursor-pointer select-none hover:text-gray-900">
                     Valor <span class="sort-indicator text-gray-400">↕</span>
                 </th>
 
-                <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
+                <th scope="col" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap">
                     Características
                 </th>
 
-                <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
+                <th scope="col" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap">
                     Estado
                 </th>
 
-                <th data-sort-type="text" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap cursor-pointer select-none hover:text-gray-900">
+                <th scope="col" data-sort-type="text" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap cursor-pointer select-none hover:text-gray-900">
                     Agente asignado <span class="sort-indicator text-gray-400">↕</span>
                 </th>
 
@@ -96,12 +110,7 @@
                 </td>
 
                 <td class="px-3 sm:px-6 py-3 sm:py-4 text-center">
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                        {% if property.business_type == 'Venta' %}bg-green-100 text-green-800
-                        {% elif property.business_type == 'Alquiler' %}bg-purple-100 text-purple-800
-                        {% else %}bg-gray-100 text-gray-700{% endif %}">
-                        {{ property.business_type or '-' }}
-                    </span>
+                    {{ ui.status_badge('business', property.business_type, dot=False) }}
                 </td>
 
                 <td data-sort-value="{{ property.price if property.price is not none else '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm whitespace-nowrap">
@@ -120,24 +129,8 @@
                 </td>
 
                 <td class="px-3 sm:px-6 py-3 sm:py-4">
-                    <span class="
-                        px-3 py-1 rounded-full text-sm
-
-                        {% if property.status == 'Activa' %}
-                            bg-green-100 text-green-700
-
-                        {% elif property.status == 'Pausada' %}
-                            bg-yellow-100 text-yellow-700
-
-                        {% elif property.status == 'Vendida' %}
-                            bg-red-100 text-red-700
-
-                        {% else %}
-                            bg-gray-100 text-gray-700
-                        {% endif %}
-                    ">
-                        {{ property.status }}
-                    </span>
+                    {% set status_tone = {'Activa': 'green', 'Pausada': 'amber', 'Vendida': 'red'}.get(property.status, 'gray') %}
+                    {{ ui.badge(property.status or '-', status_tone, dot=True) }}
                 </td>
 
                 <td data-sort-value="{{ property.agent_name or '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm text-gray-600">
@@ -150,19 +143,11 @@
 
             {% if not other_properties %}
 
-            <tr>
-
-                <td colspan="8" class="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500">
-
-                    {% if search %}
-                    No se encontraron propiedades para "{{ search }}"
-                    {% else %}
-                    No hay más propiedades activas en el inventario de la empresa
-                    {% endif %}
-
-                </td>
-
-            </tr>
+            {% if search %}
+            {{ ui.empty_state('No se encontraron propiedades para "' ~ search ~ '"', hint="Prueba con otro título, dirección, ciudad o referencia.", colspan=8) }}
+            {% else %}
+            {{ ui.empty_state(readonly_empty_text or "No hay más propiedades activas en el inventario de la empresa", colspan=8) }}
+            {% endif %}
 
             {% endif %}
 

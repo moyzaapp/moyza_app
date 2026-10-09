@@ -238,3 +238,60 @@ def test_api_sin_sesion_no_expone_datos():
 def test_titulo_y_marca_siguen_a_la_empresa(moyza, moes):
     assert re.search(r"<title>\s*Compradores - MOES PREMIUM", moes.get("/alerts")[1])
     assert re.search(r"<title>\s*Compradores - MOYZA", moyza.get("/alerts")[1])
+
+
+# ---------------------------------------------------------------------------
+# Excepción acotada: pestaña "Propiedades de {otra empresa}" en /properties
+# ---------------------------------------------------------------------------
+
+def test_pestana_otra_empresa_lista_solo_inventario_disponible(moyza, moes, db, moes_data, companies):
+    """MOYZA ve en solo lectura las propiedades activas y disponibles de MOES.
+
+    El detalle sigue acotado a la empresa activa y una propiedad No
+    disponible de la otra empresa no aparece.
+    """
+    from app.core.constants import PropertyStatus
+    from app.models.property import Property
+
+    tag = moes_data["tag"]
+    prop = moes_data["property"]
+    assert prop.status == PropertyStatus.ACTIVE and prop.is_available
+
+    no_disponible = Property(
+        title=f"{tag} NO-DISPONIBLE",
+        address="Calle Test 2",
+        city="Jaen",
+        price=90000,
+        status=PropertyStatus.ACTIVE,
+        estado_inmueble="No disponible",
+        company_id=companies["MOES"].id,
+        agent_id=moes_data["agent"].id,
+    )
+    db.add(no_disponible)
+    db.commit()
+
+    status, body, _ = moyza.get(f"/properties?tab=other_company&company_id={companies['MOES'].id}")
+    assert status == 200
+    assert "Propiedades de MOES PREMIUM" in body
+    assert "Solo lectura. Estas propiedades pertenecen a MOES PREMIUM." in body
+    assert f"{tag} PROP" in body
+    assert moes_data["agent"].name in body           # agente captador visible
+    assert moes_data["client"].name not in body      # propietario nunca
+    assert f"{tag} NO-DISPONIBLE" not in body
+    assert f'href="/properties/{prop.id}"' not in body  # sin enlace al detalle
+
+    # Buscador por título dentro de la pestaña
+    status, body, _ = moyza.get(f"/properties?tab=other_company&search={urllib.parse.quote(tag)}")
+    assert status == 200 and f"{tag} PROP" in body
+    status, body, _ = moyza.get("/properties?tab=other_company&search=zzz-no-existe-zzz")
+    assert status == 200 and f"{tag} PROP" not in body
+
+    # El detalle y el alta de visita siguen fuera de alcance desde MOYZA
+    assert moyza.get(f"/properties/{prop.id}")[0] == 302
+    assert moyza.get(f"/visits/new/{prop.id}")[0] == 302
+
+    # Desde MOES la pestaña muestra MOYZA, no su propio inventario
+    status, body, _ = moes.get("/properties?tab=other_company")
+    assert status == 200
+    assert "Propiedades de MOYZA" in body
+    assert f"{tag} PROP" not in body

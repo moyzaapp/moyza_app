@@ -23,13 +23,14 @@ Propiedades
     {% if can_create %}
 
     <button
+        type="button"
         onclick="openModal()"
-        class="w-full sm:w-auto bg-black hover:bg-gray-800 text-white px-5 py-3 rounded-xl transition-colors font-medium flex items-center justify-center gap-2"
+        class="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white rounded-xl px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/30"
     >
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
         </svg>
-        <span>Nueva Propiedad</span>
+        <span>Nueva propiedad</span>
     </button>
 
     {% endif %}
@@ -95,36 +96,46 @@ Propiedades
 
 </div>
 
+{% import "components/ui_macros.html" as ui %}
+
+{% if show_others_tab or other_company_tabs %}
+
+{% set ns = namespace(items=[("mine", "Mis propiedades" if not is_admin else "Propiedades de " ~ company_name, "/properties?tab=mine", active_count)]) %}
 {% if show_others_tab %}
+{% set ns.items = ns.items + [("others", "Resto de propiedades", "/properties?tab=others", other_count)] %}
+{% endif %}
+{% for oc in other_company_tabs %}
+{% set ns.items = ns.items + [("other_company:" ~ oc.id, "Propiedades de " ~ oc.name, "/properties?tab=other_company&company_id=" ~ oc.id, oc.count)] %}
+{% endfor %}
+{% set current_tab = ("other_company:" ~ selected_other_company.id) if tab == 'other_company' else tab %}
 
-<div class="flex gap-1 mb-6 border-b border-gray-200">
-
-    <a href="/properties?tab=mine"
-       class="px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors -mb-px
-              {% if tab == 'mine' %}bg-white border border-b-white border-gray-200 text-blue-600{% else %}text-gray-500 hover:text-gray-700{% endif %}">
-        Mis propiedades
-    </a>
-
-    <a href="/properties?tab=others"
-       class="px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors -mb-px
-              {% if tab == 'others' %}bg-white border border-b-white border-gray-200 text-blue-600{% else %}text-gray-500 hover:text-gray-700{% endif %}">
-        Resto de propiedades
-        <span class="ml-1 bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full font-medium">{{ other_count }}</span>
-    </a>
-
+<div class="mb-6">
+    {{ ui.tabs(ns.items, current_tab, label="Listados de propiedades") }}
 </div>
 
 {% endif %}
 
 {% if tab == 'others' %}
 
-<div class="bg-blue-50 border border-blue-200 text-blue-800 text-sm rounded-xl p-4 mb-6 flex gap-3">
-    <svg class="w-5 h-5 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-    </svg>
-    <p>Estas propiedades pertenecen al inventario general de la empresa y no están asociadas actualmente a tu gestión. Se muestran únicamente con fines informativos.</p>
+<div class="mb-6">
+    {{ ui.banner("Estas propiedades pertenecen al inventario general de la empresa y no están asociadas actualmente a tu gestión.", tone="blue", text="Se muestran únicamente con fines informativos.") }}
 </div>
 
+{% set readonly_tab = "others" %}
+{% set readonly_tab_href = "/properties?tab=others" %}
+{% set readonly_empty_text = "No hay más propiedades activas en el inventario de la empresa" %}
+{% include 'properties/table_others.html' %}
+
+{% elif tab == 'other_company' %}
+
+<div class="mb-6">
+    {{ ui.banner("Solo lectura. Estas propiedades pertenecen a " ~ selected_other_company.name ~ ".", tone="blue", text="No se puede abrir su ficha ni registrar visitas desde " ~ company_name ~ ".") }}
+</div>
+
+{% set readonly_tab = "other_company" %}
+{% set readonly_company_id = selected_other_company.id %}
+{% set readonly_tab_href = "/properties?tab=other_company&company_id=" ~ selected_other_company.id %}
+{% set readonly_empty_text = "No hay propiedades activas en " ~ selected_other_company.name %}
 {% include 'properties/table_others.html' %}
 
 {% else %}
