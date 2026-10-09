@@ -1,0 +1,23 @@
+{
+  "skill_name": "moyza-ui-ux-pro",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Las tablas de la pantalla de Logs de Auditoría (backend/app/web/templates/report_logs/) se cortan en el móvil y la cabecera se amontona. Arréglalo para que se vea bien en el teléfono sin cambiar la funcionalidad.",
+      "expected_output": "Las tres tablas de report_logs quedan envueltas en overflow-x-auto con min-w, la cabecera pasa a flex-col sm:flex-row, se usan los tokens del sistema (rounded-2xl, border-gray-200, badges del mapa de estados en amber en vez de yellow) y no se introducen colores ni radios fuera de tokens.md.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Quiero que el dashboard de admin (/dashboard) deje de ser un placeholder: que muestre KPIs reales de la empresa activa (propiedades activas, alertas pendientes, alertas sin atender más de 7 días, visitas de este mes) y una gráfica de alertas creadas por mes del año en curso. Backend y plantilla.",
+      "expected_output": "Route con consultas reales scoped por empresa; plantilla con 4 tarjetas KPI siguiendo charts.md (colores semánticos, icono en caja), gráfica Chart.js local con datos en <script type=application/json>, canvas con role=img y tabla de respaldo, alto fijo, paleta de series del sistema. Sin emojis, sin números fijos.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "En clientes, el modal de crear/editar (clients/form.html) se ve viejo y no se puede cerrar con Escape. Modernízalo y de paso que el botón de guardar no permita enviar dos veces.",
+      "expected_output": "Modal con role=dialog, aria-modal, aria-labelledby, cierre por Escape y fondo, foco al abrir; formulario con label for/id, inputs con las clases del sistema, botón primario bg-gray-900 y secundario, pie con Cancelar a la izquierda y Guardar a la derecha, data-once o equivalente contra doble envío. Idealmente usa ui_macros.html y ui.js del skill instalándolos en el proyecto. Sin bg-black ni rounded-lg en inputs.",
+      "files": []
+    }
+  ]
+}
