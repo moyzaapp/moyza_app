@@ -111,7 +111,8 @@ En `properties/visit_form.html` (alta) y `visits/edit_form.html` (edición), nue
 - **Validación backend** (`create_visit` y `update_visit`):
   - `agent_id` obligatorio y perteneciente a la empresa activa (`get_agent_in_company`).
   - Si el usuario es agente, `agent_id` se fuerza a su propio agente (ignorar lo que venga en el form).
-  - `companion_agent_id` opcional, en la empresa activa, distinto de `agent_id`.
+  - `companion_agent_id` opcional, distinto de `agent_id`. **Actualizado (oct. 2026):** puede ser
+    de cualquier empresa activa (`get_agent_in_any_company`); el select lo agrupa por empresa.
   - Errores → redirect al formulario con flash, como el resto de validaciones.
 - Auditoría: `draft_created` y una nueva entrada `agents_updated` (en edición) incluyen
   `agent_id` y `companion_agent_id` en `event_data`.
@@ -143,7 +144,8 @@ Los informes ya congelados (`is_locked`) no se recalculan.
 - Agentes seleccionables = `scope_agents(db.query(Agent), empresa_activa)`.
 - `get_agent_in_company` en la validación de ambos campos.
 - Las visitas siguen heredando empresa de la propiedad (`scope_visits`); no cambia.
-- Un agente que pertenece a las dos empresas solo puede acompañar visitas de la empresa activa.
+- ~~Un agente que pertenece a las dos empresas solo puede acompañar visitas de la empresa activa.~~
+  Sustituido: el acompañante puede ser de cualquier empresa; el principal sigue en la activa.
 
 ---
 
