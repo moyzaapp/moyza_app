@@ -5,6 +5,7 @@
 {% import "components/ui_macros.html" as ui %}
 {% from "dashboard/components/kpi.html" import metric_kpi %}
 {% from "dashboard/components/trend_chart.html" import trend_chart %}
+{% from "dashboard/components/notification_item.html" import notification_item %}
 {% set period_word = {'WEEKLY': 'semana', 'MONTHLY': 'mes', 'YEARLY': 'año'}[period.period_type] %}
 {% set this_period = {'WEEKLY': 'esta semana', 'MONTHLY': 'este mes', 'YEARLY': 'este año'}[period.period_type] %}
 {% set prev_period = {'WEEKLY': 'la semana anterior', 'MONTHLY': 'el mes anterior', 'YEARLY': 'el año anterior'}[period.period_type] %}
@@ -43,8 +44,33 @@
     </p>
 </section>
 
-{# ---------------------------------------------------------------- Hoy y pendiente #}
+{# ---------------------------------------------------------------- Novedades y hoy #}
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    {% if home.show_news %}
+    <section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="newsTitle">
+        <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
+            <h2 id="newsTitle" class="text-lg font-bold text-gray-900">
+                Novedades
+                {% if home.news_unread %}<span class="ml-1 align-middle">{{ ui.badge(home.news_unread ~ (" nueva" if home.news_unread == 1 else " nuevas"), "blue") }}</span>{% endif %}
+            </h2>
+            <a href="/notifications" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Ver todas</a>
+        </header>
+        {% if home.news %}
+        <ul class="divide-y divide-gray-100">
+            {% for n in home.news %}{{ notification_item(n, n.when) }}{% endfor %}
+        </ul>
+        {% if home.news_unread %}
+        <form method="POST" action="/notifications/mark-all-read" class="px-4 sm:px-6 py-3 border-t border-gray-200">
+            <input type="hidden" name="next" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+            <button type="submit" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Marcar todas como leídas</button>
+        </form>
+        {% endif %}
+        {% else %}
+            {{ ui.empty_state("Aún no tienes novedades", "Te avisaremos aquí cuando otro agente visite tus inmuebles, te añada como acompañante o el administrador te deje una observación.") }}
+        {% endif %}
+    </section>
+    {% endif %}
 
     <section class="bg-white rounded-2xl border border-gray-200 {% if not home.show_news %}lg:col-span-2{% endif %}" aria-labelledby="agendaTitle">
         <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">

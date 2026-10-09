@@ -1,0 +1,23 @@
+{#
+  Una notificación in-app (Novedades del Inicio y /notifications).
+  `n` = notification_service.serialize(...): id, title, body, url (abre y
+  marca leída), icon, tone, created_at (ISO UTC), read.
+  Sin leer: fondo azul suave + punto (components.md: fila destacada).
+#}
+{% from "dashboard/components/icons.html" import icon_box %}
+
+{% macro notification_item(n, when) -%}
+<li>
+    <a href="{{ n.url }}" class="flex items-start gap-3 px-4 sm:px-6 py-3 transition-colors {% if n.read %}hover:bg-gray-50{% else %}bg-blue-50/60 hover:bg-blue-50{% endif %}">
+        {{ icon_box(n.icon, n.tone) }}
+        <span class="min-w-0 flex-1">
+            <span class="block text-sm {% if n.read %}text-gray-700{% else %}font-semibold text-gray-900{% endif %}">
+                {% if not n.read %}<span class="sr-only">Sin leer: </span>{% endif %}{{ n.title }}
+            </span>
+            {% if n.body %}<span class="block text-xs text-gray-500 mt-0.5">{{ n.body }}</span>{% endif %}
+            <span class="block text-xs text-gray-500 mt-0.5">{{ when }}</span>
+        </span>
+        {% if not n.read %}<span class="w-2 h-2 rounded-full bg-blue-600 shrink-0 mt-2" aria-hidden="true"></span>{% endif %}
+    </a>
+</li>
+{%- endmacro %}

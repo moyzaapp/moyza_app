@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+
+{% block title %}Notificaciones - {{ brand_name }}{% endblock %}
+
+{#
+  Notificaciones in-app del usuario en la empresa activa (PLAN_DASHBOARD_INICIO.md §4.4).
+  Clic en una: se marca como leída y lleva a su destino.
+#}
+{% block content %}
+{% import "components/ui_macros.html" as ui %}
+{% from "dashboard/components/notification_item.html" import notification_item %}
+
+<div class="max-w-3xl mx-auto space-y-6">
+
+    {% call ui.page_header("Notificaciones", "Avisos de " ~ brand_name ~ " dentro de la app · " ~ unread_total ~ " sin leer") %}
+        {% if unread_total %}
+        <form method="POST" action="/notifications/mark-all-read">
+            <input type="hidden" name="next" value="/notifications?status={{ status }}">
+            {{ ui.button("Marcar todas como leídas", "secondary", type="submit", full_mobile=True) }}
+        </form>
+        {% endif %}
+    {% endcall %}
+
+    <section class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div class="px-4 sm:px-6">
+            {{ ui.tabs([
+                ('all', 'Todas', '/notifications?status=all', none),
+                ('unread', 'Sin leer', '/notifications?status=unread', unread_total),
+                ('read', 'Leídas', '/notifications?status=read', none),
+            ], status, label='Filtrar notificaciones') }}
+        </div>
+
+        {% if items %}
+        <ul class="divide-y divide-gray-100 border-t border-gray-200">
+            {% for n in items %}
+            {{ notification_item(n, n.when) }}
+            {% endfor %}
+        </ul>
+        {% if pages > 1 %}
+        <nav class="flex items-center justify-between px-4 sm:px-6 py-3 border-t border-gray-200 text-sm text-gray-500" aria-label="Paginación">
+            <p>Mostrando <span class="font-medium text-gray-900">{{ (page - 1) * per_page + 1 }}-{{ [page * per_page, total] | min }}</span> de <span class="font-medium text-gray-900">{{ total }}</span></p>
+            <div class="flex gap-2">
+                {% if page > 1 %}{{ ui.button("Anterior", "secondary", href="/notifications?status=" ~ status ~ "&page=" ~ (page - 1)) }}{% endif %}
+                {% if page < pages %}{{ ui.button("Siguiente", "secondary", href="/notifications?status=" ~ status ~ "&page=" ~ (page + 1)) }}{% endif %}
+            </div>
+        </nav>
+        {% endif %}
+        {% else %}
+            {% if status == 'unread' %}
+                {{ ui.empty_state("No tienes notificaciones sin leer", "Las nuevas aparecerán aquí y en la campana.") }}
+            {% elif status == 'read' %}
+                {{ ui.empty_state("No hay notificaciones leídas", "Las leídas se guardan 90 días.") }}
+            {% else %}
+                {{ ui.empty_state("Aún no tienes notificaciones", "Te avisaremos aquí cuando otro agente visite tus inmuebles, te añada como acompañante o el administrador te deje una observación.") }}
+            {% endif %}
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

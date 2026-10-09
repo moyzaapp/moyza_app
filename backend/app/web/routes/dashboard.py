@@ -2,8 +2,9 @@
 
 El contenido depende del rol y siempre es de la empresa activa:
 
-- Agente: sus KPIs contra objetivo, agenda, cartera, tendencia y
-  observaciones del admin, más el aviso de compradores sin atender.
+- Agente: sus KPIs contra objetivo, novedades (notificaciones in-app),
+  agenda, cartera, tendencia y observaciones del admin, más el aviso de
+  compradores sin atender.
 - Admin: KPIs del equipo, cumplimiento por agente, "Requiere atención",
   actividad reciente y tendencia de 12 semanas, más el aviso de compradores
   sin atender agrupado por agente.
@@ -17,8 +18,10 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.constants import DashboardThresholds
 from app.core.constants import PeriodType
 from app.db.deps import get_db
+from app.services import notification_service as notifications
 from app.services.company_scope import in_company
 from app.services.dashboard_service import DashboardService
 from app.services.dashboard_service import long_date_es
@@ -68,11 +71,17 @@ async def dashboard(
         agent = get_agent_from_user(current_user, db)
         # La ficha de agente tiene que pertenecer a la empresa activa
         if agent is not None and in_company(agent, company.id):
-            context.update({
-                "view": "agent",
-                "agent": agent,
-                "home": svc.agent_home(agent, period),
+            home = svc.agent_home(agent, period)
+            # Novedades: notificaciones in-app del usuario en la empresa activa
+            home.update({
+                "show_news": True,
+                "news": [
+                    notifications.serialize(n)
+                    for n in notifications.recent(db, current_user.id, company.id, DashboardThresholds.NEWS_LIMIT)
+                ],
+                "news_unread": notifications.unread_count(db, current_user.id, company.id),
             })
+            context.update({"view": "agent", "agent": agent, "home": home})
         else:
             context["view"] = "no_agent"
 

@@ -33,6 +33,7 @@ from app.models.property_alert import PropertyAlert
 from app.services.company_scope import get_agent_in_company
 from app.services.company_scope import scope_agents
 from app.services.company_scope import scope_alerts
+from app.services.notification_service import notify_admin_note
 from app.services.performance_report_service import PerformanceReportService
 from app.web.dependencies.auth import is_admin
 from app.web.dependencies.company import get_active_company
@@ -312,18 +313,20 @@ async def save_notes(
     period = svc.period(period_type, period_start_str)
     back_url = _performance_url(period.period_type, period.start_str, agent_id)
 
-    if not get_agent_in_company(db, agent_id, company_id):
+    agent = get_agent_in_company(db, agent_id, company_id)
+    if not agent:
         response = RedirectResponse(url=_performance_url(period.period_type, period.start_str), status_code=302)
         set_flash(response, "error", "Agente no encontrado en la empresa activa")
         return response
 
+    notes = (admin_notes or "").strip()
     try:
-        svc.save_notes(
+        report = svc.save_notes(
             agent_id=agent_id,
             period_type=period.period_type,
             period_start=period.start,
             period_end=period.end,
-            admin_notes=(admin_notes or "").strip(),
+            admin_notes=notes,
         )
     except Exception:
         db.rollback()
@@ -331,6 +334,10 @@ async def save_notes(
         response = RedirectResponse(url=back_url, status_code=302)
         set_flash(response, "error", "Error al guardar las observaciones")
         return response
+
+    # Aviso in-app al agente (solo si hay texto; no al propio admin)
+    if notes:
+        notify_admin_note(db, agent=agent, company_id=company_id, period=period, report=report, actor=current_user)
 
     response = RedirectResponse(url=back_url, status_code=302)
     set_flash(response, "success", "Observaciones guardadas")

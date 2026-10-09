@@ -29,6 +29,8 @@ from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, get_agent_from_user
 from app.core.constants import PhoneCountryCodes
 from app.services.visit_whatsapp_log_service import log_whatsapp_attempt
+from app.services.notification_service import notify_visit_created
+from app.services.notification_service import notify_visit_sheet_failed
 from app.services.company_scope import (
     scope_agents,
     scope_visits,
@@ -326,6 +328,10 @@ async def create_visit(
             }
         )
 
+        # Aviso in-app al captador (si no participó) y al acompañante.
+        # Nunca rompe el alta: los errores quedan en el log.
+        notify_visit_created(db, visit, actor=request.state.user)
+
         # Redirigir al preview en vez de generar PDF inmediatamente
         if generate_sheet:
             response = RedirectResponse(url=f"/visits/preview/{visit.id}", status_code=302)
@@ -416,6 +422,7 @@ async def send_visit_sheet_whatsapp(
     file_url = settings.public_url(str(filepath))
 
     sent_to = []
+    send_failed = False
 
     triggered_by = request.state.user.id if request.state.user else None
 
@@ -443,6 +450,7 @@ async def send_visit_sheet_whatsapp(
                 triggered_by=triggered_by
             )
         except Exception as e:
+            send_failed = True
             logger.exception("Error enviando ficha al comprador: %s", visit.phone)
             log_whatsapp_attempt(
                 db=db,
@@ -483,6 +491,10 @@ async def send_visit_sheet_whatsapp(
     #         logger.info("Ficha enviada al agente: %s", property_item.agent.phone)
     #     except Exception:
     #         logger.exception("Error enviando ficha al agente: %s", property_item.agent.phone)
+
+    # Aviso in-app al agente de la visita si el WhatsApp quedó en ERROR
+    if send_failed:
+        notify_visit_sheet_failed(db, visit, actor=request.state.user)
 
     if sent_to:
         response = RedirectResponse(url=redirect_url, status_code=302)

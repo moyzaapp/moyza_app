@@ -27,3 +27,4 @@ from app.models.user_activity_log import UserActivityLog
 from app.models.property_change_log import PropertyChangeLog
 from app.models.agent_performance_report import AgentPerformanceReport
 from app.models.agent_performance_target import AgentPerformanceTarget
+from app.models.notification import Notification

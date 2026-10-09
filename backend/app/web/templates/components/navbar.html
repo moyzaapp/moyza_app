@@ -43,6 +43,41 @@
 
     <div class="flex items-center gap-2 lg:gap-4">
 
+        {# Campana de notificaciones in-app (solo agentes en v1: decisión §6-3) #}
+        {% if not user_is_admin %}
+        <div class="relative" id="notifBell">
+            <button
+                type="button"
+                id="notifBellBtn"
+                class="relative w-10 h-10 rounded-xl flex items-center justify-center text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20"
+                aria-haspopup="true"
+                aria-expanded="false"
+                aria-controls="notifPanel"
+                aria-label="Notificaciones"
+            >
+                <svg class="w-6 h-6" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg>
+                <span id="notifBadge" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.25rem] h-5 px-1 rounded-full bg-red-600 text-white text-xs font-bold flex items-center justify-center" aria-hidden="true"></span>
+                <span id="notifSr" class="sr-only" aria-live="polite"></span>
+            </button>
+
+            <div
+                id="notifPanel"
+                class="hidden absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-2xl shadow-lg z-50 overflow-hidden"
+                role="region"
+                aria-label="Últimas notificaciones"
+            >
+                <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-200">
+                    <p class="text-sm font-bold text-gray-900">Notificaciones</p>
+                    <button type="button" id="notifMarkAll" class="hidden text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Marcar todas como leídas</button>
+                </div>
+                <ul id="notifList" class="max-h-[60vh] overflow-y-auto divide-y divide-gray-100">
+                    <li class="px-4 py-6"><div class="h-4 rounded bg-gray-100 animate-pulse"></div><div class="h-3 mt-2 w-2/3 rounded bg-gray-100 animate-pulse"></div></li>
+                </ul>
+                <a href="/notifications" class="block px-4 py-3 border-t border-gray-200 text-center text-sm font-medium text-blue-600 hover:bg-gray-50">Ver todas</a>
+            </div>
+        </div>
+        {% endif %}
+
         <span class="text-gray-600 hidden md:inline text-sm lg:text-base">
             {{ current_user.full_name }}
         </span>
@@ -57,3 +92,5 @@
     </div>
 
 </header>
+
+{% if not user_is_admin %}<script src="/static/js/notifications.js"></script>{% endif %}
