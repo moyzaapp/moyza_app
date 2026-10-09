@@ -42,7 +42,7 @@
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, boxHeight: 12, usePointStyle: true, color: INK, font: { size: 12 } } },
+        legend: { position: 'bottom', labels: { boxWidth: 12, boxHeight: 12, usePointStyle: true, color: INK, font: { size: 12 }, sort: function (a, b) { return a.datasetIndex - b.datasetIndex; } } },
         tooltip: { backgroundColor: '#111827', titleColor: '#F9FAFB', bodyColor: '#F9FAFB', padding: 10, cornerRadius: 8 }
       },
       scales: {
@@ -69,14 +69,14 @@
       if (total) {
         datasets.push({
           type: 'line', label: total.label, data: total.data, borderColor: TOTAL, backgroundColor: TOTAL,
-          borderWidth: 2, pointRadius: 3, tension: 0.3, order: 1, yAxisID: 'y'
+          borderWidth: 2, pointRadius: 3, tension: 0.3, cubicInterpolationMode: 'monotone', order: 1, yAxisID: 'y'
         });
       }
     } else {
       datasets = data.series.map(function (s, i) {
         return {
           type: 'line', label: s.label, data: s.data, borderColor: s.color, backgroundColor: s.color,
-          borderWidth: 2, tension: 0.3, pointRadius: i === 0 ? 3 : 0, pointHoverRadius: 5
+          borderWidth: 2, tension: 0.3, cubicInterpolationMode: 'monotone', pointRadius: i === 0 ? 3 : 0, pointHoverRadius: 5
         };
       });
     }

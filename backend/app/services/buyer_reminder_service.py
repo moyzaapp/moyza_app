@@ -15,6 +15,8 @@ from typing import Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import selectinload
 
 from app.models.agent import Agent
 from app.models.alert_follow_up import AlertFollowUp
@@ -59,6 +61,9 @@ def get_pending_buyers_by_agent(
 
     alerts = (
         db.query(PropertyAlert)
+        # Seguimientos y propiedad en lote (antes, 2 consultas por alerta);
+        # el Inicio llama a esta función en cada carga.
+        .options(selectinload(PropertyAlert.follow_ups), joinedload(PropertyAlert.property))
         .outerjoin(last_followup, last_followup.c.alert_id == PropertyAlert.id)
         .filter(PropertyAlert.status.in_(REMINDER_STATUSES))
         .filter(

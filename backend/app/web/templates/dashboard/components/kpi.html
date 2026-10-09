@@ -33,11 +33,11 @@
     {% if kpi.target %}
         {% set hint = kpi.pct ~ " % de " ~ kpi.target %}
     {% else %}
-        {% set hint = "Sin objetivo definido" %}
+        {% set hint = "Sin objetivo" %}
     {% endif %}
     {% set ring = progress_ring(kpi.pct, kpi.tone, kpi.label ~ ": " ~ (kpi.pct ~ " % del objetivo" if kpi.target else "sin objetivo")) %}
 {% else %}
-    {% set hint = "Resultado, sin objetivo en este período" %}
+    {% set hint = "Solo resultado" %}
     {% set ring = None %}
 {% endif %}
 {{ ui.kpi_card(kpi.label, kpi.value, tone=kpi.tone, hint=hint, href=href,
