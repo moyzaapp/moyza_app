@@ -3,6 +3,8 @@ from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 
+from app.core.constants import BusinessType
+
 _UTC = ZoneInfo("UTC")
 _MADRID = ZoneInfo("Europe/Madrid")
 
@@ -46,3 +48,5 @@ templates = Jinja2Templates(
 )
 templates.env.filters["madrid_dt"] = madrid_dt
 templates.env.globals["current_year"] = lambda: datetime.now().year
+# Operaciones fijas (Venta / Alquiler) para los selects: BusinessType.values()
+templates.env.globals["BusinessType"] = BusinessType

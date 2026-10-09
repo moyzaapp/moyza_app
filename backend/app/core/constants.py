@@ -89,6 +89,26 @@ class PropertyStatus:
         return value in cls.values()
 
 
+class BusinessType:
+    """Operación de una propiedad o de lo que busca un comprador.
+
+    Valores tal cual se guardan en `properties.business_type` y
+    `buyer_search_criteria.business_type`. En el alta y la edición de
+    criterios de un comprador es obligatoria y solo admite estos dos.
+    """
+    VENTA = "Venta"
+    ALQUILER = "Alquiler"
+
+    @classmethod
+    def values(cls) -> tuple[str, ...]:
+        # Tupla ordenada: es también el orden de las opciones en los selects
+        return (cls.VENTA, cls.ALQUILER)
+
+    @classmethod
+    def is_valid(cls, value: str | None) -> bool:
+        return value in cls.values()
+
+
 class PropertyInteractionType:
     INQUIRY = "CONSULTA"
     VISIT = "VISITA"
