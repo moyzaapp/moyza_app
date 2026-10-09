@@ -1,0 +1,49 @@
+{#
+  Selector de período del Inicio (charts.md §Dashboards): segmentado
+  Semana / Mes / Año + flechas, con el rango en texto y el estado.
+  Usa los mismos query params que Resultados Comerciales.
+#}
+{% macro period_nav(p, labels, base="/dashboard") -%}
+<div class="flex flex-wrap items-center gap-2">
+    <div class="inline-flex rounded-xl border border-gray-300 bg-white p-0.5 text-sm" role="group" aria-label="Tipo de período">
+        {% for ptype in ['WEEKLY', 'MONTHLY', 'YEARLY'] %}
+        <a href="{{ base }}?period_type={{ ptype }}"
+           {% if p.period_type == ptype %}aria-current="true"{% endif %}
+           class="px-3 sm:px-4 py-2 font-medium rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20
+                  {% if p.period_type == ptype %}bg-gray-900 text-white{% else %}text-gray-600 hover:bg-gray-50{% endif %}">
+            {{ labels[ptype] }}
+        </a>
+        {% endfor %}
+    </div>
+
+    <div class="inline-flex items-center gap-1">
+        <a href="{{ base }}?period_type={{ p.period_type }}&period_start={{ p.prev_str }}"
+           class="w-10 h-10 rounded-xl border border-gray-300 bg-white hover:bg-gray-50 flex items-center justify-center text-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20"
+           aria-label="Período anterior">
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
+        </a>
+        <span class="px-3 py-2 text-sm font-semibold text-gray-900 whitespace-nowrap">{{ p.label }}</span>
+        {% if p.show_next %}
+        <a href="{{ base }}?period_type={{ p.period_type }}&period_start={{ p.next_str }}"
+           class="w-10 h-10 rounded-xl border border-gray-300 bg-white hover:bg-gray-50 flex items-center justify-center text-gray-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20"
+           aria-label="Período siguiente">
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+        </a>
+        {% else %}
+        <span class="w-10 h-10 rounded-xl border border-gray-200 flex items-center justify-center text-gray-300" aria-hidden="true">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+        </span>
+        {% endif %}
+    </div>
+
+    {% if p.is_current %}
+    <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium bg-green-100 text-green-800">
+        <span class="w-1.5 h-1.5 rounded-full bg-green-500" aria-hidden="true"></span>En curso
+    </span>
+    {% else %}
+    <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-700">
+        <span class="w-1.5 h-1.5 rounded-full bg-gray-400" aria-hidden="true"></span>Período cerrado
+    </span>
+    {% endif %}
+</div>
+{%- endmacro %}

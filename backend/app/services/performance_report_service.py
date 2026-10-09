@@ -469,16 +469,29 @@ class PerformanceReportService:
             .count()
         )
 
+        return self.metrics_from_counts(counts, hojas_visita)
+
+    @staticmethod
+    def metrics_from_counts(counts: dict, hojas_visita: int) -> dict:
+        """Diccionario de métricas a partir de los conteos por tipo de cada indicador.
+
+        `counts`: {indicador: {'venta', 'alquiler', 'otros'}} para los
+        indicadores de BREAKDOWN_KEYS (falta = 0). Lo usan `calculate_metrics`
+        y el cálculo por lotes del Inicio: una sola fórmula.
+        """
+        def get(indicator):
+            return counts.get(indicator) or _empty_counts()
+
         metrics = {
             # Contactos: solo venta y alquiler, como hasta ahora
-            "contactos_venta": counts["contactos"][SALE],
-            "contactos_alquiler": counts["contactos"][RENT],
+            "contactos_venta": get("contactos")[SALE],
+            "contactos_alquiler": get("contactos")[RENT],
             "hojas_visita": hojas_visita,
             "calidad_cartera": None,
         }
         for indicator in ("captaciones_crm", "bajadas", "cierres"):
             sale_key, rent_key = BREAKDOWN_KEYS[indicator]
-            c = counts[indicator]
+            c = get(indicator)
             metrics[indicator] = c[SALE] + c[RENT] + c[OTHER]
             metrics[sale_key] = c[SALE]
             metrics[rent_key] = c[RENT]

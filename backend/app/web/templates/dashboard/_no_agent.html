@@ -1,0 +1,15 @@
+{% import "components/ui_macros.html" as ui %}
+{{ ui.banner(
+    "Tu usuario no está vinculado a una ficha de agente en " ~ brand_name,
+    tone="amber",
+    text="El Inicio muestra los indicadores de tu ficha de agente. Pide al administrador que te dé de alta como agente en esta empresa con el mismo email de tu usuario."
+) }}
+
+<section class="bg-white rounded-2xl border border-gray-200">
+    {% call ui.empty_state("Aún no hay indicadores que mostrar", "Mientras tanto puedes consultar las propiedades y los compradores de " ~ brand_name ~ ".") %}
+    <div class="flex flex-col sm:flex-row justify-center gap-3">
+        {{ ui.button("Ver propiedades", "secondary", href="/properties", full_mobile=True) }}
+        {{ ui.button("Ver compradores", "primary", href="/alerts", full_mobile=True) }}
+    </div>
+    {% endcall %}
+</section>

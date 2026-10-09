@@ -4,12 +4,13 @@
 
         <!-- Botón hamburger (solo móvil) -->
         <button
+            type="button"
             onclick="toggleSidebar()"
             class="lg:hidden p-2 hover:bg-gray-100 rounded-lg transition-colors"
             aria-label="Abrir menú"
         >
-            <svg class="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+            <svg class="w-6 h-6 text-gray-700" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 12h16M4 18h16"></path>
             </svg>
         </button>
 
@@ -34,7 +35,7 @@
             </p>
 
             <p class="text-xs lg:text-sm text-gray-500">
-                {{ current_user.role_id | capitalize }}
+                {{ user_role_label }}
             </p>
         </div>
 

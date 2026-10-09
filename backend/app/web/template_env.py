@@ -25,7 +25,12 @@ def company_context(request) -> dict:
     """
     allowed = list(getattr(request.state, "allowed_companies", []) or [])
     company = getattr(request.state, "company", None)
+    user = getattr(request.state, "user", None)
+    role_name = (user.role.name if user is not None and user.role else "") or ""
     return {
+        # Rol del usuario para sidebar y navbar (las plantillas no leen request.state.user.role)
+        "user_is_admin": role_name.lower() == "admin",
+        "user_role_label": {"admin": "Administrador", "agent": "Agente"}.get(role_name.lower(), role_name.capitalize()),
         "active_company": company,
         "allowed_companies": allowed,
         "can_switch_company": len(allowed) > 1,

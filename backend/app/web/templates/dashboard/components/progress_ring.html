@@ -1,0 +1,21 @@
+{#
+  Anillo de progreso contra objetivo (SVG, sin librería).
+  Semáforo de tokens.md: verde >= 100 %, ámbar >= 60 %, rojo < 60 %; sin objetivo, gris.
+  El anillo nunca pasa del 100 % visual aunque el valor sí (se dice en el texto).
+#}
+{% set _ring_tones = {"green": "text-green-500", "amber": "text-amber-500", "red": "text-red-500", "gray": "text-gray-300"} %}
+
+{% macro progress_ring(pct, tone="gray", label="", size=44) -%}
+{% set r = 18 %}
+{% set c = 113.1 %}{# 2·π·18 #}
+{% set shown = [[pct or 0, 100] | min, 0] | max %}
+<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 44 44" class="-rotate-90"
+     role="progressbar" aria-valuenow="{{ pct or 0 }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ label }}">
+    <circle cx="22" cy="22" r="{{ r }}" fill="none" stroke-width="5" class="text-gray-100" stroke="currentColor"/>
+    {% if pct is not none %}
+    <circle cx="22" cy="22" r="{{ r }}" fill="none" stroke-width="5" stroke-linecap="round"
+            class="{{ _ring_tones.get(tone, _ring_tones['gray']) }}" stroke="currentColor"
+            stroke-dasharray="{{ c }}" stroke-dashoffset="{{ (c * (1 - shown / 100)) | round(2) }}"/>
+    {% endif %}
+</svg>
+{%- endmacro %}

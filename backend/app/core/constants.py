@@ -373,3 +373,31 @@ class PerformanceObjectives:
     @classmethod
     def target_field(cls, metric_key: str) -> str:
         return cls.TARGET_FIELDS[metric_key]
+
+
+class DashboardThresholds:
+    """Umbrales del Inicio (PLAN_DASHBOARD_INICIO.md §6-7).
+
+    El aviso de compradores sin atender NO está aquí: reutiliza la regla de
+    los recordatorios por email (`settings.BUYER_REMINDER_HOURS`, 48 h).
+    """
+
+    # Agente: compradores con último seguimiento "sin respuesta" hace más de N días
+    NO_RESPONSE_DAYS = 3
+    # Agente: propiedades activas sin ninguna visita en N días
+    STALE_PROPERTY_DAYS = 30
+    # Admin: compradores PENDING abandonados (misma regla que Resultados Comerciales)
+    ABANDONED_BUYER_DAYS = 7
+    # Admin: agente sin actividad (visita, seguimiento ni alerta leída) en N días
+    INACTIVE_AGENT_DAYS = 5
+    # Admin: fichas de visita con WhatsApp en ERROR en las últimas N horas
+    WHATSAPP_ERROR_HOURS = 48
+
+    # Semanas de las gráficas de tendencia
+    AGENT_TREND_WEEKS = 8
+    TEAM_TREND_WEEKS = 12
+
+    # Elementos por bloque
+    AGENDA_LIMIT = 8
+    FEED_LIMIT = 20
+    NEWS_LIMIT = 8
