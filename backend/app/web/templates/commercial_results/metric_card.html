@@ -1,0 +1,52 @@
+{#
+  Tarjeta de una métrica en la pestaña Rendimiento.
+
+  - value: total de la métrica.
+  - detail: {'venta', 'alquiler', 'otros'} o None. `has_breakdown` indica si
+    la métrica se desglosa (un snapshot antiguo puede no tener desglose).
+  - is_objective: la métrica tiene objetivo en este período; solo entonces se
+    muestran barra, "obj." y %. El resto es solo resultado.
+  - Semáforo (tokens.md): verde >= 100 %, ámbar >= 60 %, rojo < 60 %.
+#}
+{% macro metric_card(label, value, detail=none, has_breakdown=false, is_objective=false, target=none, pct=none, bar_pct=none, sale_color='#2563EB', rent_color='#F59E0B', highlight=false) %}
+<div class="p-4">
+  <div class="flex items-start justify-between gap-2 mb-1">
+    <p class="text-xs text-gray-500">{{ label }}</p>
+    {% if is_objective %}
+    <span class="text-xs font-semibold uppercase tracking-wide text-blue-600" title="Métrica con objetivo en este período">Obj.</span>
+    {% endif %}
+  </div>
+  <p class="text-2xl font-bold {% if highlight and value > 0 %}text-green-600{% else %}text-gray-800{% endif %}">{{ value }}</p>
+
+  {% if detail %}
+  <p class="flex flex-wrap items-center gap-x-2 text-xs text-gray-500 mt-0.5">
+    <span class="inline-flex items-center gap-1" title="Venta">
+      <span class="w-2 h-2 rounded-full" style="background-color: {{ sale_color }}"></span>V {{ detail.venta }}
+    </span>
+    <span class="text-gray-300">·</span>
+    <span class="inline-flex items-center gap-1" title="Alquiler">
+      <span class="w-2 h-2 rounded-full" style="background-color: {{ rent_color }}"></span>A {{ detail.alquiler }}
+    </span>
+    {% if detail.otros %}
+    <span class="text-gray-300">·</span>
+    <span title="Sin tipo venta / alquiler">otros {{ detail.otros }}</span>
+    {% endif %}
+  </p>
+  {% elif has_breakdown %}
+  <p class="text-xs text-gray-400 mt-0.5" title="Período congelado antes de existir el desglose">sin desglose</p>
+  {% endif %}
+
+  {% if is_objective %}
+    {% if target %}
+    <div class="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden" role="progressbar"
+         aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ label }}: {{ pct }} % del objetivo">
+      <div class="h-full rounded-full {% if pct >= 100 %}bg-green-500{% elif pct >= 60 %}bg-amber-500{% else %}bg-red-500{% endif %}"
+           style="width: {{ bar_pct }}%"></div>
+    </div>
+    <p class="text-xs text-gray-400 mt-0.5">obj. {{ target }} · {{ pct }} %</p>
+    {% else %}
+    <p class="text-xs text-gray-400 mt-2">Sin objetivo</p>
+    {% endif %}
+  {% endif %}
+</div>
+{% endmacro %}

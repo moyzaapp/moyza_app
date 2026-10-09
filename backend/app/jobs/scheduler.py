@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 import json
 from pathlib import Path
@@ -7,6 +7,7 @@ from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.core.config import settings
+from app.core.constants import PeriodType
 from app.core.constants import PropertyStatus
 from app.db.session import SessionLocal
 from app.models.property import Property
@@ -109,45 +110,74 @@ def send_buyer_reminders():
         db.close()
 
 
-def freeze_weekly_reports():
-    """Cada lunes a las 00:01 congela los reportes de la semana anterior."""
+def _freeze_previous_period(period_type: str, now: datetime = None):
+    """Congela, en todas las empresas, el período anterior al que contiene `now`.
+
+    `now` (UTC) se inyecta en los tests; el scheduler usa la hora actual.
+    Devuelve (period_start, period_end) congelados.
+    """
     db = SessionLocal()
     try:
+        # Sin empresa: freeze_all_for_period recorre empresas x agentes
         svc = PerformanceReportService(db)
-        today = datetime.utcnow().date()
-        # El lunes de HOY es el inicio de la semana actual;
-        # la semana anterior empezó 7 días antes
-        monday_this_week = today - timedelta(days=today.weekday())
-        monday_prev = monday_this_week - timedelta(days=7)
-        period_start = datetime(monday_prev.year, monday_prev.month, monday_prev.day)
-        _, period_end = svc.week_bounds(period_start)
-        logger.info(f"Congelando reportes semanales: {period_start.date()} – {period_end.date()}")
-        svc.freeze_all_for_period("WEEKLY", period_start, period_end)
-        logger.info("Reportes semanales congelados correctamente")
+        period_start = svc.previous_period_start(period_type, now)
+        _, period_end = svc.period_bounds(period_type, period_start)
+        logger.info(
+            f"Congelando reportes {period_type}: {period_start.date()} – {period_end.date()}"
+        )
+        svc.freeze_all_for_period(period_type, period_start, period_end)
+        logger.info(f"Reportes {period_type} congelados correctamente")
+        return period_start, period_end
     except Exception as e:
-        logger.error(f"Error congelando reportes semanales: {e}", exc_info=True)
+        logger.error(f"Error congelando reportes {period_type}: {e}", exc_info=True)
     finally:
         db.close()
 
 
-def freeze_monthly_reports():
+def freeze_weekly_reports(now: datetime = None):
+    """Cada lunes a las 00:01 congela los reportes de la semana anterior."""
+    return _freeze_previous_period(PeriodType.WEEKLY, now)
+
+
+def freeze_monthly_reports(now: datetime = None):
     """El día 1 de cada mes a las 00:01 congela los reportes del mes anterior."""
+    return _freeze_previous_period(PeriodType.MONTHLY, now)
+
+
+def freeze_yearly_reports(now: datetime = None):
+    """El 1 de enero a las 00:01 congela los reportes del año anterior."""
+    return _freeze_previous_period(PeriodType.YEARLY, now)
+
+
+def notify_follow_ups_due(now: datetime = None):
+    """Cada día a las 08:00 (Madrid): aviso in-app de seguimientos de hoy o vencidos.
+
+    Uno por alerta y día (deduplicación de 24 h). Solo in-app: sin email ni WhatsApp.
+    """
+    from app.services.notification_service import run_follow_up_due
+
     db = SessionLocal()
     try:
-        svc = PerformanceReportService(db)
-        today = datetime.utcnow()
-        # Mes anterior
-        if today.month == 1:
-            prev_year, prev_month = today.year - 1, 12
-        else:
-            prev_year, prev_month = today.year, today.month - 1
-        period_start = datetime(prev_year, prev_month, 1)
-        _, period_end = svc.month_bounds(period_start)
-        logger.info(f"Congelando reportes mensuales: {period_start.strftime('%Y-%m')}")
-        svc.freeze_all_for_period("MONTHLY", period_start, period_end)
-        logger.info("Reportes mensuales congelados correctamente")
+        created = run_follow_up_due(db, now=now)
+        logger.info(f"Avisos de seguimiento creados: {created}")
+        return created
     except Exception as e:
-        logger.error(f"Error congelando reportes mensuales: {e}", exc_info=True)
+        logger.error(f"Error en notify_follow_ups_due: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+def cleanup_read_notifications(now: datetime = None):
+    """Cada día: borra las notificaciones leídas hace más de 90 días."""
+    from app.services.notification_service import cleanup_read
+
+    db = SessionLocal()
+    try:
+        deleted = cleanup_read(db, now=now)
+        logger.info(f"Notificaciones leídas eliminadas (> 90 días): {deleted}")
+        return deleted
+    except Exception as e:
+        logger.error(f"Error en cleanup_read_notifications: {e}", exc_info=True)
     finally:
         db.close()
 
@@ -243,6 +273,18 @@ def start_scheduler():
         replace_existing=True
     )
 
+    # Congelar reportes anuales: 1 de enero a las 00:01
+    scheduler.add_job(
+        freeze_yearly_reports,
+        "cron",
+        month=1,
+        day=1,
+        hour=0,
+        minute=1,
+        id="freeze_yearly_reports",
+        replace_existing=True
+    )
+
     # Recordatorio de compradores sin gestión
     scheduler.add_job(
         send_buyer_reminders,
@@ -251,6 +293,27 @@ def start_scheduler():
         # hour=3,
         minute=10,
         id="send_buyer_reminders",
+        replace_existing=True
+    )
+
+    # Avisos in-app de seguimientos: 08:00 hora de Madrid
+    scheduler.add_job(
+        notify_follow_ups_due,
+        "cron",
+        hour=8,
+        minute=0,
+        timezone="Europe/Madrid",
+        id="notify_follow_ups_due",
+        replace_existing=True
+    )
+
+    # Limpieza de notificaciones leídas (retención 90 días)
+    scheduler.add_job(
+        cleanup_read_notifications,
+        "cron",
+        hour=3,
+        minute=30,
+        id="cleanup_read_notifications",
         replace_existing=True
     )
 

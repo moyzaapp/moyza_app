@@ -1,0 +1,45 @@
+{#
+  Tarjeta KPI del Inicio: macro ui.kpi_card + variación, desglose venta /
+  alquiler y anillo de objetivo (solo en métricas con objetivo en el período).
+#}
+{% import "components/ui_macros.html" as ui %}
+{% from "dashboard/components/progress_ring.html" import progress_ring %}
+
+{# Variación vs. período anterior: subir es bueno en todas las métricas del Inicio #}
+{% macro delta_tag(delta, period_word="período anterior") -%}
+{% if delta is not none %}
+{% if delta > 0 %}
+<span class="text-xs font-medium text-green-600"><span aria-hidden="true">▲</span> {{ delta }}<span class="sr-only"> más que el {{ period_word }}</span></span>
+{% elif delta < 0 %}
+<span class="text-xs font-medium text-red-600"><span aria-hidden="true">▼</span> {{ -delta }}<span class="sr-only"> menos que el {{ period_word }}</span></span>
+{% else %}
+<span class="text-xs font-medium text-gray-500"><span aria-hidden="true">=</span><span class="sr-only">Igual que el {{ period_word }}</span></span>
+{% endif %}
+{% endif %}
+{%- endmacro %}
+
+{% macro breakdown_line(detail) -%}
+{% if detail %}
+<p class="flex flex-wrap items-center gap-x-2 text-xs text-gray-500 mt-1">
+    <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-600" aria-hidden="true"></span>Venta {{ detail.venta }}</span>
+    <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500" aria-hidden="true"></span>Alquiler {{ detail.alquiler }}</span>
+    {% if detail.otros %}<span>Otros {{ detail.otros }}</span>{% endif %}
+</p>
+{% endif %}
+{%- endmacro %}
+
+{% macro metric_kpi(kpi, href=None) -%}
+{% if kpi.is_objective %}
+    {% if kpi.target %}
+        {% set hint = kpi.pct ~ " % de " ~ kpi.target %}
+    {% else %}
+        {% set hint = "Sin objetivo" %}
+    {% endif %}
+    {% set ring = progress_ring(kpi.pct, kpi.tone, kpi.label ~ ": " ~ (kpi.pct ~ " % del objetivo" if kpi.target else "sin objetivo")) %}
+{% else %}
+    {% set hint = "Solo resultado" %}
+    {% set ring = None %}
+{% endif %}
+{{ ui.kpi_card(kpi.label, kpi.value, tone=kpi.tone, hint=hint, href=href,
+               delta=delta_tag(kpi.delta), extra=breakdown_line(kpi.breakdown), aside=ring) }}
+{%- endmacro %}

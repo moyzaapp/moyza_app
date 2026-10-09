@@ -9,6 +9,7 @@ Punto único para restringir consultas a la empresa activa. Reglas:
 Se usan EXISTS (`.has()` / `.any()`) en lugar de JOIN para que el filtro
 se pueda añadir a cualquier consulta sin chocar con joins ya existentes.
 """
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.agent import Agent
@@ -51,6 +52,23 @@ def scope_visits(query, company_id: int):
 
 def scope_reports(query, company_id: int):
     return query.filter(Report.property.has(Property.company_id == company_id))
+
+
+def visit_agent_clause(agent_id: int):
+    """Cláusula: visitas en las que participó el agente (principal o acompañante).
+
+    Punto único para atribuir visitas a agentes; si en el futuro una visita
+    admite más de dos agentes, solo cambia esta función.
+    """
+    return or_(
+        PropertyVisit.agent_id == agent_id,
+        PropertyVisit.companion_agent_id == agent_id,
+    )
+
+
+def visits_for_agent(query, agent_id: int):
+    """Filtra una consulta de visitas a aquellas en las que participó el agente."""
+    return query.filter(visit_agent_clause(agent_id))
 
 
 def property_in_company_clause(company_id: int):

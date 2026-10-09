@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Resultados Comerciales - {{ brand_name }}{% endblock %}
+
+{% block content %}
+
+{# Colores fijos del desglose en toda la sección (skill: references/charts.md):
+   venta = blue-600, alquiler = amber-500. La marca no se usa en series: el negro
+   de MOYZA se confunde con el marcador de objetivo. #}
+{% import "components/ui_macros.html" as ui %}
+{% set sale_color = '#2563EB' %}
+{% set rent_color = '#F59E0B' %}
+
+<div class="max-w-7xl mx-auto">
+
+    <!-- Header -->
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+      <div>
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Resultados Comerciales</h1>
+        <p class="text-sm text-gray-500 mt-1">Objetivos, resultados y compradores del equipo · {{ brand_name }}</p>
+      </div>
+      <a href="/alerts" class="text-blue-600 hover:text-blue-800 hover:underline text-sm">
+        Ver Compradores →
+      </a>
+    </div>
+
+    <!-- Tabs -->
+    <div class="mb-6">
+      {{ ui.tabs([
+        ('rendimiento', 'Rendimiento', '/commercial-results?tab=rendimiento', none),
+        ('evolucion', 'Evolución', '/commercial-results?tab=evolucion', none),
+        ('compradores', 'Compradores', '/commercial-results?tab=compradores', none),
+      ], tab, label='Pestañas de Resultados Comerciales') }}
+    </div>
+
+    {% if tab == 'rendimiento' %}
+      {% include "commercial_results/_performance.html" %}
+    {% elif tab == 'evolucion' %}
+      {% include "commercial_results/_evolution.html" %}
+    {% else %}
+      {% include "commercial_results/_buyers.html" %}
+    {% endif %}
+
+</div>
+
+{% endblock %}

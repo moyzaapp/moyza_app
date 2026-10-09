@@ -31,6 +31,18 @@ Registrar visita
 
 <div class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
 
+    {% if is_foreign_property %}
+    <div class="mb-4 sm:mb-6 bg-blue-50 border border-blue-200 text-blue-800 px-3 sm:px-4 py-2 sm:py-3 rounded-xl text-xs sm:text-sm flex items-start gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <p>
+            Propiedad captada por <span class="font-medium">{{ property.agent.name if property.agent else 'otro agente' }}</span>.
+            La visita se registrará a tu nombre.
+        </p>
+    </div>
+    {% endif %}
+
     <form
         action="/visits/create/{{ property.id }}"
         method="POST"
@@ -258,6 +270,8 @@ Registrar visita
             </select>
 
         </div>
+
+        {% include 'visits/agents_fields.html' %}
 
         <textarea
             name="notes"

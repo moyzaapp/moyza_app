@@ -234,7 +234,8 @@ async def finalize_visit(
         generate_visit_sheet(
             property_item=property_item,
             visit=visit,
-            agent=property_item.agent,
+            agent=visit.signing_agent,
+            companion_agent=visit.companion_agent,
             output_path=str(output_path)
         )
 
@@ -259,6 +260,7 @@ async def finalize_visit(
         # Enviar por WhatsApp
         file_url = settings.public_url(str(output_path))
         sent_to = []
+        send_failed = False
 
         if visit.phone:
             started_at = perf_counter()
@@ -283,6 +285,7 @@ async def finalize_visit(
                     duration_ms=int((perf_counter() - started_at) * 1000)
                 )
             except Exception as e:
+                send_failed = True
                 logger.exception(f"Error sending sheet to buyer: {visit.phone}")
                 log_whatsapp_attempt(
                     db=db,
@@ -341,6 +344,17 @@ async def finalize_visit(
         )
 
         logger.info(f"Visit {visit_id} completed successfully")
+
+        # Avisos in-app (nunca email ni WhatsApp). Esta ruta /api no pasa por
+        # el middleware: el actor se resuelve desde la cookie.
+        from app.services.notification_service import notify_visit_completed
+        from app.services.notification_service import notify_visit_sheet_failed
+        from app.web.dependencies.company import get_api_user
+
+        actor = get_api_user(request, db)
+        notify_visit_completed(db, visit, actor=actor, sent=bool(sent_to))
+        if send_failed:
+            notify_visit_sheet_failed(db, visit, actor=actor)
 
         return {
             "success": True,

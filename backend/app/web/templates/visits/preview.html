@@ -161,7 +161,8 @@ Vista Previa del Documento - Visita
         </p>
         <p class="mb-3">
             El interesado declara que ha visitado el inmueble con fecha <strong>{{ visit_date }}</strong> a las <strong>{{ visit_time }}</strong> horas
-            con esta agencia y que no lo había visitado antes, acompañado por el agente de la inmobiliaria.
+            con esta agencia y que no lo había visitado antes,
+            {% if companion_agent_name %}acompañado por los agentes de la inmobiliaria <strong>{{ agent_name }}</strong> y <strong>{{ companion_agent_name }}</strong>.{% else %}acompañado por el agente de la inmobiliaria.{% endif %}
             Asimismo, reconoce que ha conocido dicho inmueble gracias a la intermediación de la empresa inmobiliaria mencionada,
             la cual actúa como mediadora en la operación de compraventa. Durante dicha visita "El agente" ha proporcionado
             información fidedigna y detalles generales sobre el inmueble, condiciones de adquisición, resolviendo todas
@@ -232,10 +233,10 @@ Vista Previa del Documento - Visita
 
     <div class="flex justify-between items-center gap-4">
         <a
-            href="/visits/new/{{ property.id }}"
+            href="/visits/edit/{{ visit.id }}"
             class="px-6 py-3 bg-white border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-100 transition-colors"
         >
-            ← Volver a Editar Datos
+            ← Volver a editar datos
         </a>
 
         <button

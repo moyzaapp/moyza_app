@@ -1,0 +1,53 @@
+{#
+  Gráfica de tendencia (charts.md): JSON embebido + canvas con role="img" y
+  alto fijo + tabla de respaldo. La monta /static/js/dashboard.js.
+  `trend`: DashboardService.Trend; `kind`: "lines" (agente) o "bars" (equipo:
+  barras apiladas por agente + línea de total).
+#}
+{% import "components/ui_macros.html" as ui %}
+
+{% macro trend_chart(id, trend, title, description, kind="lines", empty_title="Aún no hay datos en estas semanas", empty_hint=None) -%}
+<section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="{{ id }}Title">
+    <header class="px-4 sm:px-6 py-4 border-b border-gray-200">
+        <h2 id="{{ id }}Title" class="text-lg font-bold text-gray-900">{{ title }}</h2>
+        <p class="text-xs text-gray-500 mt-0.5">{{ description }}</p>
+    </header>
+    <div class="p-4 sm:p-6">
+        {% if trend.is_empty %}
+            {{ ui.empty_state(empty_title, empty_hint) }}
+        {% else %}
+        <div class="relative h-64 sm:h-72">
+            <canvas id="{{ id }}" data-trend-kind="{{ kind }}" role="img" aria-label="{{ title }}; los datos están en la tabla siguiente"></canvas>
+        </div>
+        <script type="application/json" id="{{ id }}Data">{{ trend.as_json() | tojson }}</script>
+        <details class="mt-3">
+            <summary class="text-xs text-gray-500 cursor-pointer">Ver datos en tabla</summary>
+            <div class="mt-2 overflow-x-auto">
+                <table class="w-full min-w-[480px] text-xs">
+                    <caption class="sr-only">{{ title }}</caption>
+                    <thead class="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                            <th scope="col" class="text-left px-3 py-2 font-semibold text-gray-500">Semana</th>
+                            {% for s in trend.series %}
+                            <th scope="col" class="text-right px-3 py-2 font-semibold text-gray-500">{{ s.label }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        {% for label in trend.labels %}
+                        {% set i = loop.index0 %}
+                        <tr>
+                            <th scope="row" class="text-left px-3 py-2 font-medium text-gray-700">{{ label }}</th>
+                            {% for s in trend.series %}
+                            <td class="text-right px-3 py-2 tabular-nums text-gray-700">{{ s.data[i] }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </details>
+        {% endif %}
+    </div>
+</section>
+{%- endmacro %}

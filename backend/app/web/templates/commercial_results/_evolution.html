@@ -1,0 +1,184 @@
+{#
+  Pestaña Evolución: gráficas del año (PLAN_RESULTADOS_COMERCIALES §2.6).
+  Todos los datos del año van en el JSON inicial; el selector de indicador y
+  de agente cambia las gráficas sin recargar. Bajo cada gráfica hay una tabla
+  con los mismos datos (accesible y copiable; también sirve si Chart.js no carga).
+#}
+{% set yp = year_period %}
+{% set ev = evolution %}
+
+<!-- Año + filtros -->
+<div class="bg-white rounded-2xl border border-gray-200 p-4 mb-5 flex flex-wrap items-center gap-3">
+
+  <div class="flex items-center gap-2">
+    <a href="/commercial-results?tab=evolucion&year={{ yp.prev_start.year }}"
+       class="p-3 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors" aria-label="Año anterior">
+      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 19l-7-7 7-7"/>
+      </svg>
+    </a>
+    <span class="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-semibold text-gray-800">{{ ev.year }}</span>
+    {% if yp.show_next %}
+    <a href="/commercial-results?tab=evolucion&year={{ yp.next_start.year }}"
+       class="p-3 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors" aria-label="Año siguiente">
+      <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"/>
+      </svg>
+    </a>
+    {% else %}
+    <span class="p-3 rounded-xl border border-gray-100 opacity-30 cursor-not-allowed" aria-hidden="true">
+      <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"/>
+      </svg>
+    </span>
+    {% endif %}
+  </div>
+
+  {% if ev.agents %}
+  <!-- Indicador -->
+  <div class="inline-flex rounded-xl border border-gray-300 p-0.5 text-sm" role="radiogroup" aria-label="Indicador">
+    {% for key, label in ev.indicators.items() %}
+    <button type="button" role="radio" data-indicator="{{ key }}"
+            aria-checked="{{ 'true' if loop.first else 'false' }}"
+            class="evo-indicator px-4 py-2 font-medium rounded-lg transition-colors
+                   {% if loop.first %}bg-gray-900 text-white{% else %}text-gray-600 hover:bg-gray-50{% endif %}">
+      {{ label }}
+    </button>
+    {% endfor %}
+  </div>
+
+  <!-- Agente (gráfica mensual) -->
+  <label class="flex items-center gap-2 text-sm text-gray-600">
+    Agente
+    <select id="evo-agent"
+            class="border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500">
+      <option value="all">Todos</option>
+      {% for a in ev.agents %}
+      <option value="{{ a.id }}">{{ a.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
+
+  {% if yp.is_current %}
+  <span class="sm:ml-auto inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+    <span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+    Año en curso · mes actual en tiempo real
+  </span>
+  {% endif %}
+</div>
+
+{% if not ev.agents %}
+<div class="bg-white rounded-2xl border border-gray-200 p-12 text-center">
+  <p class="text-gray-500">No hay agentes en {{ brand_name }}</p>
+  <a href="/agents" class="inline-block mt-3 text-sm text-blue-600 hover:underline">Gestionar agentes →</a>
+</div>
+{% else %}
+
+<p id="evo-chart-error" class="hidden mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+  No se pudo cargar la librería de gráficas. Los datos siguen disponibles en las tablas.
+</p>
+
+<!-- Cumplimiento anual -->
+<section class="bg-white rounded-2xl border border-gray-200 mb-5" aria-labelledby="evo-completion-title">
+  <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
+    <h2 id="evo-completion-title" class="text-lg font-bold text-gray-800">Cumplimiento anual</h2>
+    <p class="text-xs text-gray-500 mt-0.5">Media de los % de los objetivos anuales (captaciones, bajadas y cierres)</p>
+  </div>
+  <div class="p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+    {% for a in ev.agents %}
+    {% set c = a.completion %}
+    <div class="rounded-xl border border-gray-200 p-4">
+      <p class="text-sm font-medium text-gray-700 truncate" title="{{ a.name }}">{{ a.name }}</p>
+      {% if c is not none %}
+      <p class="text-2xl font-bold mt-1 {% if c >= 100 %}text-green-600{% elif c >= 60 %}text-amber-600{% else %}text-red-600{% endif %}">{{ c }} %</p>
+      <div class="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden" role="progressbar"
+           aria-valuenow="{{ c }}" aria-valuemin="0" aria-valuemax="100" aria-label="Cumplimiento de {{ a.name }}">
+        <div class="h-full rounded-full {% if c >= 100 %}bg-green-500{% elif c >= 60 %}bg-amber-500{% else %}bg-red-500{% endif %}"
+             style="width: {{ [c, 100] | min }}%"></div>
+      </div>
+      {% else %}
+      <p class="text-sm text-gray-400 mt-2">Sin objetivos anuales</p>
+      <a href="/commercial-results?tab=rendimiento&period_type=YEARLY&period_start={{ ev.year }}-01-01&open={{ a.id }}#agent-{{ a.id }}"
+         class="text-xs text-blue-600 hover:underline">Definir objetivos →</a>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- Gráfica 1: resultados por agente en el año -->
+<section class="bg-white rounded-2xl border border-gray-200 mb-5" aria-labelledby="evo-agents-title">
+  <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
+    <h2 id="evo-agents-title" class="text-lg font-bold text-gray-800">
+      <span class="evo-indicator-label">{{ ev.indicators.values() | first }}</span> por agente · {{ ev.year }}
+    </h2>
+    <p class="text-xs text-gray-500 mt-0.5">Venta y alquiler apilados; la marca negra discontinua es el objetivo anual del agente</p>
+  </div>
+  <div class="p-4 sm:p-6">
+    <p id="evo-agents-empty" class="hidden py-10 text-center text-sm text-gray-500">Sin datos de este indicador en {{ ev.year }}.</p>
+    <div id="evo-agents-wrap" class="relative" style="height: {{ [ev.agents | length * 48 + 70, 180] | max }}px">
+      <canvas id="evo-agents-chart" role="img" aria-label="Resultados por agente en {{ ev.year }}; los datos están en la tabla siguiente"></canvas>
+    </div>
+    <details class="mt-4 group">
+      <summary class="cursor-pointer text-sm text-blue-600 hover:underline">Ver tabla de datos</summary>
+      <div class="mt-3 overflow-x-auto">
+        <table class="w-full text-sm" id="evo-agents-table">
+          <caption class="sr-only">Resultados por agente en {{ ev.year }}</caption>
+          <thead class="bg-gray-50 border-b border-gray-200 text-gray-600">
+            <tr>
+              <th scope="col" class="text-left px-3 py-2 font-semibold">Agente</th>
+              <th scope="col" class="text-right px-3 py-2 font-semibold">Venta</th>
+              <th scope="col" class="text-right px-3 py-2 font-semibold">Alquiler</th>
+              <th scope="col" class="text-right px-3 py-2 font-semibold">Otros</th>
+              <th scope="col" class="text-right px-3 py-2 font-semibold">Total</th>
+              <th scope="col" class="text-right px-3 py-2 font-semibold">Objetivo</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- Gráfica 2: evolución mensual -->
+<section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="evo-monthly-title">
+  <div class="px-4 sm:px-6 py-4 border-b border-gray-100">
+    <h2 id="evo-monthly-title" class="text-lg font-bold text-gray-800">
+      Evolución mensual · <span class="evo-indicator-label">{{ ev.indicators.values() | first }}</span> ·
+      <span id="evo-agent-label">Todos</span>
+    </h2>
+    <p class="text-xs text-gray-500 mt-0.5" id="evo-monthly-help">Equipo: venta y alquiler apilados, con la línea negra del total</p>
+  </div>
+  <div class="p-4 sm:p-6">
+    <p id="evo-monthly-empty" class="hidden py-10 text-center text-sm text-gray-500">Sin datos de este indicador en {{ ev.year }} para la selección.</p>
+    <div id="evo-monthly-wrap" class="relative h-72">
+      <canvas id="evo-monthly-chart" role="img" aria-label="Evolución mensual en {{ ev.year }}; los datos están en la tabla siguiente"></canvas>
+    </div>
+    <details class="mt-4">
+      <summary class="cursor-pointer text-sm text-blue-600 hover:underline">Ver tabla de datos</summary>
+      <div class="mt-3 overflow-x-auto">
+        <table class="w-full text-sm" id="evo-monthly-table">
+          <caption class="sr-only">Evolución mensual en {{ ev.year }}</caption>
+          <thead class="bg-gray-50 border-b border-gray-200 text-gray-600">
+            <tr>
+              <th scope="col" class="text-left px-3 py-2 font-semibold">Mes</th>
+              <th scope="col" class="text-right px-3 py-2 font-semibold">Venta</th>
+              <th scope="col" class="text-right px-3 py-2 font-semibold">Alquiler</th>
+              <th scope="col" class="text-right px-3 py-2 font-semibold">Otros</th>
+              <th scope="col" class="text-right px-3 py-2 font-semibold">Total</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </details>
+  </div>
+</section>
+
+<script id="evolution-data" type="application/json">{{ ev | tojson }}</script>
+<script id="evolution-colors" type="application/json">{{ {'venta': sale_color, 'alquiler': rent_color, 'otros': '#9CA3AF'} | tojson }}</script>
+<script src="/static/js/chart.umd.js"></script>
+<script src="/static/js/commercial_results.js"></script>
+{% endif %}

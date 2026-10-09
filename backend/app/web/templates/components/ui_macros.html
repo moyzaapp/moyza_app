@@ -1,0 +1,241 @@
+{#
+  Macros de interfaz MOYZA / MOES PREMIUM.
+
+  Instalación: copiar a backend/app/web/templates/components/ui_macros.html y en cada
+  plantilla que los use:
+      {% import "components/ui_macros.html" as ui %}
+  Las clases siguen .claude/skills/moyza-ui-ux-pro/references/tokens.md.
+#}
+
+{# ---------------------------------------------------------------- Botones #}
+{% set _btn_base = "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 disabled:opacity-50 disabled:cursor-not-allowed" %}
+{% set _btn_variants = {
+    "primary":   "bg-gray-900 text-white hover:bg-gray-800 focus-visible:ring-gray-900/30",
+    "secondary": "bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 focus-visible:ring-gray-900/20",
+    "danger":    "bg-red-600 hover:bg-red-700 text-white focus-visible:ring-red-600/40",
+    "warning":   "bg-amber-600 hover:bg-amber-700 text-white focus-visible:ring-amber-600/40",
+    "text":      "text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 px-2"
+} %}
+
+{% macro button(label, variant="primary", type="button", href=None, extra="", attrs="", full_mobile=False) -%}
+{% set cls = _btn_base ~ " " ~ _btn_variants.get(variant, _btn_variants["primary"]) ~ (" w-full sm:w-auto" if full_mobile else "") ~ " " ~ extra %}
+{% if href %}<a href="{{ href }}" class="{{ cls }}" {{ attrs | safe }}>{{ caller() if caller else "" }}{{ label }}</a>
+{% else %}<button type="{{ type }}" class="{{ cls }}" {{ attrs | safe }}>{{ caller() if caller else "" }}{{ label }}</button>{% endif %}
+{%- endmacro %}
+
+{# ---------------------------------------------------------------- Badges #}
+{% set _tones = {
+    "green": "bg-green-100 text-green-800", "amber": "bg-amber-100 text-amber-800",
+    "red":   "bg-red-100 text-red-800",     "blue":  "bg-blue-100 text-blue-800",
+    "gray":  "bg-gray-100 text-gray-700",   "purple": "bg-purple-100 text-purple-800"
+} %}
+{% set _dots = { "green": "bg-green-500", "amber": "bg-amber-500", "red": "bg-red-500", "blue": "bg-blue-500", "gray": "bg-gray-400", "purple": "bg-purple-500" } %}
+
+{% macro badge(label, tone="gray", dot=False, extra="") -%}
+<span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium {{ _tones.get(tone, _tones['gray']) }} {{ extra }}">
+    {% if dot %}<span class="w-1.5 h-1.5 rounded-full {{ _dots.get(tone, _dots['gray']) }}" aria-hidden="true"></span>{% endif %}{{ label }}
+</span>
+{%- endmacro %}
+
+{# Mapa único de estados. Mantener sincronizado con references/tokens.md #}
+{% set _status_map = {
+    "alert":    { "PENDING": ("Pendiente", "amber"), "IN_PROGRESS": ("En proceso", "blue"), "COMPLETED": ("Completada", "green"), "CANCELLED": ("Cancelada", "gray") },
+    "priority": { "ALTA": ("Alta", "red"), "NORMAL": ("Normal", "blue"), "BAJA": ("Baja", "gray") },
+    "log":      { "success": ("Exitoso", "green"), "failed": ("Fallido", "red"), "pending": ("Pendiente", "amber"), "skipped": ("Omitido", "gray") },
+    "business": { "Venta": ("Venta", "blue"), "Alquiler": ("Alquiler", "amber") },
+    "active":   { True: ("Activo", "green"), False: ("Inactivo", "gray") }
+} %}
+
+{% macro status_badge(domain, value, dot=True) -%}
+{% set entry = _status_map.get(domain, {}).get(value) %}
+{% if entry %}{{ badge(entry[0], entry[1], dot=dot) }}{% else %}{{ badge(value or "-", "gray", dot=False) }}{% endif %}
+{%- endmacro %}
+
+{# ---------------------------------------------------------------- KPI #}
+{% set _kpi_value = { "green": "text-green-600", "amber": "text-amber-600", "red": "text-red-600", "blue": "text-blue-600", "gray": "text-gray-900" } %}
+{% set _kpi_icon  = { "green": "bg-green-100 text-green-600", "amber": "bg-amber-100 text-amber-600", "red": "bg-red-100 text-red-600", "blue": "bg-blue-100 text-blue-600", "gray": "bg-gray-100 text-gray-600" } %}
+
+{#
+  Extensión del proyecto (compatible con el macro del skill):
+  - delta: HTML ya renderizado junto al valor (variación vs. período anterior).
+  - extra: HTML ya renderizado bajo el hint (p. ej. desglose venta / alquiler).
+  - aside: HTML ya renderizado a la derecha en lugar de la caja de icono
+    (p. ej. un anillo de progreso).
+#}
+{% macro kpi_card(label, value, tone="gray", hint=None, href=None, active=False, delta=None, extra=None, aside=None) -%}
+{% set tag = "a" if href else "div" %}
+<{{ tag }} {% if href %}href="{{ href }}"{% endif %}
+    class="block bg-white rounded-2xl border p-4 sm:p-5 transition-colors
+           {% if active %}border-gray-900 ring-2 ring-gray-900/10{% else %}border-gray-200{% endif %}
+           {% if href %}hover:border-gray-300{% endif %}">
+    <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+            <p class="text-sm font-medium text-gray-500">{{ label }}</p>
+            <p class="mt-1 flex items-baseline flex-wrap gap-x-2">
+                <span class="text-3xl font-bold tabular-nums {{ _kpi_value.get(tone, _kpi_value['gray']) }}">{{ value }}</span>
+                {% if delta %}{{ delta }}{% endif %}
+            </p>
+            {% if hint %}<p class="text-xs text-gray-500 mt-1">{{ hint }}</p>{% endif %}
+            {% if extra %}{{ extra }}{% endif %}
+        </div>
+        {% if aside %}
+        <div class="shrink-0">{{ aside }}</div>
+        {% elif caller %}
+        <div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 {{ _kpi_icon.get(tone, _kpi_icon['gray']) }}" aria-hidden="true">
+            {{ caller() }}
+        </div>
+        {% endif %}
+    </div>
+</{{ tag }}>
+{%- endmacro %}
+
+{# ---------------------------------------------------------------- Banner #}
+{% set _banner = {
+    "amber": "border-amber-200 bg-amber-50 text-amber-900",
+    "blue":  "border-blue-200 bg-blue-50 text-blue-900",
+    "red":   "border-red-200 bg-red-50 text-red-900",
+    "green": "border-green-200 bg-green-50 text-green-900"
+} %}
+
+{% macro banner(title, tone="amber", text=None, role="status") -%}
+<div class="rounded-xl border px-4 py-3 flex items-start gap-3 {{ _banner.get(tone, _banner['amber']) }}" role="{{ 'alert' if tone == 'red' else role }}">
+    <svg class="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        {% if tone == "green" %}<path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
+        {% elif tone == "blue" %}<path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/>
+        {% else %}<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>{% endif %}
+    </svg>
+    <div class="min-w-0 flex-1">
+        <p class="text-sm font-semibold">{{ title }}</p>
+        {% if text %}<p class="text-xs mt-1 opacity-90">{{ text }}</p>{% endif %}
+        {% if caller %}<div class="flex flex-wrap gap-2 mt-3">{{ caller() }}</div>{% endif %}
+    </div>
+</div>
+{%- endmacro %}
+
+{# ---------------------------------------------------------------- Modal #}
+{#
+  Uso:
+    {% call ui.modal("clientModal", "Nuevo cliente", size="lg") %}
+        <form method="POST" action="/clients/create" class="p-6 space-y-4" data-once>
+            ...
+            {{ ui.modal_footer() }}   o un pie propio
+        </form>
+    {% endcall %}
+  Abrir: UI.openModal('clientModal'); cerrar: cualquier [data-modal-close], Escape o fondo.
+#}
+{% set _modal_sizes = { "md": "sm:max-w-md", "lg": "sm:max-w-lg", "xl": "sm:max-w-2xl", "2xl": "sm:max-w-4xl" } %}
+
+{% macro modal(id, title, size="lg", subtitle=None) -%}
+<div id="{{ id }}" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="{{ id }}Title">
+    <div class="absolute inset-0 bg-gray-900/50" data-modal-close></div>
+    <div class="relative min-h-full flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="bg-white w-full {{ _modal_sizes.get(size, _modal_sizes['lg']) }} max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-xl">
+            <header class="flex items-start justify-between gap-3 px-6 py-4 border-b border-gray-200">
+                <div>
+                    <h2 id="{{ id }}Title" class="text-lg font-bold text-gray-900">{{ title }}</h2>
+                    {% if subtitle %}<p class="text-sm text-gray-500 mt-0.5">{{ subtitle }}</p>{% endif %}
+                </div>
+                <button type="button" data-modal-close aria-label="Cerrar"
+                    class="w-9 h-9 -mr-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center shrink-0">
+                    <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+                </button>
+            </header>
+            {{ caller() }}
+        </div>
+    </div>
+</div>
+{%- endmacro %}
+
+{% macro modal_footer(submit_label="Guardar", cancel_label="Cancelar", submit_variant="primary") -%}
+<footer class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl -mx-6 -mb-6 mt-2">
+    {{ button(cancel_label, "secondary", attrs='data-modal-close', full_mobile=True) }}
+    {{ button(submit_label, submit_variant, type="submit", full_mobile=True) }}
+</footer>
+{%- endmacro %}
+
+{#
+  Confirmación con consecuencias. Uso:
+    {{ ui.confirm_modal("deletePropModal", "¿Eliminar la propiedad?", "Se borrarán también sus 3 visitas e informes.", action="/properties/12/delete", submit_label="Eliminar") }}
+#}
+{% macro confirm_modal(id, title, text, action, submit_label="Eliminar", variant="danger") -%}
+{% call modal(id, title, size="md") %}
+<form method="POST" action="{{ action }}" class="p-6" data-once>
+    <p class="text-sm text-gray-700">{{ text }}</p>
+    {{ modal_footer(submit_label=submit_label, submit_variant=variant) }}
+</form>
+{% endcall %}
+{%- endmacro %}
+
+{# ---------------------------------------------------------------- Formularios #}
+{% set _input = "w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500" %}
+
+{% macro field(name, label, type="text", value="", required=False, placeholder="", help=None, error=None, attrs="", optional_label=False) -%}
+<div>
+    <label for="{{ name }}" class="block text-sm font-medium text-gray-700 mb-1">
+        {{ label }}
+        {% if required %}<span class="text-red-500" aria-hidden="true">*</span>{% elif optional_label %}<span class="text-gray-400 font-normal">(opcional)</span>{% endif %}
+    </label>
+    {% if type == "textarea" %}
+    <textarea id="{{ name }}" name="{{ name }}" rows="3" placeholder="{{ placeholder }}" {% if required %}required{% endif %} {{ attrs | safe }}
+        class="{{ _input }} resize-y {% if error %}border-red-500{% endif %}" {% if help %}aria-describedby="{{ name }}_help"{% endif %} {% if error %}aria-invalid="true"{% endif %}>{{ value }}</textarea>
+    {% else %}
+    <input type="{{ type }}" id="{{ name }}" name="{{ name }}" value="{{ value }}" placeholder="{{ placeholder }}" {% if required %}required{% endif %} {{ attrs | safe }}
+        class="{{ _input }} {% if error %}border-red-500{% endif %}" {% if help %}aria-describedby="{{ name }}_help"{% endif %} {% if error %}aria-invalid="true"{% endif %}>
+    {% endif %}
+    {% if help %}<p id="{{ name }}_help" class="text-xs text-gray-500 mt-1">{{ help }}</p>{% endif %}
+    {% if error %}<p class="text-xs text-red-600 mt-1" role="alert">{{ error }}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro select(name, label, options, value=None, required=False, empty="Sin especificar", help=None, error=None, attrs="") -%}
+<div>
+    <label for="{{ name }}" class="block text-sm font-medium text-gray-700 mb-1">{{ label }}{% if required %} <span class="text-red-500" aria-hidden="true">*</span>{% endif %}</label>
+    <select id="{{ name }}" name="{{ name }}" {% if required %}required{% endif %} {{ attrs | safe }} class="{{ _input }} {% if error %}border-red-500{% endif %}">
+        {% if empty is not none %}<option value="">{{ empty }}</option>{% endif %}
+        {% for opt_value, opt_label in options %}
+        <option value="{{ opt_value }}" {% if value is not none and opt_value|string == value|string %}selected{% endif %}>{{ opt_label }}</option>
+        {% endfor %}
+    </select>
+    {% if help %}<p class="text-xs text-gray-500 mt-1">{{ help }}</p>{% endif %}
+    {% if error %}<p class="text-xs text-red-600 mt-1" role="alert">{{ error }}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{# ---------------------------------------------------------------- Estado vacío #}
+{% macro empty_state(title, hint=None, colspan=None) -%}
+{% set inner %}
+<div class="py-12 px-6 text-center">
+    <div class="mx-auto w-12 h-12 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center mb-3" aria-hidden="true">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z"/></svg>
+    </div>
+    <p class="text-sm font-medium text-gray-900">{{ title }}</p>
+    {% if hint %}<p class="text-xs text-gray-500 mt-1">{{ hint }}</p>{% endif %}
+    {% if caller %}<div class="mt-4">{{ caller() }}</div>{% endif %}
+</div>
+{% endset %}
+{% if colspan %}<tr><td colspan="{{ colspan }}">{{ inner }}</td></tr>{% else %}{{ inner }}{% endif %}
+{%- endmacro %}
+
+{# ---------------------------------------------------------------- Cabecera de página #}
+{% macro page_header(title, subtitle=None) -%}
+<div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+    <div>
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">{{ title }}</h1>
+        {% if subtitle %}<p class="text-sm text-gray-500 mt-1">{{ subtitle }}</p>{% endif %}
+    </div>
+    {% if caller %}<div class="flex flex-col sm:flex-row flex-wrap gap-3">{{ caller() }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{# ---------------------------------------------------------------- Tabs #}
+{% macro tabs(items, current, label="Secciones") -%}
+<nav class="flex gap-6 border-b border-gray-200 -mb-px overflow-x-auto" role="tablist" aria-label="{{ label }}">
+    {% for key, text, href, count in items %}
+    {% set active = key == current %}
+    <a href="{{ href }}" role="tab" aria-selected="{{ 'true' if active else 'false' }}"
+       class="whitespace-nowrap py-3 text-sm font-medium border-b-2 transition-colors {% if active %}border-gray-900 text-gray-900{% else %}border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300{% endif %}">
+        {{ text }}{% if count is not none %}<span class="ml-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{{ count }}</span>{% endif %}
+    </a>
+    {% endfor %}
+</nav>
+{%- endmacro %}

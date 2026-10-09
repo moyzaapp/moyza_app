@@ -22,7 +22,15 @@ class AgentPerformanceTarget(Base):
         nullable=False
     )
 
-    period_type = Column(String, nullable=False)   # WEEKLY / MONTHLY
+    # Un agente que trabaja en las dos empresas tiene objetivos separados
+    company_id = Column(
+        Integer,
+        ForeignKey("companies.id"),
+        nullable=False,
+        index=True
+    )
+
+    period_type = Column(String, nullable=False)   # WEEKLY / MONTHLY / YEARLY
     period_start = Column(DateTime, nullable=False)
 
     target_contactos = Column(Integer, nullable=True)

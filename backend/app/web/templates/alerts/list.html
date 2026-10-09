@@ -15,7 +15,7 @@
                 <p class="text-gray-600 mt-1">Gestiona compradores y sus alertas de propiedades</p>
             </div>
 
-            {% if request.state.user.role.name.lower() == 'admin' %}
+            {# Acciones disponibles para admin y agentes #}
             <div class="flex flex-wrap gap-2">
                 <button
                     onclick="openCreateBuyerModal()"
@@ -45,7 +45,6 @@
                     Agregar alerta con filtro
                 </button>
             </div>
-            {% endif %}
         </div>
 
         <!-- Stats Cards -->
@@ -426,12 +425,10 @@
                                             {% if request.state.user.role.name.lower() == 'admin' %}
                                             <p>No hay compradores registrados</p>
                                             {% else %}
-                                            <p>Aún no hay compradores en seguimiento. Aparecerán aquí a medida que abras y gestiones sus alertas.</p>
+                                            <p>Aún no tienes compradores. Aparecerán aquí los que registres y los de las alertas que gestiones.</p>
                                             {% endif %}
-                                            {% if request.state.user.role.name.lower() == 'admin' %}
                                             <button onclick="openCreateBuyerModal()"
                                                 class="text-blue-600 hover:underline text-sm">Crear el primero</button>
-                                            {% endif %}
                                         </div>
                                     </td>
                                 </tr>
@@ -445,8 +442,6 @@
     </div>
 
 </div>
-
-{% if request.state.user.role.name.lower() == 'admin' %}
 
 <!-- Modal: Nuevo Comprador -->
 <div id="createBuyerModal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
@@ -1299,6 +1294,7 @@ function setBuyerMode(mode) {
                                         class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
                                 </div>
                             </div>
+                            {% if is_admin %}
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Agente responsable</label>
                                 <select name="agent_id"
@@ -1309,6 +1305,7 @@ function setBuyerMode(mode) {
                                     {% endfor %}
                                 </select>
                             </div>
+                            {% endif %}
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Imprescindibles</label>
                                 <textarea name="notes" rows="3" placeholder="Ej: planta baja, piscina, sin reformar..."
@@ -1336,7 +1333,5 @@ function setBuyerMode(mode) {
         </form>
     </div>
 </div>
-
-{% endif %}
 
 {% endblock %}

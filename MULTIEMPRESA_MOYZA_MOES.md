@@ -128,15 +128,136 @@ docker exec moyza_backend python -m pytest tests/test_company_context.py -q
 docker exec moyza_backend python -m pytest tests/test_company_isolation.py -q
 ```
 
+```bash
+# Agentes de las visitas (unitarios + integración si la app responde)
+docker exec moyza_backend python -m pytest tests/test_visit_agents.py -q
+```
+
 `pytest` no está en `requirements.txt`; se instala con
 `docker exec moyza_backend pip install pytest` o con `run_tests.sh`.
 
-## 6. Pendientes conocidos
+## 6. Visitas con agente propio y acompañante
+
+Detalle en `PLAN_VISITAS_AGENTES.md`. Cualquier agente puede registrar
+visitas en cualquier propiedad disponible de la empresa activa; la visita
+guarda quién la hizo (`property_visits.agent_id`) y un acompañante opcional
+(`companion_agent_id`). Ambos deben ser agentes de la empresa activa.
+
+- Listado `/visits` del agente: visitas en las que participó y las que otros
+  hicieron a sus propiedades.
+- Ficha PDF y preview: emite y firma el agente de la visita; el acompañante
+  solo aparece en el texto legal. Visitas antiguas sin agente caen al
+  captador.
+- `hojas_visita`: suma 1 al principal y 1 al acompañante; no al captador.
+- Agentes fijos al firmar: en `signed`/`completed` no se pueden cambiar.
+
+Despliegue (migración `s2t3u4v5w6x7_add_agents_to_property_visits`, con
+backfill: agente del usuario creador por email y, si no, el captador):
+
+```bash
+docker exec moyza_backend alembic upgrade head
+docker exec moyza_db psql -U <usuario> -d <bd> -c "
+  select count(*) as total, count(agent_id) as con_agente,
+         count(*) filter (where agent_id is null) as sin_agente
+  from property_visits;"
+docker restart moyza_backend
+```
+
+Rollback: `docker exec moyza_backend alembic downgrade r1s2t3u4v5w6` con el
+código anterior desplegado (elimina las dos columnas y sus índices).
+
+## 7. Resultados Comerciales (rendimiento por empresa)
+
+Detalle en `PLAN_RESULTADOS_COMERCIALES.md`. La sección "Dashboard
+Compradores" pasa a ser **Resultados Comerciales** (`/commercial-results`,
+solo admin) con tres pestañas: Rendimiento (semana / mes / año), Evolución
+(gráficas del año con Chart.js local en `static/js/chart.umd.js`) y
+Compradores. `/alerts-dashboard` y `/performance-reports` redirigen con 301
+conservando los query params.
+
+- Todas las métricas se calculan con las propiedades de la empresa activa.
+  Un agente que está en las dos empresas tiene resultados, objetivos y
+  snapshots separados en cada una.
+- Captaciones, bajadas y cierres se desglosan en venta / alquiler (el
+  cierre usa el tipo de la alerta y, si falta, el de la propiedad).
+- Objetivos por período (`PerformanceObjectives` en `core/constants.py`):
+  semana = captaciones y bajadas; mes y año = captaciones, bajadas y
+  cierres. Los objetivos antiguos de contactos y hojas de visita se quedan
+  en la tabla como histórico.
+- Nuevo job `freeze_yearly_reports` (1 de enero, 00:01); semanal y mensual
+  congelan ahora un snapshot por empresa y agente.
+
+Despliegue (migración `t3u4v5w6x7y8_add_company_and_breakdown_to_performance`:
+`company_id` en objetivos y snapshots con backfill a MOYZA, clave única por
+agente + empresa + período, y 6 columnas de desglose que quedan NULL en los
+snapshots existentes; sus totales no cambian):
+
+```bash
+docker exec moyza_db pg_dump -U <usuario> -d <bd> -Fc > backup_pre_resultados_$(date +%F).dump
+docker exec moyza_backend alembic upgrade head
+docker exec moyza_db psql -U <usuario> -d <bd> -c "
+  select company_id, period_type, count(*) from agent_performance_reports group by 1, 2;
+  select company_id, period_type, count(*) from agent_performance_targets group by 1, 2;"
+docker restart moyza_backend
+```
+
+Resultado esperado: todas las filas existentes con el `company_id` de MOYZA y
+los mismos totales que antes. Los snapshots anteriores se muestran "sin
+desglose" (en las gráficas, su total cuenta como "otros").
+
+Rollback: `docker exec moyza_backend alembic downgrade s2t3u4v5w6x7` con el
+código anterior desplegado. **Borra los objetivos y snapshots de MOES**: la
+clave antigua no admite el mismo agente y período en dos empresas.
+
+```bash
+# Tests (servicio sin app; rutas contra la app levantada)
+docker exec moyza_backend python -m pytest tests/test_performance_service.py tests/test_commercial_results.py tests/test_scheduler.py -q
+```
+
+## 8. Inicio por rol y notificaciones in-app
+
+Detalle en `PLAN_DASHBOARD_INICIO.md`. `/dashboard` es el **Inicio** para
+todos los roles (el login sigue llevando ahí; el agente ya no ve "Acceso
+denegado") y todo su contenido es de la empresa activa:
+
+- Agente: KPIs del período (semana / mes / año) con delta y anillo de
+  objetivo solo en las métricas de `PerformanceObjectives`, % global y
+  puesto sin nombres, novedades, agenda, tendencia de 8 semanas, cartera y
+  observaciones del admin.
+- Admin: KPIs del equipo, cumplimiento por agente, "Requiere atención",
+  actividad reciente (visita cruzada marcada) y tendencia de 12 semanas.
+- Al entrar, ventana de compradores con más de `BUYER_REMINDER_HOURS`
+  (48 h) sin gestión: misma regla que el email de las 06:00, filtrada por
+  la empresa activa; una vez cerrada no vuelve ese día en ese navegador.
+- Notificaciones **solo in-app** (campana del navbar para agentes,
+  `/notifications` y bloque "Novedades"): visita en tu inmueble, acompañante,
+  ficha firmada, envío de ficha fallido, seguimiento de hoy o vencido
+  (job diario 08:00 Madrid) y observación del admin. Cada notificación es
+  de un usuario y una empresa; nunca se avisa al propio actor y no se
+  repite la misma en 24 h. Las leídas se borran a los 90 días (job diario).
+
+Despliegue (migración `u4v5w6x7y8z9_create_notifications`, solo crea la
+tabla `notifications`; no toca datos existentes):
+
+```bash
+docker exec moyza_backend alembic upgrade head
+docker restart moyza_backend
+```
+
+Rollback: `docker exec moyza_backend alembic downgrade t3u4v5w6x7y8` con el
+código anterior desplegado (borra la tabla y sus notificaciones).
+
+```bash
+# Tests (servicios con base de datos; rutas contra la app levantada)
+docker exec moyza_backend python -m pytest tests/test_dashboard_service.py tests/test_notification_service.py tests/test_dashboard_routes.py tests/test_visit_preview_edit.py -q
+```
+
+## 9. Pendientes conocidos
 
 - Datos legales y logo reales de MOES PREMIUM (sección 4).
 - Eliminar las columnas heredadas `users.company` y `agents.company` cuando ya
   no las lea nada.
-- `/activity-logs` y el dashboard de admin no filtran por empresa a propósito:
-  la actividad de usuarios no es un dato de empresa.
+- `/activity-logs` no filtra por empresa a propósito: la actividad de
+  usuarios no es un dato de empresa.
 - Vista consolidada "Todas las empresas" para el admin: descartada en esta
   versión, pendiente de decidir.

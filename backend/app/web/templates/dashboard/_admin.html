@@ -1,0 +1,200 @@
+{#
+  Inicio del admin (PLAN_DASHBOARD_INICIO.md §3.3). `home` = DashboardService.admin_home.
+  KPIs del equipo arriba, cumplimiento por agente, lo que requiere atención y
+  la actividad reciente, y la tendencia de 12 semanas.
+#}
+{% import "components/ui_macros.html" as ui %}
+{% from "dashboard/components/kpi.html" import delta_tag, breakdown_line %}
+{% from "dashboard/components/trend_chart.html" import trend_chart %}
+{% from "dashboard/components/feed_item.html" import feed_item %}
+{% from "dashboard/components/attention_item.html" import attention_item %}
+{% from "dashboard/components/icons.html" import icon %}
+{% set prev_period = {'WEEKLY': 'la semana anterior', 'MONTHLY': 'el mes anterior', 'YEARLY': 'el año anterior'}[period.period_type] %}
+{% set short_labels = {'hojas_visita': 'Visitas', 'contactos': 'Contactos', 'captaciones_crm': 'Capt.', 'bajadas': 'Bajadas', 'cierres': 'Cierres'} %}
+{% set bar_tones = {'green': 'bg-green-500', 'amber': 'bg-amber-500', 'red': 'bg-red-500', 'gray': 'bg-gray-300'} %}
+{% set text_tones = {'green': 'text-green-700', 'amber': 'text-amber-700', 'red': 'text-red-700', 'gray': 'text-gray-500'} %}
+
+{# ---------------------------------------------------------------- KPIs del equipo #}
+<section aria-labelledby="teamKpisTitle" class="space-y-3">
+    <h2 id="teamKpisTitle" class="text-xs font-semibold uppercase tracking-wide text-gray-500">Equipo · {{ period.label }}</h2>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {% for kpi in home.kpis %}
+        {% call ui.kpi_card(kpi.label, kpi.value, hint=("Visitas de la empresa" if kpi.key == 'hojas_visita' else "Suma de los agentes"),
+                            delta=delta_tag(kpi.delta), extra=breakdown_line(kpi.breakdown)) %}
+            {{ icon({'hojas_visita': 'calendar', 'contactos': 'users', 'captaciones_crm': 'home', 'cierres': 'check'}[kpi.key]) }}
+        {% endcall %}
+        {% endfor %}
+
+        {% set s = home.secondary_kpis %}
+        {% call ui.kpi_card(s.bajadas.label, s.bajadas.value, hint="Suma de los agentes", delta=delta_tag(s.bajadas.delta)) %}
+            {{ icon('trending_down') }}
+        {% endcall %}
+
+        {% set avg = s.completion_avg %}
+        {% if avg is not none %}
+            {% call ui.kpi_card("Cumplimiento medio", avg ~ " %", tone=('green' if avg >= 100 else ('amber' if avg >= 60 else 'red')),
+                                hint="Media de " ~ s.completion_agents ~ (" agente con objetivos" if s.completion_agents == 1 else " agentes con objetivos")) %}
+                {{ icon('chart') }}
+            {% endcall %}
+        {% else %}
+            {% call ui.kpi_card("Cumplimiento medio", "—", hint="Ningún agente tiene objetivos en este período",
+                                href="/commercial-results?tab=rendimiento&period_type=" ~ period.period_type ~ "&period_start=" ~ period.start_str) %}
+                {{ icon('flag') }}
+            {% endcall %}
+        {% endif %}
+
+        {% call ui.kpi_card("Compradores pendientes", s.pending_buyers, tone=('amber' if s.pending_buyers else 'gray'),
+                            hint="Sin atender todavía", href="/alerts?status_filter=PENDING") %}
+            {{ icon('inbox') }}
+        {% endcall %}
+
+        {% call ui.kpi_card("Abandonados", s.abandoned_buyers, tone=('red' if s.abandoned_buyers else 'gray'),
+                            hint="Pendientes desde hace más de " ~ s.abandoned_days ~ " días", href="/alerts?status_filter=PENDING") %}
+            {{ icon('clock') }}
+        {% endcall %}
+    </div>
+    <p class="text-xs text-gray-500">La flecha compara con {{ prev_period }}.</p>
+</section>
+
+{# ---------------------------------------------------------------- Cumplimiento del equipo #}
+<section class="bg-white rounded-2xl border border-gray-200 overflow-hidden" aria-labelledby="teamTitle">
+    <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 sm:px-6 py-4 border-b border-gray-200">
+        <div>
+            <h2 id="teamTitle" class="text-lg font-bold text-gray-900">Cumplimiento del equipo</h2>
+            <p class="text-xs text-gray-500 mt-0.5">Barras en las métricas con objetivo; % global = media de esas métricas. Flecha: tendencia frente a {{ prev_period }}.</p>
+        </div>
+        <a href="/commercial-results?tab=rendimiento&period_type={{ period.period_type }}&period_start={{ period.start_str }}"
+           class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 shrink-0">Objetivos y notas</a>
+    </header>
+    {% if not home.team %}
+        {% call ui.empty_state("Aún no hay agentes en " ~ brand_name, "Da de alta a los agentes para ver aquí su cumplimiento.") %}
+            {{ ui.button("Gestionar agentes", "primary", href="/agents") }}
+        {% endcall %}
+    {% else %}
+    <div class="overflow-x-auto">
+        <table class="w-full min-w-[760px] text-sm">
+            <thead class="bg-gray-50 border-b border-gray-200">
+                <tr>
+                    <th scope="col" class="text-left px-4 sm:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Agente</th>
+                    {% for key, label in short_labels.items() %}
+                    <th scope="col" class="text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        {{ label }}{% if key in home.objective_keys %} <span class="normal-case font-normal text-gray-500">(obj.)</span>{% endif %}
+                    </th>
+                    {% endfor %}
+                    <th scope="col" class="text-right px-4 sm:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Global</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for row in home.team %}
+                <tr class="hover:bg-gray-50 transition-colors">
+                    <td class="px-4 sm:px-6 py-3">
+                        <a href="/commercial-results?tab=rendimiento&period_type={{ period.period_type }}&period_start={{ period.start_str }}&open={{ row.agent.id }}#agent-{{ row.agent.id }}"
+                           class="font-medium text-gray-900 hover:text-blue-600">{{ row.agent.name }}</a>
+                        {% if not row.has_target %}<p class="text-xs text-gray-500">Sin objetivos</p>{% endif %}
+                    </td>
+                    {% for cell in row.cells %}
+                    <td class="px-3 py-3 align-middle">
+                        {% if cell.is_objective and cell.target %}
+                        <div class="flex items-center gap-2 min-w-[96px]">
+                            <div class="h-2 w-14 rounded-full bg-gray-100 overflow-hidden" role="progressbar"
+                                 aria-valuenow="{{ cell.pct }}" aria-valuemin="0" aria-valuemax="100"
+                                 aria-label="{{ short_labels[cell.key] }} de {{ row.agent.name }}: {{ cell.value }} de {{ cell.target }}">
+                                <div class="h-full rounded-full {{ bar_tones[cell.tone] }}" style="width: {{ cell.bar_pct }}%"></div>
+                            </div>
+                            <span class="text-xs tabular-nums {{ text_tones[cell.tone] }} font-medium">{{ cell.pct }} %</span>
+                        </div>
+                        <p class="text-xs text-gray-500 tabular-nums">{{ cell.value }} / {{ cell.target }}</p>
+                        {% elif cell.is_objective %}
+                        <span class="tabular-nums text-gray-900">{{ cell.value }}</span>
+                        <p class="text-xs text-gray-500">sin objetivo</p>
+                        {% else %}
+                        <span class="tabular-nums text-gray-900">{{ cell.value }}</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                    <td class="px-4 sm:px-6 py-3 text-right whitespace-nowrap">
+                        {% if row.completion is not none %}
+                            {% set badge_tone = row.completion_tone %}
+                            {{ ui.badge(row.completion ~ " %", badge_tone) }}
+                        {% else %}
+                            <span class="text-xs text-gray-500">—</span>
+                        {% endif %}
+                        {% if row.trend == 'up' %}
+                        <span class="text-xs font-medium text-green-600 ml-1"><span aria-hidden="true">▲</span><span class="sr-only">Mejora frente a {{ prev_period }} ({{ row.previous_completion }} %)</span></span>
+                        {% elif row.trend == 'down' %}
+                        <span class="text-xs font-medium text-red-600 ml-1"><span aria-hidden="true">▼</span><span class="sr-only">Empeora frente a {{ prev_period }} ({{ row.previous_completion }} %)</span></span>
+                        {% elif row.trend == 'flat' %}
+                        <span class="text-xs font-medium text-gray-500 ml-1"><span aria-hidden="true">=</span><span class="sr-only">Igual que {{ prev_period }}</span></span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</section>
+
+{# ---------------------------------------------------------------- Atención y actividad #}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="attentionTitle">
+        <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
+            <h2 id="attentionTitle" class="text-lg font-bold text-gray-900">Requiere atención</h2>
+            {% if home.pending_by_agent %}
+            <button type="button" data-modal-open="pendingBuyersModal" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Compradores sin gestión</button>
+            {% endif %}
+        </header>
+        {% if home.attention %}
+        <ul class="divide-y divide-gray-100">
+            {% for item in home.attention %}{{ attention_item(item) }}{% endfor %}
+        </ul>
+        {% else %}
+            {{ ui.empty_state("Todo en orden", "No hay compradores abandonados, agentes inactivos ni envíos fallidos.") }}
+        {% endif %}
+    </section>
+
+    <section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="feedTitle">
+        <header class="px-4 sm:px-6 py-4 border-b border-gray-200">
+            <h2 id="feedTitle" class="text-lg font-bold text-gray-900">Actividad reciente</h2>
+            <p class="text-xs text-gray-500 mt-0.5">Visitas, fichas firmadas, bajadas, cierres y captaciones de {{ brand_name }} en los últimos 30 días</p>
+        </header>
+        {% if home.feed %}
+        <ul class="divide-y divide-gray-100 max-h-[32rem] overflow-y-auto">
+            {% for event in home.feed %}{{ feed_item(event) }}{% endfor %}
+        </ul>
+        {% else %}
+            {{ ui.empty_state("Aún no hay actividad en los últimos 30 días", "Las visitas, captaciones, bajadas y cierres del equipo aparecerán aquí.") }}
+        {% endif %}
+    </section>
+</div>
+
+{# ---------------------------------------------------------------- Tendencia #}
+{{ trend_chart("teamTrend", home.trend, "Tendencia del equipo",
+               "Hojas de visita por agente (barras apiladas) y contactos del equipo (línea), últimas " ~ (home.trend.labels | length) ~ " semanas",
+               kind="bars", empty_title="Aún no hay visitas ni contactos en estas semanas",
+               empty_hint="La gráfica se llenará con la actividad del equipo.") }}
+
+{# ---------------------------------------------------------------- Ventana de compradores sin atender (§3.4) #}
+{% if home.pending_by_agent %}
+{% set total = home.pending_by_agent | sum(attribute='count') %}
+{% call ui.modal("pendingBuyersModal", "Compradores sin atender", size="lg",
+                 subtitle=(total ~ (" comprador lleva" if total == 1 else " compradores llevan") ~ " más de " ~ buyer_reminder_hours ~ " h sin gestión")) %}
+<div data-dismiss-daily="pending_buyers_dismissed" class="p-6 space-y-4">
+    <ul class="divide-y divide-gray-100 -my-2">
+        {% for g in home.pending_by_agent %}
+        <li class="py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+            <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-gray-900 truncate">{{ g.agent_name }}</p>
+                <p class="text-xs text-gray-500">{{ g.count }} {{ 'comprador' if g.count == 1 else 'compradores' }} · el más antiguo, <span class="font-medium text-red-700">{{ g.oldest_hours }} h</span></p>
+            </div>
+            {{ ui.button("Ver compradores", "secondary", href="/alerts?agent_id=" ~ g.agent_id, full_mobile=True) }}
+        </li>
+        {% endfor %}
+    </ul>
+    <footer class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl -mx-6 -mb-6 mt-2">
+        {{ ui.button("Lo reviso después", "primary", attrs='data-modal-close', full_mobile=True) }}
+    </footer>
+</div>
+{% endcall %}
+{% endif %}

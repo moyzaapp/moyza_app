@@ -47,12 +47,15 @@ def generate_visit_sheet(
     visit,
     agent,
     output_path,
-    company=None
+    company=None,
+    companion_agent=None
 ):
     """
     Genera la Ficha de Visita Inmobiliaria en PDF con la identidad de la
     empresa propietaria del inmueble (MOYZA o MOES PREMIUM).
 
+    `agent` es el agente que realizó la visita: figura como emisor y firma.
+    `companion_agent` (opcional) solo aparece en el texto legal; no firma.
     `company` es opcional: por defecto se usa la empresa de la propiedad.
     """
 
@@ -300,13 +303,22 @@ def generate_visit_sheet(
     agent_name = _safe_text(agent.name) if agent else f"Agente {_safe_text(brand.name)}"
     visit_time = visit.created_at.strftime("%H:%M") if visit.created_at else datetime.now().strftime("%H:%M")
 
+    # Debe coincidir con templates/visits/preview.html (lo que se firma)
+    if companion_agent:
+        accompanied_by = (
+            f"acompañado por los agentes de la inmobiliaria <b>{agent_name}</b> "
+            f"y <b>{_safe_text(companion_agent.name)}</b>"
+        )
+    else:
+        accompanied_by = "acompañado por el agente de la inmobiliaria"
+
     legal_text = f"""
     El presente documento es emitido por el asesor inmobiliario <b>{agent_name}</b>
     en calidad de representante de la agencia inmobiliaria {_safe_text(brand.name)} con domicilio fiscal en
     {_safe_text(brand.fiscal_address)}.
     <br/><br/>
     El interesado declara que ha visitado el inmueble con fecha <b>{visit_date}</b> a las <b>{visit_time}</b> horas
-    con esta agencia y que no lo había visitado antes, acompañado por el agente de la inmobiliaria.
+    con esta agencia y que no lo había visitado antes, {accompanied_by}.
     Asimismo, reconoce que ha conocido dicho inmueble gracias a la intermediación de la empresa inmobiliaria mencionada,
     la cual actúa como mediadora en la operación de compraventa. Durante dicha visita "El agente" ha proporcionado
     información fidedigna y detalles generales sobre el inmueble, condiciones de adquisición, resolviendo todas

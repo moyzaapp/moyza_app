@@ -1,0 +1,217 @@
+{#
+  Inicio del agente (PLAN_DASHBOARD_INICIO.md §3.2). `home` = DashboardService.agent_home.
+  Orden de lectura (charts.md): KPIs, lo que hay que hacer hoy, tendencia, cartera.
+#}
+{% import "components/ui_macros.html" as ui %}
+{% from "dashboard/components/kpi.html" import metric_kpi %}
+{% from "dashboard/components/trend_chart.html" import trend_chart %}
+{% from "dashboard/components/notification_item.html" import notification_item %}
+{% set period_word = {'WEEKLY': 'semana', 'MONTHLY': 'mes', 'YEARLY': 'año'}[period.period_type] %}
+{% set this_period = {'WEEKLY': 'esta semana', 'MONTHLY': 'este mes', 'YEARLY': 'este año'}[period.period_type] %}
+{% set prev_period = {'WEEKLY': 'la semana anterior', 'MONTHLY': 'el mes anterior', 'YEARLY': 'el año anterior'}[period.period_type] %}
+
+{# ---------------------------------------------------------------- KPIs #}
+<section aria-labelledby="kpisTitle" class="space-y-3">
+    <h2 id="kpisTitle" class="text-xs font-semibold uppercase tracking-wide text-gray-500">
+        Mis resultados · {{ period.label }}
+    </h2>
+    <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for kpi in home.objective_kpis %}{{ metric_kpi(kpi) }}{% endfor %}
+        {% for kpi in home.activity_kpis %}{{ metric_kpi(kpi) }}{% endfor %}
+
+        {# Cumplimiento global + puesto sin nombres (decisión §6-6) #}
+        {% set c = home.completion %}
+        {% if c is not none %}
+            {% set c_tone = 'green' if c >= 100 else ('amber' if c >= 60 else 'red') %}
+            {% if home.ranking %}
+                {% set c_hint = "Estás en el puesto " ~ home.ranking.position ~ " de " ~ home.ranking.total %}
+            {% else %}
+                {% set c_hint = "Media de tus objetivos de " ~ this_period %}
+            {% endif %}
+            {{ ui.kpi_card("Cumplimiento global", c ~ " %", tone=c_tone, hint=c_hint) }}
+        {% else %}
+            {{ ui.kpi_card("Cumplimiento global", "—", tone="gray", hint="Sin objetivos " ~ this_period ~ "; los define el administrador") }}
+        {% endif %}
+    </div>
+    <p class="text-xs text-gray-500">
+        Con objetivo {{ this_period }}:
+        {% for key in home.objective_keys %}{{ {'captaciones_crm': 'captaciones', 'bajadas': 'bajadas de precio', 'cierres': 'cierres'}[key] }}{% if not loop.last %}, {% endif %}{% endfor %}.
+        La flecha compara con {{ prev_period }}.
+    </p>
+</section>
+
+{# ---------------------------------------------------------------- Novedades y hoy #}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    {% if home.show_news %}
+    <section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="newsTitle">
+        <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
+            <h2 id="newsTitle" class="text-lg font-bold text-gray-900">
+                Novedades
+                {% if home.news_unread %}<span class="ml-1 align-middle">{{ ui.badge(home.news_unread ~ (" nueva" if home.news_unread == 1 else " nuevas"), "blue") }}</span>{% endif %}
+            </h2>
+            <a href="/notifications" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Ver todas</a>
+        </header>
+        {% if home.news %}
+        <ul class="divide-y divide-gray-100">
+            {% for n in home.news %}{{ notification_item(n, n.when) }}{% endfor %}
+        </ul>
+        {% if home.news_unread %}
+        <form method="POST" action="/notifications/mark-all-read" class="px-4 sm:px-6 py-3 border-t border-gray-200">
+            <input type="hidden" name="next" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+            <button type="submit" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Marcar todas como leídas</button>
+        </form>
+        {% endif %}
+        {% else %}
+            {{ ui.empty_state("Aún no tienes novedades", "Te avisaremos aquí cuando otro agente visite tus inmuebles, te añada como acompañante o el administrador te deje una observación.") }}
+        {% endif %}
+    </section>
+    {% endif %}
+
+    <section class="bg-white rounded-2xl border border-gray-200 {% if not home.show_news %}lg:col-span-2{% endif %}" aria-labelledby="agendaTitle">
+        <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
+            <h2 id="agendaTitle" class="text-lg font-bold text-gray-900">Hoy y pendiente</h2>
+            <a href="/alerts" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Ver compradores</a>
+        </header>
+        {% set a = home.agenda %}
+        {% if a.is_empty %}
+            {{ ui.empty_state("Nada pendiente para hoy", "Cuando programes una próxima acción en un comprador, aparecerá aquí el día que toque.") }}
+        {% else %}
+        <ul class="divide-y divide-gray-100">
+            {% for item in a.due %}
+            <li>
+                <a href="/alerts/{{ item.alert_id }}" class="flex items-start gap-3 px-4 sm:px-6 py-3 hover:bg-gray-50 transition-colors">
+                    <span class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 {% if item.overdue %}bg-red-100 text-red-600{% else %}bg-amber-100 text-amber-600{% endif %}" aria-hidden="true">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+                    </span>
+                    <span class="min-w-0 flex-1">
+                        <span class="block text-sm font-medium text-gray-900 truncate">{{ item.buyer_name }}</span>
+                        <span class="block text-xs text-gray-500">Próxima acción tras «{{ item.action_label }}» · {{ item.when.strftime('%d/%m/%Y %H:%M') }}</span>
+                    </span>
+                    {% if item.overdue %}{{ ui.badge("Vencida", "red", dot=True) }}{% else %}{{ ui.badge("Hoy", "amber", dot=True) }}{% endif %}
+                </a>
+            </li>
+            {% endfor %}
+            {% if a.due_total > a.due | length %}
+            <li class="px-4 sm:px-6 py-3 text-xs text-gray-500">y {{ a.due_total - a.due | length }} más en <a href="/alerts" class="font-medium text-blue-600 hover:underline">Compradores</a></li>
+            {% endif %}
+            {% if a.unread %}
+            <li>
+                <a href="/alerts?status_filter=PENDING" class="flex items-center gap-3 px-4 sm:px-6 py-3 hover:bg-gray-50 transition-colors">
+                    <span class="w-9 h-9 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center shrink-0" aria-hidden="true">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H6.911a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661Z"/></svg>
+                    </span>
+                    <span class="flex-1 text-sm text-gray-700"><span class="font-semibold text-gray-900">{{ a.unread }}</span> {{ 'comprador nuevo sin leer' if a.unread == 1 else 'compradores nuevos sin leer' }}</span>
+                    <svg class="w-4 h-4 text-gray-400" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+                </a>
+            </li>
+            {% endif %}
+            {% if a.no_response %}
+            <li>
+                <a href="/alerts" class="flex items-center gap-3 px-4 sm:px-6 py-3 hover:bg-gray-50 transition-colors">
+                    <span class="w-9 h-9 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center shrink-0" aria-hidden="true">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 3.75 18 6m0 0 2.25 2.25M18 6l2.25-2.25M18 6l-2.25 2.25m1.5 13.5c-8.284 0-15-6.716-15-15V4.5A2.25 2.25 0 0 1 4.5 2.25h1.372c.516 0 .966.351 1.091.852l1.106 4.423c.11.44-.054.902-.417 1.173l-1.293.97a1.062 1.062 0 0 0-.38 1.21 12.035 12.035 0 0 0 7.143 7.143c.441.162.928-.004 1.21-.38l.97-1.293a1.125 1.125 0 0 1 1.173-.417l4.423 1.106c.5.125.852.575.852 1.091V19.5a2.25 2.25 0 0 1-2.25 2.25h-2.25Z"/></svg>
+                    </span>
+                    <span class="flex-1 text-sm text-gray-700"><span class="font-semibold text-gray-900">{{ a.no_response }}</span> {{ 'comprador' if a.no_response == 1 else 'compradores' }} en «Sin respuesta» desde hace más de {{ a.no_response_days }} días</span>
+                    <svg class="w-4 h-4 text-gray-400" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+                </a>
+            </li>
+            {% endif %}
+        </ul>
+        {% endif %}
+        {% if home.pending_buyers %}
+        <div class="px-4 sm:px-6 py-3 border-t border-gray-200">
+            <button type="button" data-modal-open="pendingBuyersModal" class="text-sm font-medium text-red-700 hover:text-red-800 hover:underline underline-offset-2">
+                {{ home.pending_buyers | length }} {{ 'comprador lleva' if home.pending_buyers | length == 1 else 'compradores llevan' }} más de {{ buyer_reminder_hours }} h sin gestión
+            </button>
+        </div>
+        {% endif %}
+    </section>
+</div>
+
+{# ---------------------------------------------------------------- Tendencia #}
+{{ trend_chart("agentTrend", home.trend, "Mi tendencia",
+               "Hojas de visita y contactos por semana, últimas " ~ (home.trend.labels | length) ~ " semanas",
+               kind="lines", empty_title="Aún no hay visitas ni contactos en estas semanas",
+               empty_hint="Registra tus visitas y compradores para ver aquí tu evolución.") }}
+
+{# ---------------------------------------------------------------- Cartera y observaciones #}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="portfolioTitle">
+        <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
+            <h2 id="portfolioTitle" class="text-lg font-bold text-gray-900">Mi cartera</h2>
+            <a href="/properties" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Ver propiedades</a>
+        </header>
+        {% set pf = home.portfolio %}
+        {% if not pf.total %}
+            {{ ui.empty_state("Aún no tienes propiedades en " ~ brand_name, "Las propiedades que captes aparecerán aquí con su estado.") }}
+        {% else %}
+        <div class="p-4 sm:p-6 space-y-4">
+            <div class="flex flex-wrap gap-2">
+                {% for s in pf.statuses %}{{ ui.badge(s.status ~ " · " ~ s.count, s.tone, dot=True) }}{% endfor %}
+            </div>
+            {% if pf.stale_total %}
+            <div>
+                <p class="text-sm text-gray-700">
+                    <span class="font-semibold text-amber-700">{{ pf.stale_total }}</span>
+                    {{ 'activa sin visitas' if pf.stale_total == 1 else 'activas sin visitas' }} en {{ pf.stale_days }} días
+                    <span class="text-gray-500">· candidatas a revisar precio o difusión</span>
+                </p>
+                <ul class="mt-2 divide-y divide-gray-100">
+                    {% for prop in pf.stale %}
+                    <li class="py-2 flex items-center justify-between gap-3">
+                        <a href="/properties/{{ prop.id }}" class="text-sm font-medium text-gray-900 hover:text-blue-600 truncate">{{ prop.title }}</a>
+                        {% if prop.market_entry_date %}<span class="text-xs text-gray-500 shrink-0">captada {{ prop.market_entry_date | madrid_dt('%d/%m/%Y') }}</span>{% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-500">Todas tus propiedades activas han tenido visitas en los últimos {{ pf.stale_days }} días.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="notesTitle">
+        <header class="px-4 sm:px-6 py-4 border-b border-gray-200">
+            <h2 id="notesTitle" class="text-lg font-bold text-gray-900">Observaciones del administrador</h2>
+            <p class="text-xs text-gray-500 mt-0.5">{{ period.label }}</p>
+        </header>
+        {% if home.admin_notes %}
+        <div class="p-4 sm:p-6">
+            <p class="text-sm text-gray-700 whitespace-pre-line">{{ home.admin_notes }}</p>
+        </div>
+        {% else %}
+            {{ ui.empty_state("Sin observaciones en este período", "Cuando el administrador te deje una nota sobre tu " ~ period_word ~ ", la verás aquí.") }}
+        {% endif %}
+    </section>
+</div>
+
+{# ---------------------------------------------------------------- Ventana de compradores sin atender (§3.4) #}
+{% if home.pending_buyers %}
+{% set n = home.pending_buyers | length %}
+{% call ui.modal("pendingBuyersModal", "Compradores sin atender", size="lg",
+                 subtitle=(n ~ (" comprador lleva" if n == 1 else " compradores llevan") ~ " más de " ~ buyer_reminder_hours ~ " h sin gestión")) %}
+<div data-dismiss-daily="pending_buyers_dismissed" class="p-6 space-y-4">
+    <ul class="divide-y divide-gray-100 -my-2">
+        {% for b in home.pending_buyers %}
+        <li class="py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+            <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-gray-900 truncate">{{ b.buyer_name or 'Comprador sin nombre' }}</p>
+                <p class="text-xs text-gray-500">
+                    {% if b.buyer_phone and b.buyer_phone != '—' %}<a href="tel:{{ b.buyer_phone }}" class="hover:text-blue-600">{{ b.buyer_phone }}</a> · {% endif %}
+                    <span class="font-medium text-red-700">{{ b.hours_elapsed }} h sin gestión</span>
+                </p>
+            </div>
+            {{ ui.button("Gestionar", "secondary", href="/alerts/" ~ b.alert_id, full_mobile=True) }}
+        </li>
+        {% endfor %}
+    </ul>
+    <footer class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl -mx-6 -mb-6 mt-2">
+        {{ ui.button("Lo reviso después", "primary", attrs='data-modal-close', full_mobile=True) }}
+    </footer>
+</div>
+{% endcall %}
+{% endif %}
