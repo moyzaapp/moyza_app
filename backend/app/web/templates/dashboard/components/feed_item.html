@@ -1,0 +1,22 @@
+{#
+  Evento del feed de actividad (admin) o de Novedades. `event`: dict con
+  icon, tone, title, text, when (UTC naive), href y cross (visita cruzada).
+#}
+{% import "components/ui_macros.html" as ui %}
+{% from "dashboard/components/icons.html" import icon_box %}
+
+{% macro feed_item(event) -%}
+<li>
+    <a href="{{ event.href }}" class="flex items-start gap-3 px-4 sm:px-6 py-3 hover:bg-gray-50 transition-colors">
+        {{ icon_box(event.icon, event.tone) }}
+        <span class="min-w-0 flex-1">
+            <span class="flex flex-wrap items-center gap-2">
+                <span class="text-sm font-medium text-gray-900">{{ event.title }}</span>
+                {% if event.cross %}{{ ui.badge("Visita cruzada", "blue") }}{% endif %}
+            </span>
+            {% if event.text %}<span class="block text-xs text-gray-500 mt-0.5 truncate">{{ event.text }}</span>{% endif %}
+        </span>
+        <time class="text-xs text-gray-500 shrink-0 tabular-nums" datetime="{{ event.when.isoformat() }}Z">{{ event.when | madrid_dt('%d/%m %H:%M') }}</time>
+    </a>
+</li>
+{%- endmacro %}

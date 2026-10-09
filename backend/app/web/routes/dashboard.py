@@ -4,7 +4,9 @@ El contenido depende del rol y siempre es de la empresa activa:
 
 - Agente: sus KPIs contra objetivo, agenda, cartera, tendencia y
   observaciones del admin, más el aviso de compradores sin atender.
-- Admin: indicadores del equipo (ver `_admin_context`).
+- Admin: KPIs del equipo, cumplimiento por agente, "Requiere atención",
+  actividad reciente y tendencia de 12 semanas, más el aviso de compradores
+  sin atender agrupado por agente.
 - Usuario sin ficha de agente en la empresa activa: vista mínima con aviso.
 """
 from fastapi import APIRouter
@@ -61,7 +63,7 @@ async def dashboard(
     }
 
     if admin:
-        context["view"] = "admin"
+        context.update({"view": "admin", "home": svc.admin_home(period)})
     else:
         agent = get_agent_from_user(current_user, db)
         # La ficha de agente tiene que pertenecer a la empresa activa

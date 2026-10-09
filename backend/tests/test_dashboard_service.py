@@ -250,3 +250,53 @@ def test_agenda_proxima_accion_vencida_y_sin_respuesta(ctx):
     assert agenda["due"][0]["overdue"] is True
     assert agenda["unread"] == 1
     assert agenda["no_response"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Inicio del admin (fase 3)
+# ---------------------------------------------------------------------------
+
+def test_feed_marca_la_visita_cruzada_y_no_cruza_de_empresa(ctx):
+    svc = DashboardService(ctx.db, ctx.moyza.id)
+    now = datetime.utcnow()
+    prop_carlos = _prop(ctx, ctx.moyza, ctx.carlos, title="PYTEST-DASH CARLOS PROP")
+    prop_moes = _prop(ctx, ctx.moes, ctx.laura, title="PYTEST-DASH MOES PROP")
+    _visit(ctx, prop_carlos, ctx.laura, now - timedelta(minutes=5))                       # cruzada
+    _visit(ctx, prop_carlos, ctx.laura, now - timedelta(minutes=4), companion=ctx.carlos)  # captador presente
+    _visit(ctx, prop_moes, ctx.laura, now - timedelta(minutes=3))                          # otra empresa
+
+    feed = [e for e in svc.activity_feed(now=now) if e["kind"] == "visit" and "PYTEST-DASH" in e["text"]]
+    assert len(feed) == 2
+    newest, oldest = feed
+    assert newest["cross"] is False
+    assert oldest["cross"] is True
+    assert oldest["title"] == "PYTEST-DASH LAURA visitó el inmueble de PYTEST-DASH CARLOS"
+    assert all("MOES" not in e["text"] for e in feed)
+
+
+def test_admin_home_kpis_equipo_cumplimiento_y_atencion(ctx):
+    svc = DashboardService(ctx.db, ctx.moyza.id)
+    now = datetime.utcnow()
+    week = svc.period("WEEKLY", "")
+    prop = _prop(ctx, ctx.moyza, ctx.carlos, entry=week.start + timedelta(minutes=1))
+    # Visita con acompañante: 1 para el equipo, 1 hoja para cada agente
+    _visit(ctx, prop, ctx.laura, max(week.start, now - timedelta(minutes=1)), companion=ctx.carlos)
+    _target(ctx, ctx.carlos, ctx.moyza, week, target_captaciones_crm=1, target_bajadas=2)
+
+    home = svc.admin_home(week, now=now)
+    kpis = {k.key: k for k in home["kpis"]}
+    team_visits = svc._company_visit_count(week.start, week.end)
+    assert kpis["hojas_visita"].value == team_visits
+    rows = {r["agent"].id: r for r in home["team"]}
+    carlos = rows[ctx.carlos.id]
+    capt = next(c for c in carlos["cells"] if c["key"] == "captaciones_crm")
+    assert capt["is_objective"] and capt["pct"] == 100 and capt["tone"] == "green"
+    assert carlos["completion"] == 50                    # media(100, 0)
+    assert rows[ctx.laura.id]["completion"] is None
+    # Carlos (con objetivos) va antes que Laura (sin objetivos)
+    order = [r["agent"].id for r in home["team"]]
+    assert order.index(ctx.carlos.id) < order.index(ctx.laura.id)
+    # Laura no tiene objetivos en la semana en curso
+    missing = [i for i in home["attention"] if i["icon"] == "flag"]
+    assert missing
+    assert ctx.laura.id not in svc.team_targets([ctx.laura.id, ctx.carlos.id], week)
