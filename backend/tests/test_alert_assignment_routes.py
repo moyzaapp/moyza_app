@@ -400,3 +400,63 @@ def test_nota_de_reasignacion_no_permite_cerrar(data):
 
     status, _, headers = admin.post(f"/alerts/{alert_id}/complete", {})
     assert "al menos un seguimiento" in _flash(headers).get("message", "")
+
+
+# ---------------------------------------------------------------------------
+# Fase 4: agente de la otra empresa (decisión §4-1 B)
+# ---------------------------------------------------------------------------
+
+def test_agente_solo_moes_recibe_alerta_moyza(data):
+    from app.models.agent import Agent
+    from app.models.user import User
+
+    admin = _Client(ADMIN_EMAIL, "MOYZA")
+    name = f"{TAG} PARA MOES"
+
+    # El formulario avisa antes de enviar: la opción lleva sus empresas
+    status, body, _ = admin.get("/alerts")
+    assert f'data-companies="{data["moes_id"]}">{TAG} MOES</option>' in body
+
+    status, _, headers = _create(admin, data["property_id"], name, agent_id=data["moes"])
+    flash = _flash(headers)
+    assert flash.get("category") == "success" and f"{TAG} MOES ahora tiene acceso a MOYZA" in flash["message"]
+
+    db = _session()
+    agent = db.get(Agent, data["moes"])
+    assert {c.code for c in agent.companies} == {"MOYZA", "MOES"}
+    user = db.query(User).filter(User.email == EMAIL.format("moes")).one()
+    assert [c.code for c in user.companies] == ["MOES"]   # basta la ficha de agente
+    [alert] = _alerts_of_buyer(db, name)
+    db.close()
+
+    # Con MOES activa: banner con el cambio de empresa, y la alerta no sale en la lista
+    moes_view = _Client(EMAIL.format("moes"), "MOES")
+    status, body, _ = moes_view.get("/alerts")
+    assert status == 200 and "Tienes 1 comprador asignado en MOYZA" in body
+    assert 'action="/switch-company"' in body and 'name="code" value="MOYZA"' in body
+    assert name not in body
+    # El aviso in-app vive en MOYZA: con MOES activa no está en la campana
+    assert f"Te han asignado un comprador: {name}" not in moes_view.get("/dashboard")[1]
+
+    # Puede cambiar a MOYZA
+    status, _, headers = moes_view.post("/switch-company", {"code": "MOYZA", "next": "/alerts"})
+    assert status == 303 and "active_company=MOYZA" in headers.get("set-cookie", "")
+
+    # Con MOYZA activa: ve y trabaja su alerta, la campana tiene el aviso y no el banner
+    moyza_view = _Client(EMAIL.format("moes"), "MOYZA")
+    status, body, _ = moyza_view.get("/alerts")
+    assert status == 200 and name in body and "comprador asignado en" not in body
+    # Solo sus alertas: no ve las de otros agentes de MOYZA
+    assert f"{TAG} DEFECTO" not in body and f"{TAG} OTRO CON MOTIVO" not in body
+    assert moyza_view.get(f"/alerts/{alert.id}")[0] == 200
+    status, _, headers = moyza_view.post(f"/alerts/{alert.id}/follow-up", {
+        "action_type": "PRIMERA_LLAMADA", "notes": "Llamada desde MOES",
+    })
+    assert _flash(headers).get("category") == "success"
+    assert f"Te han asignado un comprador: {name}" in moyza_view.get("/dashboard")[1]
+
+    # Una alerta de MOYZA de otro agente sigue fuera de su alcance
+    db = _session()
+    [other] = _alerts_of_buyer(db, f"{TAG} DEFECTO")
+    db.close()
+    assert moyza_view.get(f"/alerts/{other.id}")[0] == 302

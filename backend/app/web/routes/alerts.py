@@ -345,6 +345,25 @@ async def alerts_page(
     property_types = filter_values["property_types"]
     business_types = filter_values["business_types"]
 
+    # Alertas abiertas del agente en sus OTRAS empresas (PLAN_ASIGNACION_ALERTAS.md
+    # §2.6): una alerta asignada en otra empresa no aparece aquí, así que se
+    # avisa con un banner para que cambie de empresa.
+    other_company_alerts = []
+    if not admin_view and agent:
+        for other in getattr(request.state, "allowed_companies", None) or []:
+            if other.id == company.id:
+                continue
+            count = (
+                scope_alerts(db.query(PropertyAlert.id), other.id)
+                .filter(
+                    PropertyAlert.agent_id == agent.id,
+                    PropertyAlert.status.in_(OPEN_ALERT_STATUSES),
+                )
+                .count()
+            )
+            if count:
+                other_company_alerts.append({"company": other, "count": count})
+
     # Calcular alertas bloqueadas y etapa actual de cada alerta
     locked_alert_ids = set()
     if not is_admin(current_user):
@@ -389,6 +408,7 @@ async def alerts_page(
             "completed_count": completed_count,
             "agents": agents,
             "assignable_groups": assignable_groups,
+            "other_company_alerts": other_company_alerts,
             "locked_alert_ids": locked_alert_ids,
             "alert_stages": alert_stages,
             "is_admin": is_admin(current_user),

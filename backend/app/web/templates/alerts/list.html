@@ -49,6 +49,23 @@
             </div>
         </div>
 
+        <!-- Compradores asignados en otra empresa (agente): no salen en este listado -->
+        {% for item in other_company_alerts %}
+        <div class="mb-6">
+            {% call ui.banner(
+                "Tienes " ~ item.count ~ (" comprador asignado" if item.count == 1 else " compradores asignados") ~ " en " ~ item.company.name,
+                tone="blue",
+                text="Este listado solo muestra " ~ brand_name ~ ". Cambia de empresa para atenderlos."
+            ) %}
+            <form method="post" action="/switch-company">
+                <input type="hidden" name="code" value="{{ item.company.code }}">
+                <input type="hidden" name="next" value="/alerts">
+                {{ ui.button("Cambiar a " ~ item.company.name, "secondary", type="submit", extra="px-3 py-2 text-xs border-blue-300 text-blue-800") }}
+            </form>
+            {% endcall %}
+        </div>
+        {% endfor %}
+
         <!-- Stats Cards -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             <div class="bg-white rounded-xl border border-gray-200 p-6">
