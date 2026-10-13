@@ -50,6 +50,8 @@ from app.services.alert_duplicate_service import (
     new_contact_note,
     append_note,
 )
+from app.services import alert_assignment_service as assignment
+from app.services.alert_assignment_service import AlertAssignmentError
 from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, get_agent_from_user, require_admin_role
 from app.web.dependencies.company import get_active_company
@@ -288,8 +290,11 @@ async def alerts_page(
     # Agentes para el formulario de creación (solo admin). Las propiedades no se
     # precargan: el formulario las busca por /alerts/search-properties.
     agents = []
+    assignable_groups = []
     if is_admin(current_user):
         agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
+        # "Agente asignado" del alta y de la reasignación: todas las empresas (§4-1 B)
+        assignable_groups = assignment.assignable_agents(db, company.id)
 
     buyers = visible_buyers_query(db, current_user, company.id).order_by(Buyer.name.asc()).all()
 
@@ -366,6 +371,7 @@ async def alerts_page(
             "in_progress_count": in_progress_count,
             "completed_count": completed_count,
             "agents": agents,
+            "assignable_groups": assignable_groups,
             "locked_alert_ids": locked_alert_ids,
             "alert_stages": alert_stages,
             "is_admin": is_admin(current_user),
@@ -642,8 +648,8 @@ async def search_properties(
 
     Devuelve como máximo PROPERTY_SEARCH_LIMIT coincidencias por título,
     dirección o ciudad. Admin y agentes: solo expone título, dirección,
-    ciudad y agente (los mismos datos que "Resto de propiedades"), nunca el
-    propietario.
+    ciudad y agente (nombre e id, para preseleccionarlo en "Agente asignado"),
+    nunca el propietario. Las propiedades sin captador solo las ve el admin.
 
     NOTA: debe declararse antes de /alerts/{alert_id}, o FastAPI intentaría
     resolver "search-properties" como un id y devolvería 422.
@@ -656,22 +662,20 @@ async def search_properties(
 
     like = f"%{term}%"
 
-    properties = (
-        scope_properties(db.query(Property), get_active_company(request).id)
-        .filter(
-            Property.status != PropertyStatus.ARCHIVED,
-            Property.available_clause(),
-            Property.agent_id.isnot(None),
-            or_(
-                Property.title.ilike(like),
-                Property.address.ilike(like),
-                Property.city.ilike(like),
-            ),
-        )
-        .order_by(Property.title.asc())
-        .limit(PROPERTY_SEARCH_LIMIT)
-        .all()
+    query = scope_properties(db.query(Property), get_active_company(request).id).filter(
+        Property.status != PropertyStatus.ARCHIVED,
+        Property.available_clause(),
+        or_(
+            Property.title.ilike(like),
+            Property.address.ilike(like),
+            Property.city.ilike(like),
+        ),
     )
+    # Propiedad sin captador: solo el admin, que puede elegir el agente (§4-7)
+    if not is_admin(request.state.user):
+        query = query.filter(Property.agent_id.isnot(None))
+
+    properties = query.order_by(Property.title.asc()).limit(PROPERTY_SEARCH_LIMIT).all()
 
     results = [
         {
@@ -680,6 +684,7 @@ async def search_properties(
             "address": p.address or "",
             "city": p.city or "",
             "agent": p.agent.name if p.agent else "",
+            "agent_id": p.agent_id,
         }
         for p in properties
     ]
@@ -834,12 +839,18 @@ async def create_alert(
     business_type: str = Form(None),
     confirm_duplicate: str = Form(None),
     confirm_new_buyer: str = Form(None),
+    agent_id: str = Form(None),
+    assignment_reason: str = Form(None),
     db: Session = Depends(get_db)
 ):
     """Crear nueva alerta con comprador existente o nuevo (admin y agentes).
 
-    La alerta se asigna siempre al agente de la propiedad, la cree quien la
-    cree. El agente solo puede usar compradores a los que tiene acceso.
+    Agente asignado (PLAN_ASIGNACION_ALERTAS.md §2.1): por defecto el captador
+    de la propiedad. Solo el admin puede elegir otro (`agent_id`, de cualquier
+    empresa; si no pertenece a la de la propiedad se le da acceso) con un
+    motivo opcional; también puede crearla sobre una propiedad sin captador si
+    elige agente. Un agente que manda otro `agent_id` recibe un error. El
+    agente solo puede usar compradores a los que tiene acceso.
 
     Validación de duplicados:
     - Comprador existente: si ya hay una alerta abierta para ese comprador y
@@ -923,10 +934,19 @@ async def create_alert(
         set_flash(response, "error", "La propiedad está marcada como No disponible")
         return response
 
-    if not property_item.agent_id:
+    admin_view = is_admin(current_user)
+    try:
+        assignee = assignment.resolve_assignee(
+            is_admin_user=admin_view,
+            requested_agent_id=agent_id,
+            owner_agent_id=property_item.agent_id,
+            lookup_any_agent=assignment.lookup_any_agent(db),
+        )
+    except AlertAssignmentError as error:
         db.rollback()
-        response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "error", "La propiedad no tiene agente asignado")
+        back_url = f"/buyers/{buyer_id}" if buyer_id else "/alerts"
+        response = RedirectResponse(url=back_url, status_code=302)
+        set_flash(response, "error", str(error))
         return response
 
     # Duplicados: solo aplica a compradores existentes (uno nuevo no tiene alertas)
@@ -949,9 +969,9 @@ async def create_alert(
             message = append_note(message, duplicate_note(existing))
 
     try:
+        now = datetime.utcnow()
         alert = PropertyAlert(
-            property_id=property_id,
-            agent_id=property_item.agent_id,
+            property=property_item,
             buyer_id=buyer.id,
             lead_name=buyer.name,
             lead_phone=buyer.phone,
@@ -962,22 +982,37 @@ async def create_alert(
             priority=priority,
             business_type=business_type or None,
             status=AlertStatus.PENDING,
+            created_at=now,
             created_by=current_user.id
         )
 
         db.add(alert)
+        result = assignment.assign(
+            db,
+            alert,
+            assignee,
+            current_user,
+            assignment_reason if admin_view else None,
+            is_new=True,
+            now=now,
+        )
         db.commit()
 
         response = RedirectResponse(url="/alerts", status_code=302)
-        own_agent = None if is_admin(current_user) else get_agent_from_user(current_user, db)
-        if own_agent and property_item.agent_id != own_agent.id:
+        own_agent = None if admin_view else get_agent_from_user(current_user, db)
+        if own_agent and assignee.id != own_agent.id:
             # La alerta va al agente de la propiedad: no aparecerá en la lista de quien la creó
             set_flash(
                 response,
                 "success",
-                f"Alerta creada para {buyer.name} y asignada a {property_item.agent.name}, "
+                f"Alerta creada para {buyer.name} y asignada a {assignee.name}, "
                 "agente de la propiedad"
             )
+        elif admin_view:
+            message = f"Alerta creada para {buyer.name} y asignada a {assignee.name}"
+            if result.granted_company is not None:
+                message += f". {assignee.name} ahora tiene acceso a {result.granted_company.name}"
+            set_flash(response, "success", message)
         else:
             set_flash(response, "success", f"Alerta de comprador creada para {buyer.name}")
         return response
@@ -1472,6 +1507,9 @@ async def buyer_detail(
 
     agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
 
+    # "Agente asignado" del formulario rápido: solo el admin elige (§4-2)
+    assignable_groups = assignment.assignable_agents(db, company.id) if is_admin(current_user) else []
+
     # Para el agente: su propia ficha (las propiedades de otros agentes se
     # muestran como recomendadas pero sin enlace al detalle, que incluye
     # datos del propietario).
@@ -1497,6 +1535,7 @@ async def buyer_detail(
             "own_agent": own_agent,
             "buyer_alerts": buyer_alerts,
             "agents": agents,
+            "assignable_groups": assignable_groups,
             "zones": zones,
             "cities": cities,
             "property_types": property_types,

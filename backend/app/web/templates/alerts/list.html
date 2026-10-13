@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "alerts/assign_fields.html" import assign_fields with context %}
 
 {% block title %}Compradores - {{ brand_name }}{% endblock %}
 
@@ -494,11 +495,11 @@
 </div>
 
 <!-- Modal: Agregar Alerta de Comprador -->
-<div id="createAlertModal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+<div id="createAlertModal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="createAlertModalTitle">
     <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <form method="POST" action="/alerts/create" id="createAlertForm">
             <div class="p-6 border-b border-gray-200">
-                <h2 class="text-2xl font-bold text-gray-800">Agregar alerta de comprador</h2>
+                <h2 id="createAlertModalTitle" class="text-2xl font-bold text-gray-800">Agregar alerta de comprador</h2>
             </div>
 
             <div class="p-6 space-y-5">
@@ -621,6 +622,9 @@
                     </div>
                 </div>
 
+                <!-- Agente asignado: aparece al elegir la propiedad (el admin puede cambiarlo) -->
+                {{ assign_fields("ca", groups=assignable_groups, is_admin=is_admin) }}
+
                 <!-- Aviso: ya existe una alerta para este comprador y esta propiedad -->
                 <div id="dupBanner" class="hidden"></div>
                 <input type="hidden" name="confirm_duplicate" id="confirmDuplicate">
@@ -686,6 +690,7 @@
 </div>
 
 <script src="/static/js/alert-duplicates.js"></script>
+<script src="/static/js/alert-assign.js"></script>
 <script>
 
 // ---- Modales ----
@@ -702,6 +707,10 @@ function openCreateAlertModal() {
 function closeCreateAlertModal() {
     document.getElementById('createAlertModal').classList.add('hidden');
 }
+document.addEventListener('keydown', function (e) {
+    var modal = document.getElementById('createAlertModal');
+    if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) closeCreateAlertModal();
+});
 function openFilterAlertModal() {
     document.getElementById('filterAlertModal').classList.remove('hidden');
     setFcBuyerMode('existing');
@@ -905,6 +914,7 @@ function setBuyerMode(mode) {
     const selectedTitle = document.getElementById('propertySelectedTitle');
     const selectedMeta = document.getElementById('propertySelectedMeta');
     const form = document.getElementById('createAlertForm');
+    const assign = window.AlertAssign ? AlertAssign.init('ca') : null;
 
     let timer = null;
     let items = [];
@@ -938,7 +948,7 @@ function setBuyerMode(mode) {
             return '<li data-index="' + i + '" class="property-option px-4 py-2 cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0">'
                 + '<p class="text-sm font-medium text-gray-800">' + escapeHtml(p.title) + '</p>'
                 + (meta ? '<p class="text-xs text-gray-500">' + escapeHtml(meta) + '</p>' : '')
-                + (p.agent ? '<p class="text-xs text-gray-400">Agente: ' + escapeHtml(p.agent) + '</p>' : '')
+                + '<p class="text-xs text-gray-500">' + (p.agent ? 'Agente: ' + escapeHtml(p.agent) : 'Sin agente captador') + '</p>'
                 + '</li>';
         }).join('');
         list.classList.remove('hidden');
@@ -960,11 +970,13 @@ function setBuyerMode(mode) {
         selectedMeta.textContent = [property.address, property.city].filter(Boolean).join(' · ');
         selected.classList.remove('hidden');
         hideResults();
+        if (assign) assign.setOwner(property.agent_id, property.agent);
         if (window.alertDupRefresh) window.alertDupRefresh();
     }
 
     window.clearPropertySelection = function () {
         hidden.value = '';
+        if (assign) assign.clear();
         selected.classList.add('hidden');
         input.classList.remove('hidden');
         input.value = '';

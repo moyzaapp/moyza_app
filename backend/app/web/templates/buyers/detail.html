@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "alerts/assign_fields.html" import assign_fields with context %}
 
 {% block title %}{{ buyer.name }} - Comprador - {{ brand_name }}{% endblock %}
 
@@ -435,9 +436,12 @@
                             {% endif %}
                         </div>
 
-                        <!-- Botón crear alerta (admin y agentes; la alerta va al agente de la propiedad) -->
+                        <!-- Botón crear alerta (admin y agentes; por defecto va al agente de la propiedad
+                             y solo el admin puede elegir otro) -->
                         <button
                             data-prop-id="{{ prop.id }}"
+                            data-prop-agent-id="{{ prop.agent_id or '' }}"
+                            data-prop-agent-name="{{ prop.agent.name if prop.agent else '' }}"
                             data-prop-title="{{ prop.title | e }}"
                             data-prop-meta="{{ [prop.address, prop.city, prop.zona] | select | join(' · ') | e }}"
                             onclick="openQuickAlertModal(this)"
@@ -538,15 +542,15 @@
 </div>
 
 <!-- Modal: Crear alerta rápida desde propiedad compatible -->
-<div id="quickAlertModal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full">
+<div id="quickAlertModal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="quickAlertModalTitle">
+    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[92vh] overflow-y-auto">
         <form method="POST" action="/alerts/create" id="quickAlertForm">
             <input type="hidden" name="buyer_id" value="{{ buyer.id }}">
             <input type="hidden" name="property_id" id="qaPropertyId">
             <input type="hidden" name="confirm_duplicate" id="qaConfirmDuplicate">
 
             <div class="p-6 border-b border-gray-200">
-                <h2 class="text-xl font-bold text-gray-800">Crear alerta de comprador</h2>
+                <h2 id="quickAlertModalTitle" class="text-xl font-bold text-gray-800">Crear alerta de comprador</h2>
             </div>
 
             <div class="p-6 space-y-4">
@@ -576,6 +580,9 @@
                         <p class="text-xs text-gray-500" id="qaPropertyMeta"></p>
                     </div>
                 </div>
+
+                <!-- Agente asignado (el admin puede cambiarlo; el agente solo lo ve) -->
+                {{ assign_fields("qa", groups=assignable_groups, is_admin=is_admin) }}
 
                 <!-- Origen -->
                 <div>
@@ -709,14 +716,17 @@
 </div>
 
 <script src="/static/js/alert-duplicates.js"></script>
+<script src="/static/js/alert-assign.js"></script>
 <script>
 var qaDupRequest = 0;
+var qaAssign = window.AlertAssign ? AlertAssign.init('qa') : null;
 
 function openQuickAlertModal(btn) {
     var propertyId = btn.dataset.propId;
     document.getElementById('qaPropertyId').value = propertyId;
     document.getElementById('qaPropertyTitle').textContent = btn.dataset.propTitle;
     document.getElementById('qaPropertyMeta').textContent = btn.dataset.propMeta;
+    if (qaAssign) qaAssign.setOwner(btn.dataset.propAgentId, btn.dataset.propAgentName);
 
     // Estado limpio y consulta de alertas ya registradas para este comprador y propiedad
     var banner = document.getElementById('qaDupBanner');
@@ -747,6 +757,10 @@ function openQuickAlertModal(btn) {
 function closeQuickAlertModal() {
     document.getElementById('quickAlertModal').classList.add('hidden');
 }
+document.addEventListener('keydown', function (e) {
+    var modal = document.getElementById('quickAlertModal');
+    if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) closeQuickAlertModal();
+});
 
 function switchDetailTab(tab) {
     var panels = {
