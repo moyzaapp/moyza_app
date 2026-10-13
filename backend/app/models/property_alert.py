@@ -6,6 +6,7 @@ from sqlalchemy import String
 from sqlalchemy import Text
 from sqlalchemy import DateTime
 from sqlalchemy import ForeignKey
+from sqlalchemy import Index
 
 from sqlalchemy.orm import relationship
 
@@ -15,6 +16,15 @@ from app.db.base import Base
 class PropertyAlert(Base):
 
     __tablename__ = "property_alerts"
+
+    # Índices para el listado /alerts y la cola de cada agente
+    # (migración w6x7y8z9a0b1_add_alert_indexes)
+    __table_args__ = (
+        Index("ix_property_alerts_property_id", "property_id"),
+        Index("ix_property_alerts_buyer_id", "buyer_id"),
+        Index("ix_property_alerts_status", "status"),
+        Index("ix_property_alerts_agent_id_status", "agent_id", "status"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 
