@@ -11,8 +11,9 @@ Reglas:
 - Los avisos nacen de un evento ya guardado: `safe_notify` confirma en su
   propia transacción y, si falla, lo registra en el log sin romper el flujo.
 
-Catálogo v1 (decisión §6-3). `target_reached`, `period_closed` y
-`alert_assigned` quedan para después; el admin no tiene campana en v1.
+Catálogo v1 (decisión §6-3). `target_reached` y `period_closed` quedan para
+después; el admin no tiene campana en v1. `alert_assigned` llega con
+PLAN_ASIGNACION_ALERTAS.md §2.4 (lo emite `alert_assignment_service`).
 """
 import logging
 from datetime import datetime
@@ -48,6 +49,7 @@ class NotificationKind:
     VISIT_SHEET_SEND_FAILED = "visit_sheet_send_failed"
     FOLLOW_UP_DUE = "follow_up_due"
     ADMIN_NOTE_ADDED = "admin_note_added"
+    ALERT_ASSIGNED = "alert_assigned"
 
     # Icono (dashboard/components/icons.html) y tono por tipo
     STYLES = {
@@ -57,6 +59,7 @@ class NotificationKind:
         VISIT_SHEET_SEND_FAILED: ("chat", "red"),
         FOLLOW_UP_DUE: ("clock", "amber"),
         ADMIN_NOTE_ADDED: ("chat", "gray"),
+        ALERT_ASSIGNED: ("user", "blue"),
     }
 
     @classmethod

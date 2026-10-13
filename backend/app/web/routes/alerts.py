@@ -229,8 +229,15 @@ async def alerts_page(
     current_user = request.state.user
     company = get_active_company(request)
 
-    # Base query: solo alertas de propiedades de la empresa activa
-    base_query = scope_alerts(db.query(PropertyAlert).join(Property).join(Agent), company.id)
+    # Base query: solo alertas de propiedades de la empresa activa. El JOIN con
+    # agentes va por el agente de la ALERTA (no el captador de la propiedad):
+    # property_alerts tiene dos FK a agents y la propiedad puede no tener captador.
+    base_query = scope_alerts(
+        db.query(PropertyAlert)
+        .join(Property, Property.id == PropertyAlert.property_id)
+        .join(Agent, Agent.id == PropertyAlert.agent_id),
+        company.id,
+    )
 
     # Si es agente, filtrar solo sus alertas
     if not is_admin(current_user):

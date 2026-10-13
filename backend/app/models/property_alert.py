@@ -106,15 +106,61 @@ class PropertyAlert(Base):
         nullable=True
     )
 
+    # Asignación (PLAN_ASIGNACION_ALERTAS.md §2.3). `agent_id` es el agente que
+    # trabaja la alerta; puede no ser el captador de la propiedad. Las alertas
+    # anteriores a la asignación manual tienen assigned_at = created_at y
+    # assigned_by = created_by.
+    assigned_by = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    assigned_at = Column(
+        DateTime,
+        nullable=True
+    )
+
+    previous_agent_id = Column(
+        Integer,
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    assignment_reason = Column(
+        String,
+        nullable=True
+    )
+
     # Relaciones
     property = relationship(
         "Property",
         backref="alerts"
     )
 
+    # `foreign_keys` explícito: property_alerts tiene dos FK a agents
     agent = relationship(
         "Agent",
+        foreign_keys=[agent_id],
         backref="alerts"
+    )
+
+    previous_agent = relationship(
+        "Agent",
+        foreign_keys=[previous_agent_id]
+    )
+
+    assigned_by_user = relationship(
+        "User",
+        foreign_keys=[assigned_by]
+    )
+
+    assignment_logs = relationship(
+        "AlertAssignmentLog",
+        back_populates="alert",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="AlertAssignmentLog.created_at.desc(), AlertAssignmentLog.id.desc()"
     )
 
     buyer = relationship(
