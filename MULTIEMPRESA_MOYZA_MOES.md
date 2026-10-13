@@ -144,7 +144,8 @@ docker exec moyza_backend python -m pytest tests/test_visit_agents.py -q
 Detalle en `PLAN_VISITAS_AGENTES.md`. Cualquier agente puede registrar
 visitas en cualquier propiedad disponible de la empresa activa; la visita
 guarda quién la hizo (`property_visits.agent_id`) y un acompañante opcional
-(`companion_agent_id`). Ambos deben ser agentes de la empresa activa.
+(`companion_agent_id`). El principal debe ser agente de la empresa activa; el
+acompañante puede ser de cualquier empresa (cambio del 2026-10-09, commit a78f721).
 
 - Listado `/visits` del agente: visitas en las que participó y las que otros
   hicieron a sus propiedades.
