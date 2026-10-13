@@ -1,185 +1,60 @@
+{% import "components/ui_macros.html" as ui %}
 {% from 'components/company_macros.html' import company_checkboxes %}
-<!-- Modal: editar usuario -->
-<div id="userEditModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl w-full max-w-[500px] max-h-[90vh] overflow-y-auto p-4 sm:p-6 lg:p-8">
 
-        <div class="flex items-center justify-between mb-4 sm:mb-6">
-            <h2 class="text-xl sm:text-2xl font-bold">
-                Editar Usuario
-            </h2>
-            <button
-                onclick="closeUserEditModal()"
-                class="text-gray-400 hover:text-gray-600 px-2 rounded-lg hover:bg-gray-100"
-            >
-                &#10005;
-            </button>
+<!-- Modal: editar usuario -->
+{% call ui.modal("userEditModal", "Editar usuario", size="lg") %}
+<form id="userEditForm" action="/auth/users/update" method="POST" data-once>
+    <input type="hidden" name="user_id" id="edit_user_id">
+
+    <div class="p-6 space-y-4">
+        {{ ui.field("edit_email_display", "Email", type="email", attrs="disabled", help="El email no se puede modificar: es el usuario de acceso.") }}
+        {{ ui.field("full_name", "Nombre completo", required=True, id="edit_full_name", attrs='autocomplete="name"') }}
+
+        <div>
+            <label for="edit_role_id" class="block text-sm font-medium text-gray-700 mb-1">Rol <span class="text-red-500" aria-hidden="true">*</span></label>
+            <select id="edit_role_id" name="role_id" required class="{{ ui.input_class }}">
+                {% for role in roles %}
+                <option value="{{ role.id }}">{{ role.name }}</option>
+                {% endfor %}
+            </select>
         </div>
 
-        <form id="userEditForm" action="/auth/users/update" method="POST">
-            <input type="hidden" name="user_id" id="edit_user_id">
+        {{ ui.field("phone", "Teléfono", type="tel", optional_label=True, id="edit_phone", placeholder="+34 600 000 000", attrs='autocomplete="tel" inputmode="tel"') }}
 
-            <div class="mb-3 sm:mb-4">
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Email
-                </label>
-                <input
-                    type="email"
-                    id="edit_email_display"
-                    disabled
-                    class="w-full border border-gray-200 rounded-xl p-2 sm:p-3 bg-gray-100 text-gray-500 text-sm sm:text-base"
-                >
-                <p class="mt-1 text-xs text-gray-400">
-                    El email no se puede modificar: es el usuario de acceso.
-                </p>
-            </div>
-
-            <div class="mb-3 sm:mb-4">
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Nombre Completo
-                </label>
-                <input
-                    type="text"
-                    id="edit_full_name"
-                    name="full_name"
-                    required
-                    class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                >
-            </div>
-
-            <div class="mb-3 sm:mb-4">
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Rol
-                </label>
-                <select
-                    id="edit_role_id"
-                    name="role_id"
-                    required
-                    class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                >
-                    {% for role in roles %}
-                    <option value="{{ role.id }}">{{ role.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="mb-3 sm:mb-4">
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Teléfono <span class="text-gray-400 font-normal">(opcional)</span>
-                </label>
-                <input
-                    type="tel"
-                    id="edit_phone"
-                    name="phone"
-                    class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                    placeholder="+51 999 999 999"
-                >
-            </div>
-
-            <div class="mb-4 sm:mb-6">
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Empresas
-                </label>
-                {{ company_checkboxes(all_companies, [], 'edit') }}
-                <p class="mt-2 text-xs text-gray-400">
-                    Si es agente, su ficha de agente queda en las mismas empresas.
-                </p>
-            </div>
-
-            <div class="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3">
-                <button
-                    type="button"
-                    onclick="closeUserEditModal()"
-                    class="w-full sm:w-auto px-4 sm:px-5 py-2 sm:py-3 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm sm:text-base"
-                >
-                    Cancelar
-                </button>
-                <button
-                    type="submit"
-                    class="w-full sm:w-auto px-4 sm:px-5 py-2 sm:py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm sm:text-base"
-                >
-                    Guardar
-                </button>
-            </div>
-        </form>
+        <div>
+            <span class="block text-sm font-medium text-gray-700 mb-1">Empresas</span>
+            {{ company_checkboxes(all_companies, [], 'edit') }}
+            <p class="mt-2 text-xs text-gray-500">Si es agente, su ficha de agente queda en las mismas empresas.</p>
+        </div>
     </div>
-</div>
+
+    {{ ui.modal_footer() }}
+</form>
+{% endcall %}
 
 
 <!-- Modal: cambiar contraseña -->
-<div id="userPasswordModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-2xl w-full max-w-[500px] max-h-[90vh] overflow-y-auto p-4 sm:p-6 lg:p-8">
+{% call ui.modal("userPasswordModal", "Cambiar contraseña", size="md") %}
+<form id="userPasswordForm" action="/auth/users/password" method="POST" data-once>
+    <input type="hidden" name="user_id" id="pwd_user_id">
 
-        <div class="flex items-center justify-between mb-4 sm:mb-6">
-            <h2 class="text-xl sm:text-2xl font-bold">
-                Cambiar Contraseña
-            </h2>
-            <button
-                onclick="closeUserPasswordModal()"
-                class="text-gray-400 hover:text-gray-600 px-2 rounded-lg hover:bg-gray-100"
-            >
-                &#10005;
-            </button>
-        </div>
-
-        <p class="mb-4 text-sm text-gray-600">
-            Nueva contraseña para <strong id="pwd_user_name"></strong>.
+    <div class="p-6 space-y-4">
+        <p class="text-sm text-gray-600">
+            Nueva contraseña para <strong id="pwd_user_name" class="text-gray-900"></strong>.
             Se le enviará por correo automáticamente.
         </p>
 
-        <form id="userPasswordForm" action="/auth/users/password" method="POST">
-            <input type="hidden" name="user_id" id="pwd_user_id">
+        {{ ui.field("password", "Nueva contraseña", type="password", required=True, id="pwd_password", placeholder="Mínimo 6 caracteres", attrs='minlength="6" autocomplete="new-password"') }}
 
-            <div class="mb-3 sm:mb-4">
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Nueva Contraseña
-                </label>
-                <input
-                    type="password"
-                    id="pwd_password"
-                    name="password"
-                    required
-                    minlength="6"
-                    class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                    placeholder="Mínimo 6 caracteres"
-                >
-            </div>
-
-            <div class="mb-4 sm:mb-6">
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Confirmar Contraseña
-                </label>
-                <input
-                    type="password"
-                    id="pwd_password_confirm"
-                    name="password_confirm"
-                    required
-                    minlength="6"
-                    class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                    placeholder="Repite la contraseña"
-                >
-                <p id="pwd_mismatch" class="mt-1 text-xs text-red-600 hidden">
-                    Las contraseñas no coinciden.
-                </p>
-            </div>
-
-            <div class="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3">
-                <button
-                    type="button"
-                    onclick="closeUserPasswordModal()"
-                    class="w-full sm:w-auto px-4 sm:px-5 py-2 sm:py-3 rounded-xl bg-gray-100 hover:bg-gray-200 text-sm sm:text-base"
-                >
-                    Cancelar
-                </button>
-                <button
-                    type="submit"
-                    class="w-full sm:w-auto px-4 sm:px-5 py-2 sm:py-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm sm:text-base"
-                >
-                    Cambiar Contraseña
-                </button>
-            </div>
-        </form>
+        <div>
+            {{ ui.field("password_confirm", "Confirmar contraseña", type="password", required=True, id="pwd_password_confirm", placeholder="Repite la contraseña", attrs='minlength="6" autocomplete="new-password"') }}
+            <p id="pwd_mismatch" class="mt-1 text-xs text-red-600 hidden" role="alert">Las contraseñas no coinciden.</p>
+        </div>
     </div>
-</div>
+
+    {{ ui.modal_footer(submit_label="Cambiar contraseña", submit_variant="warning") }}
+</form>
+{% endcall %}
 
 
 <script>
@@ -193,15 +68,11 @@ function editUser(id, fullName, email, phone, companyIds, roleId) {
     setCompanyChecks("edit", companyIds)
     document.getElementById("edit_role_id").value = roleId
 
-    const modal = document.getElementById("userEditModal")
-    modal.classList.remove("hidden")
-    modal.classList.add("flex")
+    UI.openModal("userEditModal")
 }
 
 function closeUserEditModal() {
-    const modal = document.getElementById("userEditModal")
-    modal.classList.remove("flex")
-    modal.classList.add("hidden")
+    UI.closeModal("userEditModal")
 }
 
 function openUserPasswordModal(id, fullName) {
@@ -211,15 +82,11 @@ function openUserPasswordModal(id, fullName) {
     document.getElementById("pwd_user_id").value = id
     document.getElementById("pwd_user_name").textContent = fullName
 
-    const modal = document.getElementById("userPasswordModal")
-    modal.classList.remove("hidden")
-    modal.classList.add("flex")
+    UI.openModal("userPasswordModal")
 }
 
 function closeUserPasswordModal() {
-    const modal = document.getElementById("userPasswordModal")
-    modal.classList.remove("flex")
-    modal.classList.add("hidden")
+    UI.closeModal("userPasswordModal")
 }
 
 // Aviso inmediato si las contraseñas no coinciden (el servidor lo revalida)
@@ -230,6 +97,7 @@ document.getElementById("userPasswordForm").addEventListener("submit", function 
     if (password !== confirm) {
         event.preventDefault()
         document.getElementById("pwd_mismatch").classList.remove("hidden")
+        document.getElementById("pwd_password_confirm").focus()
     }
 })
 </script>

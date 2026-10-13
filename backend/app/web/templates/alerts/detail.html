@@ -316,14 +316,15 @@
 {% if can_reassign %}
 <!-- Modal Reasignar (solo admin, alertas abiertas) -->
 {% call ui.modal("reassignModal", "Reasignar alerta", size="lg", subtitle=alert.lead_name ~ " · " ~ alert.property.title) %}
-<form method="POST" action="/alerts/{{ alert.id }}/reassign" class="p-6 space-y-4" data-once data-loading-text="Reasignando…">
+<form method="POST" action="/alerts/{{ alert.id }}/reassign" data-once data-loading-text="Reasignando…">
     <input type="hidden" name="next" value="/alerts/{{ alert.id }}">
-    {{ assign_fields("ra", groups=assignable_groups, is_admin=True, mode="reassign") }}
-    <p class="text-sm text-gray-500">La alerta volverá a Pendiente y sin leer para el nuevo agente, que recibirá un aviso. Los seguimientos se conservan.</p>
+    <div class="p-6 space-y-4">
+        {{ assign_fields("ra", groups=assignable_groups, is_admin=True, mode="reassign") }}
+        <p class="text-sm text-gray-500">La alerta volverá a Pendiente y sin leer para el nuevo agente, que recibirá un aviso. Los seguimientos se conservan.</p>
+    </div>
     {{ ui.modal_footer(submit_label="Reasignar") }}
 </form>
 {% endcall %}
-<script src="/static/js/ui.js"></script>
 <script src="/static/js/alert-assign.js"></script>
 <script>
 (function () {
@@ -334,75 +335,51 @@
 {% endif %}
 
 <!-- Modal Agregar Seguimiento -->
-<div id="followUpModal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-        <form method="POST" action="/alerts/{{ alert.id }}/follow-up">
-            <div class="p-6 border-b border-gray-200">
-                <h2 class="text-2xl font-bold text-gray-800">Agregar Seguimiento</h2>
-            </div>
+{% call ui.modal("followUpModal", "Agregar seguimiento", size="lg", subtitle=alert.lead_name ~ " · " ~ alert.property.title) %}
+<form method="POST" action="/alerts/{{ alert.id }}/follow-up" data-once>
+    <div class="p-6 space-y-4">
+        <div>
+            <label for="followUpActionType" class="block text-sm font-medium text-gray-700 mb-1">Etapa de seguimiento <span class="text-red-500" aria-hidden="true">*</span></label>
+            <select id="followUpActionType" name="action_type" required class="{{ ui.input_class }}" aria-describedby="followUpActionHelp">
+                <optgroup label="Seguimiento">
+                    {% for value, label in FollowUpActionType.progression_stages() %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </optgroup>
+                <optgroup label="Cierre (completa la alerta)">
+                    {% for value, label in FollowUpActionType.closing_stages() %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </optgroup>
+            </select>
+            <p id="followUpActionHelp" class="text-xs text-gray-500 mt-1">Las opciones de cierre completan la alerta automáticamente.</p>
+        </div>
 
-            <div class="p-6 space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Etapa de Seguimiento</label>
-                    <select name="action_type" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                        <optgroup label="Seguimiento">
-                            {% for value, label in FollowUpActionType.progression_stages() %}
-                            <option value="{{ value }}">{{ label }}</option>
-                            {% endfor %}
-                        </optgroup>
-                        <optgroup label="Cierre (completa la alerta)">
-                            {% for value, label in FollowUpActionType.closing_stages() %}
-                            <option value="{{ value }}">{{ label }}</option>
-                            {% endfor %}
-                        </optgroup>
-                    </select>
-                    <p class="text-xs text-gray-500 mt-1">Las opciones de cierre completan la alerta automáticamente.</p>
-                </div>
+        <div>
+            <label for="followUpNotes" class="block text-sm font-medium text-gray-700 mb-1">
+                Notas <span id="notesRequired" class="text-red-500 hidden" aria-hidden="true">*</span>
+            </label>
+            <textarea id="followUpNotes" name="notes" rows="4" class="{{ ui.input_class }} resize-y"
+                placeholder="Describe qué ocurrió en este seguimiento"></textarea>
+            <p id="notesHint" class="text-xs text-gray-500 mt-1 hidden">Obligatorio al cerrar la alerta.</p>
+        </div>
 
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        Notas <span id="notesRequired" class="text-red-500 hidden">*</span>
-                    </label>
-                    <textarea id="followUpNotes" name="notes" rows="4"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                        placeholder="Describe qué ocurrió en este seguimiento..."></textarea>
-                    <p id="notesHint" class="text-xs text-gray-500 mt-1 hidden">Obligatorio al cerrar la alerta.</p>
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Fecha Próxima Acción (Opcional)</label>
-                    <input type="datetime-local" name="next_action_date" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                </div>
-            </div>
-
-            <div class="p-6 border-t border-gray-200 flex gap-3 justify-end">
-                <button
-                    type="button"
-                    onclick="closeFollowUpModal()"
-                    class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                >
-                    Cancelar
-                </button>
-                <button
-                    type="submit"
-                    class="px-4 py-2 text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
-                >
-                    Guardar Seguimiento
-                </button>
-            </div>
-        </form>
+        {{ ui.field("next_action_date", "Fecha de la próxima acción", type="datetime-local", optional_label=True, id="followUpNextDate") }}
     </div>
-</div>
+
+    {{ ui.modal_footer(submit_label="Guardar seguimiento") }}
+</form>
+{% endcall %}
 
 <script>
 const CLOSING_STAGES = new Set(['CERRADO', 'SIN_INTERES', 'SIN_SOLVENCIA_ECONOMICA']);
 
 function openFollowUpModal() {
-    document.getElementById('followUpModal').classList.remove('hidden');
+    UI.openModal('followUpModal');
 }
 
 function closeFollowUpModal() {
-    document.getElementById('followUpModal').classList.add('hidden');
+    UI.closeModal('followUpModal');
 }
 
 (function () {

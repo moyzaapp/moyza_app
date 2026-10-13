@@ -1,238 +1,80 @@
-<div
-    id="agentModal"
-    class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 p-2 sm:p-4"
->
+{% import "components/ui_macros.html" as ui %}
+{% from 'components/company_macros.html' import company_checkboxes %}
 
-    <div class="bg-white rounded-2xl w-full max-w-[500px] max-h-[95vh] overflow-y-auto p-4 sm:p-6 lg:p-8">
+{# Modal crear / editar agente. Se abre con openModal() / editAgent(...) desde la tabla. #}
+{% call ui.modal("agentModal", "Nuevo agente", size="lg") %}
+<form id="agentForm" action="/agents/create" method="POST" data-once>
+    <input type="hidden" name="agent_id" id="agent_id">
 
-        <div class="flex items-center justify-between mb-3 sm:mb-4 lg:mb-6">
+    <div class="p-6 space-y-4">
+        {{ ui.field("name", "Nombre", required=True, attrs='autocomplete="name"') }}
+        {{ ui.field("email", "Correo", type="email", optional_label=True, attrs='autocomplete="email"') }}
 
-            <h2 class="text-lg sm:text-xl lg:text-2xl font-bold">
-                Agente
-            </h2>
-
-            <button
-                onclick="closeModal()"
-                class="text-gray-400 hover:text-gray-600 transition-colors text-xl sm:text-2xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100"
-            >
-                ✕
-            </button>
-
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {{ ui.field("dni", "DNI", optional_label=True) }}
+            {{ ui.field("phone", "Teléfono", type="tel", optional_label=True, attrs='autocomplete="tel" inputmode="tel"') }}
         </div>
 
-        <form
-            id="agentForm"
-            action="/agents/create"
-            method="POST"
-        >
+        {{ ui.field("zone", "Zona", optional_label=True) }}
 
-            <input
-                type="hidden"
-                name="agent_id"
-                id="agent_id"
-            >
+        <div>
+            <span class="block text-sm font-medium text-gray-700 mb-1">Empresas</span>
+            {{ company_checkboxes(all_companies, [active_company.id] if active_company else [], 'agent') }}
+            <p class="mt-2 text-xs text-gray-500">El agente aparece en los listados de las empresas marcadas.</p>
+        </div>
 
-            <div class="mb-3 sm:mb-4">
-
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Nombre
-                </label>
-
-                <input
-                    type="text"
-                    id="name"
-                    name="name"
-                    class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                    required
-                >
-
+        <!-- Firma registrada (solo en edición, si existe) -->
+        <div id="signaturePreviewArea" class="hidden">
+            <span class="block text-sm font-medium text-gray-700 mb-1">Firma registrada</span>
+            <div class="border border-gray-200 rounded-xl p-4 bg-gray-50">
+                <img id="signaturePreviewImage" src="" alt="Firma del agente" class="max-w-full h-auto mx-auto" style="max-height: 100px;">
             </div>
-
-            <div class="mb-3 sm:mb-4">
-
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Correo <span class="text-gray-400 font-normal">(opcional)</span>
-                </label>
-
-                <input
-                    type="email"
-                    id="email"
-                    name="email"
-                    class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                >
-
-            </div>
-
-            <div class="mb-3 sm:mb-4">
-
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    DNI <span class="text-gray-400 font-normal">(opcional)</span>
-                </label>
-
-                <input
-                    type="text"
-                    id="dni"
-                    name="dni"
-                    class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                >
-
-            </div>
-
-            <div class="mb-3 sm:mb-4">
-
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Teléfono <span class="text-gray-400 font-normal">(opcional)</span>
-                </label>
-
-                <input
-                    type="text"
-                    id="phone"
-                    name="phone"
-                    class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                >
-
-            </div>
-
-            <div class="mb-3 sm:mb-4">
-
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Zona <span class="text-gray-400 font-normal">(opcional)</span>
-                </label>
-
-                <input
-                    type="text"
-                    id="zone"
-                    name="zone"
-                    class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                >
-
-            </div>
-
-            <div class="mb-3 sm:mb-4">
-
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Empresas
-                </label>
-
-                {% from 'components/company_macros.html' import company_checkboxes %}
-                {{ company_checkboxes(all_companies, [active_company.id] if active_company else [], 'agent') }}
-
-                <p class="mt-2 text-xs text-gray-400">
-                    El agente aparece en los listados de las empresas marcadas.
-                </p>
-
-            </div>
-
-            <!-- Área para mostrar firma registrada (solo en modo edición) -->
-            <div id="signaturePreviewArea" class="mb-4 sm:mb-6 hidden">
-
-                <label class="block mb-1 sm:mb-2 text-xs sm:text-sm font-medium text-gray-700">
-                    Firma Registrada
-                </label>
-
-                <div class="border-2 border-gray-200 rounded-xl p-4 bg-gray-50">
-                    <img
-                        id="signaturePreviewImage"
-                        src=""
-                        alt="Firma del agente"
-                        class="max-w-full h-auto mx-auto"
-                        style="max-height: 100px;"
-                    >
-                </div>
-
-                <p class="text-xs text-gray-500 mt-2">
-                    Registrada el: <span id="signatureDate"></span>
-                </p>
-
-            </div>
-
-            <div class="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3">
-
-                <button
-                    type="button"
-                    onclick="closeModal()"
-                    class="w-full sm:w-auto px-4 sm:px-5 py-2 sm:py-3 rounded-xl bg-gray-100 hover:bg-gray-200 transition-colors text-sm sm:text-base"
-                >
-                    Cancelar
-                </button>
-
-                <button
-                    type="submit"
-                    class="w-full sm:w-auto px-4 sm:px-5 py-2 sm:py-3 rounded-xl bg-black hover:bg-gray-800 text-white transition-colors text-sm sm:text-base"
-                >
-                    Guardar
-                </button>
-
-            </div>
-
-        </form>
-
+            <p class="text-xs text-gray-500 mt-2">Registrada el <span id="signatureDate"></span></p>
+        </div>
     </div>
 
-</div>
+    {{ ui.modal_footer() }}
+</form>
+{% endcall %}
 
 <script>
-
 function openModal() {
-
-    document.getElementById("agentForm").reset()
-
-    document.getElementById("agentForm")
-        .action = "/agents/create"
-
+    const form = document.getElementById("agentForm")
+    form.reset()
+    form.action = "/agents/create"
     document.getElementById("agent_id").value = ""
+    document.getElementById("agentModalTitle").textContent = "Nuevo agente"
 
     // Por defecto, el nuevo agente pertenece a la empresa activa
     setCompanyChecks("agent", [{{ active_company.id if active_company else 'null' }}])
 
-    // Ocultar área de firma
     document.getElementById("signaturePreviewArea").classList.add("hidden")
-
-    const modal = document.getElementById("agentModal")
-
-    modal.classList.remove("hidden")
-    modal.classList.add("flex")
+    UI.openModal("agentModal")
 }
 
-
 function editAgent(id, name, email, dni, phone, zone, companyIds, signaturePath, signatureDate) {
-
     openModal()
-
     document.getElementById("agent_id").value = id
-
     document.getElementById("name").value = name
-
     document.getElementById("email").value = email
-
     document.getElementById("dni").value = dni || ""
-
     document.getElementById("phone").value = phone || ""
-
     document.getElementById("zone").value = zone || ""
-
     setCompanyChecks("agent", companyIds)
 
-    // Mostrar firma si existe
     if (signaturePath) {
         document.getElementById("signaturePreviewArea").classList.remove("hidden")
         document.getElementById("signaturePreviewImage").src = "/" + signaturePath
-        document.getElementById("signatureDate").textContent = signatureDate || "Fecha no disponible"
+        document.getElementById("signatureDate").textContent = signatureDate || "fecha no disponible"
     } else {
         document.getElementById("signaturePreviewArea").classList.add("hidden")
     }
 
-    document.getElementById("agentForm")
-        .action = "/agents/update"
+    document.getElementById("agentForm").action = "/agents/update"
+    document.getElementById("agentModalTitle").textContent = "Editar agente"
 }
-
 
 function closeModal() {
-
-    const modal = document.getElementById("agentModal")
-
-    modal.classList.remove("flex")
-    modal.classList.add("hidden")
+    UI.closeModal("agentModal")
 }
-
 </script>

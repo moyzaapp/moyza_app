@@ -1,86 +1,5 @@
-{% if error == "email_exists" %}
-
-<div
-    id="errorModal"
-    class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
->
-
-    <div class="bg-white rounded-2xl p-6 sm:p-8 w-full max-w-[400px]">
-
-        <h2 class="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-red-600">
-            Error
-        </h2>
-
-        <p class="text-sm sm:text-base text-gray-700 mb-4 sm:mb-6">
-
-            Ya existe un cliente con ese correo.
-
-        </p>
-
-        <div class="flex justify-end">
-
-            <button
-                onclick="window.location.href='/clients'"
-                class="bg-black hover:bg-gray-800 text-white px-4 sm:px-5 py-2 sm:py-3 rounded-xl transition-colors text-sm sm:text-base"
-            >
-                Entendido
-            </button>
-
-        </div>
-
-    </div>
-
-</div>
-
-{% endif %}
-
-{% if error == "in_use" %}
-
-<div
-    id="errorModal"
-    class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
->
-
-    <div class="bg-white rounded-2xl p-6 sm:p-8 w-full max-w-[400px]">
-
-        <h2 class="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-red-600">
-            Error
-        </h2>
-
-        <p class="text-sm sm:text-base text-gray-700 mb-4 sm:mb-6">
-
-            No se puede eliminar el cliente porque tiene propiedades asociadas.
-
-        </p>
-
-        <div class="flex justify-end">
-
-            <button
-                onclick="closeErrorModal()"
-                class="bg-black hover:bg-gray-800 text-white px-4 sm:px-5 py-2 sm:py-3 rounded-xl transition-colors text-sm sm:text-base"
-            >
-                Entendido
-            </button>
-
-        </div>
-
-    </div>
-
-</div>
-
-<script>
-
-function closeErrorModal() {
-
-    window.location.href = "/clients"
-    
-}
-
-</script>
-
-{% endif %}
-
 {% extends 'base.html' %}
+{% import "components/ui_macros.html" as ui %}
 
 {% block title %}
 Clientes
@@ -124,6 +43,27 @@ Clientes
 
 {% include 'clients/form.html' %}
 
+{% endif %}
+
+{# Errores devueltos por el servidor tras guardar o eliminar (llegan por ?error=) #}
+{% if error in ["email_exists", "in_use"] %}
+{% call ui.modal("errorModal", "No se pudo completar la acción", size="md") %}
+<div class="p-6">
+    <p class="text-sm text-gray-700">
+        {% if error == "email_exists" %}
+            Ya existe un cliente con ese correo.
+        {% else %}
+            No se puede eliminar el cliente porque tiene propiedades asociadas.
+        {% endif %}
+    </p>
+</div>
+<footer class="{{ ui.modal_footer_class }}">
+    {{ ui.button("Entendido", "primary", href="/clients", full_mobile=True) }}
+</footer>
+{% endcall %}
+<script>
+document.addEventListener('DOMContentLoaded', function () { UI.openModal('errorModal'); });
+</script>
 {% endif %}
 
 {% endblock %}

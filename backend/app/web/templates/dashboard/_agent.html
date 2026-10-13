@@ -194,7 +194,8 @@
 {% set n = home.pending_buyers | length %}
 {% call ui.modal("pendingBuyersModal", "Compradores sin atender", size="lg",
                  subtitle=(n ~ (" comprador lleva" if n == 1 else " compradores llevan") ~ " más de " ~ buyer_reminder_hours ~ " h sin gestión")) %}
-<div data-dismiss-daily="pending_buyers_dismissed" class="p-6 space-y-4">
+<div data-dismiss-daily="pending_buyers_dismissed">
+    <div class="p-6">
     <ul class="divide-y divide-gray-100 -my-2">
         {% for b in home.pending_buyers %}
         <li class="py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
@@ -209,7 +210,8 @@
         </li>
         {% endfor %}
     </ul>
-    <footer class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl -mx-6 -mb-6 mt-2">
+    </div>
+    <footer class="{{ ui.modal_footer_class }}">
         {{ ui.button("Lo reviso después", "primary", attrs='data-modal-close', full_mobile=True) }}
     </footer>
 </div>

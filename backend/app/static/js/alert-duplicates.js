@@ -188,7 +188,7 @@ window.AlertDuplicates = (function () {
     // ---- Botón de envío ---------------------------------------------------
 
     var FORCE_CLASSES = ['bg-amber-600', 'hover:bg-amber-700'];
-    var NORMAL_CLASSES = ['bg-blue-600', 'hover:bg-blue-700'];
+    var NORMAL_CLASSES = ['bg-gray-900', 'hover:bg-gray-800'];
 
     /**
      * Cambia el botón de envío a modo "forzar" (texto y color ámbar) y marca

@@ -27,7 +27,7 @@ INFO_RULES = {"heroicon-stroke-2", "tab-styles", "focus-ring"}
 RULES = [
     # (id, regex, mensaje, por qué)
     ("primary-color",
-     r"\b(bg-black|bg-blue-600|bg-indigo-600|bg-gray-800)\b(?=[^>]*\b(hover:bg-|text-white)\b)",
+     r"(?<![:\w-])(bg-black|bg-blue-600|bg-indigo-600|bg-gray-800)\b(?=[^>\"]*\b(hover:bg-|text-white)\b)",
      "botón con color fuera del sistema; el primario es bg-gray-900",
      "Hoy conviven negro, azul, índigo y gris-800 como botón principal."),
     ("yellow-vs-amber",

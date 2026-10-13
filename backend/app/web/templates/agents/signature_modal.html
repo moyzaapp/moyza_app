@@ -1,76 +1,22 @@
-<!-- Modal para firma del agente -->
-<div
-    id="signatureModal"
-    class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4 hidden"
->
-    <div class="bg-white rounded-2xl p-4 sm:p-6 lg:p-8 w-full max-w-[600px] max-h-[95vh] overflow-y-auto">
+{% import "components/ui_macros.html" as ui %}
 
-        <div class="flex items-center justify-between mb-3 sm:mb-4">
-            <h2 class="text-base sm:text-lg lg:text-xl font-bold text-gray-800">
-                Firma: <span id="agentNameDisplay" class="text-blue-600"></span>
-            </h2>
-            <button
-                type="button"
-                onclick="closeSignatureModal()"
-                class="text-gray-400 hover:text-gray-600 transition-colors text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100"
-            >
-                ✕
-            </button>
-        </div>
+<!-- Modal para firma del agente. Se abre con openSignatureModal(id, nombre) desde la tabla. -->
+{% call ui.modal("signatureModal", "Firma del agente", size="2xl", subtitle=" ", subtitle_id="agentNameDisplay") %}
+<div class="p-6 space-y-3">
+    <p class="text-sm text-gray-600">Dibuja tu firma. Se incluirá en todos los informes de visita.</p>
 
-        <p class="text-xs sm:text-sm text-gray-600 mb-3 sm:mb-4">
-            Dibuja tu firma. Se incluirá en todos los informes de visita.
-        </p>
-
-        <!-- Canvas para dibujar la firma -->
-        <div class="mb-3 sm:mb-4">
-            <div class="border-2 border-gray-300 rounded-lg bg-gray-50">
-                <canvas
-                    id="signatureCanvas"
-                    width="552"
-                    height="200"
-                    class="cursor-crosshair w-full touch-none"
-                    style="touch-action: none;"
-                ></canvas>
-            </div>
-            <p class="text-xs text-gray-500 mt-2">
-                💡 Usa tu dedo o stylus en móvil, mouse en escritorio
-            </p>
-        </div>
-
-        <!-- Botones de acción -->
-        <div class="flex flex-col sm:flex-row gap-2 sm:gap-3">
-
-            <button
-                type="button"
-                onclick="clearSignature()"
-                class="w-full sm:w-auto bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2.5 rounded-lg transition-colors text-sm font-medium order-3 sm:order-1"
-            >
-                🗑️ Limpiar
-            </button>
-
-            <div class="flex gap-2 sm:gap-3 sm:ml-auto order-1 sm:order-2">
-                <button
-                    type="button"
-                    onclick="closeSignatureModal()"
-                    class="flex-1 sm:flex-none bg-white border-2 border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-lg transition-colors text-sm font-medium"
-                >
-                    Cancelar
-                </button>
-
-                <button
-                    type="button"
-                    onclick="saveSignature()"
-                    class="flex-1 sm:flex-none bg-black hover:bg-gray-800 text-white px-4 py-2.5 rounded-lg transition-colors text-sm font-medium"
-                >
-                    ✓ Guardar
-                </button>
-            </div>
-
-        </div>
-
+    <div class="border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 overflow-hidden">
+        <canvas id="signatureCanvas" width="552" height="200" class="cursor-crosshair w-full touch-none block" style="touch-action: none;" aria-label="Área para dibujar la firma"></canvas>
     </div>
+    <p class="text-xs text-gray-500">Usa el dedo o un lápiz táctil en el móvil, o el ratón en el ordenador.</p>
+
+    <p id="signatureError" class="text-xs text-red-600 hidden" role="alert"></p>
 </div>
+
+{% call ui.modal_footer(submit_label="Guardar firma", submit_type="button", submit_attrs='onclick="saveSignature()"') %}
+    {{ ui.button("Limpiar", "secondary", attrs='onclick="clearSignature()"', full_mobile=True) }}
+{% endcall %}
+{% endcall %}
 
 <script>
     let signatureCanvas;
@@ -103,20 +49,28 @@
         signatureCanvas.addEventListener('touchend', stopDrawing);
     });
 
+    function showSignatureError(text) {
+        const el = document.getElementById('signatureError');
+        el.textContent = text || '';
+        el.classList.toggle('hidden', !text);
+    }
+
     function openSignatureModal(agentId, agentName) {
         currentAgentId = agentId;
         document.getElementById('agentNameDisplay').textContent = agentName;
-        document.getElementById('signatureModal').classList.remove('hidden');
+        showSignatureError('');
+        UI.openModal('signatureModal');
         clearSignature();
     }
 
     function closeSignatureModal() {
-        document.getElementById('signatureModal').classList.add('hidden');
+        UI.closeModal('signatureModal');
         currentAgentId = null;
     }
 
     function clearSignature() {
         signatureCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+        showSignatureError('');
     }
 
     function getMousePos(canvas, evt) {
@@ -192,7 +146,7 @@
 
     async function saveSignature() {
         if (!currentAgentId) {
-            alert('Error: No se ha seleccionado ningún agente');
+            showSignatureError('No se ha seleccionado ningún agente.');
             return;
         }
 
@@ -201,7 +155,7 @@
         const isEmpty = !imageData.data.some(channel => channel !== 0);
 
         if (isEmpty) {
-            alert('Por favor, dibuja tu firma antes de guardar');
+            showSignatureError('Dibuja tu firma antes de guardar.');
             return;
         }
 

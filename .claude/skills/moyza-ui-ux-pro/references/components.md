@@ -123,38 +123,60 @@ macro `status_badge` en lugar de un `if/elif` en cada plantilla.
 
 ## Modal
 
-```html
-<div id="editModal" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
-    <div class="absolute inset-0 bg-gray-900/50" data-modal-close></div>
-    <div class="relative min-h-full flex items-end sm:items-center justify-center p-0 sm:p-4">
-        <div class="bg-white w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-xl">
-            <header class="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200">
-                <h2 id="editModalTitle" class="text-lg font-bold text-gray-900">Editar cliente</h2>
-                <button type="button" data-modal-close aria-label="Cerrar" class="w-9 h-9 -mr-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center">
-                    <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
-                </button>
-            </header>
-            <form method="POST" action="..." class="p-6 space-y-4">
-                ...
-                <footer class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-4 border-t border-gray-200 -mx-6 -mb-6 px-6 py-4 bg-gray-50 rounded-b-2xl">
-                    <button type="button" data-modal-close class="BTN-SECUNDARIO w-full sm:w-auto">Cancelar</button>
-                    <button type="submit" class="BTN-PRIMARIO w-full sm:w-auto">Guardar</button>
-                </footer>
-            </form>
-        </div>
+Usa siempre el macro (`components/ui_macros.html`, instalado en el proyecto). No escribas
+el contenedor a mano: la anatomía resuelve el problema que tenían los modales antiguos en
+el móvil (cabecera y pie dentro del scroll, Cancelar escondido al final, teclado tapando
+el pie).
+
+```jinja
+{% import "components/ui_macros.html" as ui %}
+
+{% call ui.modal("clientModal", "Nuevo cliente", size="lg", subtitle="Datos básicos") %}
+<form id="clientForm" method="POST" action="/clients/create" data-once>
+    <div class="p-6 space-y-4">              {# ← SOLO esto scrollea #}
+        {{ ui.field("name", "Nombre", required=True) }}
+        {{ ui.field("phone", "Teléfono", type="tel") }}
     </div>
-</div>
+    {{ ui.modal_footer() }}                  {# ← pie fijo: Cancelar + Guardar #}
+</form>
+{% endcall %}
 ```
 
-JS: `assets/ui.js` expone `UI.openModal('editModal')` y `UI.closeModal('editModal')`,
-cierra con Escape y con clic en `[data-modal-close]`, mueve el foco al primer control y lo
-devuelve al botón que lo abrió. Tamaños: `sm:max-w-md` (confirmación), `sm:max-w-lg`
-(formulario corto), `sm:max-w-2xl` (formulario largo), `sm:max-w-4xl` (propiedades).
-En móvil el modal sale pegado abajo (`items-end`, `rounded-t-2xl`) como una hoja: se
-alcanza con el pulgar.
+Lo que hace el macro:
 
-Mientras no se adopte `ui.js`, el mínimo es: `role="dialog"`, `aria-modal`, `hidden`
-alternado con `flex` (no ambos a la vez) y Escape.
+- **Móvil**: hoja pegada al borde inferior, a todo el ancho, barra de arrastre arriba y
+  esquinas redondeadas solo arriba. Arrastrar la cabecera hacia abajo la cierra.
+  **Escritorio**: centrada, `sm:max-w-{size}`.
+- Alto máximo `92dvh` (alto real de pantalla, el teclado no lo rompe). El panel es
+  `flex flex-col`: cabecera y pie `shrink-0`, cuerpo `flex-1 overflow-y-auto`.
+- `role="dialog" aria-modal aria-labelledby`, X con `aria-label="Cerrar"`.
+- Cierra con Escape, con la X, con el fondo y con cualquier `[data-modal-close]`.
+- Al abrir, en escritorio enfoca el `[autofocus]` o el primer campo; en táctil enfoca el
+  panel (no abre el teclado solo). Al cerrar devuelve el foco a quien lo abrió.
+- Pie con `pb-[env(safe-area-inset-bottom)]` para iPhones con barra inferior.
+
+Parámetros: `size` = `md | lg | xl | 2xl | 3xl | 4xl` (confirmación · formulario corto ·
+formulario medio · alerta · filtro · propiedades); `subtitle`; `subtitle_id` si el
+subtítulo se cambia por JS.
+
+`modal_footer(submit_label, cancel_label, submit_variant, submit_id, submit_attrs, submit_type)`.
+Con `call` admite un botón extra a la izquierda:
+
+```jinja
+{% call ui.modal_footer(submit_label="Guardar firma", submit_type="button", submit_attrs='onclick="saveSignature()"') %}
+    {{ ui.button("Limpiar", "secondary", attrs='onclick="clearSignature()"', full_mobile=True) }}
+{% endcall %}
+```
+
+Sin formulario (lista, aviso): `<div class="p-6">…</div><footer class="{{ ui.modal_footer_class }}">…</footer>`.
+
+Abrir: `UI.openModal('clientModal', this)` desde JS, o `data-modal-open="clientModal"` en
+el botón sin JS. El título se puede cambiar con `document.getElementById('clientModalTitle')`.
+
+`ui.js` se carga una vez en `base.html` (en `<head>`). No lo incluyas en las páginas.
+
+Un modal que aparece al cargar (error devuelto por el servidor): renderízalo con el macro y
+ábrelo en `DOMContentLoaded` (ver `clients/home.html`).
 
 ## Formulario
 
@@ -172,6 +194,10 @@ alternado con `flex` (no ambos a la vez) y Escape.
 </div>
 ```
 
+- Con el macro: `ui.field(name, label, type, value, required, placeholder, help, error, attrs, optional_label, id)`
+  y `ui.select(name, label, options, value, required, empty, help, error, attrs, id)`. `id`
+  solo cuando el JS heredado espera un id distinto del `name`. Para controles a mano,
+  `class="{{ ui.input_class }}"`.
 - `id` + `for` siempre. Opcional se marca con `<span class="text-gray-400 font-normal">(opcional)</span>` solo si la mayoría de campos son obligatorios; si no, marca los obligatorios con `*`.
 - `select` y `textarea` con las mismas clases. `textarea` con `rows="3"` y `resize-y`.
 - Agrupa en `grid grid-cols-1 sm:grid-cols-2 gap-4`; campos largos con `sm:col-span-2`.
