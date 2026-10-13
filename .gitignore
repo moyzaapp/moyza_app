@@ -80,3 +80,9 @@ test.py
 *.png
 # Claude Code: configuración local por máquina
 .claude/settings.local.json
+
+# --- Tailwind ---
+# CSS compilado: lo genera el build de Docker o backend/scripts/build_css.sh (ver TAILWIND_BUILD.md)
+backend/app/static/css/tailwind.css
+# Binario standalone de Tailwind descargado por build_css.sh
+backend/.cache/

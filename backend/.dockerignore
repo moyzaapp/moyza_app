@@ -1,0 +1,9 @@
+# Archivos que no se envían al contexto de build de Docker.
+# Ojo: .env NO se excluye a propósito (hoy va dentro de la imagen).
+.git
+**/__pycache__
+**/*.pyc
+# Binario de Tailwind descargado por scripts/build_css.sh (la imagen lo descarga en su propia etapa)
+.cache
+.pytest_cache
+tests
