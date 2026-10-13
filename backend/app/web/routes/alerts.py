@@ -67,6 +67,73 @@ OPEN_ALERT_STATUSES = [AlertStatus.PENDING, AlertStatus.IN_PROGRESS]
 # Máximo de sugerencias devueltas por el autocompletado de propiedades
 PROPERTY_SEARCH_LIMIT = 15
 
+# Paginación de /alerts (PLAN_PAGINACION_ALERTAS.md): un solo tamaño de página
+# para la tabla de alertas y la de compradores, recordado en una cookie.
+PAGE_SIZES = (50, 100, 200, 300)
+DEFAULT_PAGE_SIZE = 100
+PER_PAGE_COOKIE = "alerts_per_page"
+PER_PAGE_COOKIE_MAX_AGE = 365 * 24 * 60 * 60  # 1 año
+
+
+def normalize_per_page(value) -> int:
+    """Tamaño de página válido: uno de PAGE_SIZES; cualquier otra cosa → 100."""
+    try:
+        per_page = int(str(value).strip())
+    except (TypeError, ValueError):
+        return DEFAULT_PAGE_SIZE
+    return per_page if per_page in PAGE_SIZES else DEFAULT_PAGE_SIZE
+
+
+def paginate_params(page, per_page, total) -> dict:
+    """Aritmética de paginación, sin base de datos.
+
+    `page` puede llegar como texto de la query string: si no es numérico o es
+    menor que 1 se usa la 1, y si pasa de la última se usa la última (nunca
+    error). `start`/`end` son posiciones 1-based para "Mostrando start–end de
+    total" (0–0 cuando no hay resultados).
+    """
+    per_page = normalize_per_page(per_page)
+    try:
+        page = int(str(page).strip())
+    except (TypeError, ValueError):
+        page = 1
+    total = max(int(total or 0), 0)
+
+    pages = max((total + per_page - 1) // per_page, 1)
+    page = min(max(page, 1), pages)
+    offset = (page - 1) * per_page
+
+    return {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": pages,
+        "offset": offset,
+        "start": offset + 1 if total else 0,
+        "end": min(offset + per_page, total),
+        "has_prev": page > 1,
+        "has_next": page < pages,
+    }
+
+
+def effective_alert_statuses(status_filter, q) -> Optional[list]:
+    """Estados que filtra realmente el listado de alertas.
+
+    - Con estados marcados: esos (solo los válidos, sin repetir).
+    - Sin estados y sin texto (vista por defecto): Pendiente y En proceso.
+    - Sin estados y con texto: None (busca en todos los estados, para que un
+      comprador con la alerta ya completada también aparezca).
+    """
+    valid = []
+    for status in status_filter or []:
+        if AlertStatus.is_valid(status) and status not in valid:
+            valid.append(status)
+    if valid:
+        return valid
+    if q and q.strip():
+        return None
+    return list(OPEN_ALERT_STATUSES)
+
 
 def _property_filter_values(db: Session, company_id: int) -> dict:
     """Valores distintos (zona, ciudad, tipo, operación) de las propiedades de la empresa."""
@@ -244,9 +311,19 @@ async def alerts_page(
     q: str = Query(default=""),
     status_filter: List[str] = Query(default=[]),
     agent_id: Optional[str] = Query(default=None),
+    # Paginación: se reciben como texto para que un valor no numérico vaya a
+    # la página 1 / tamaño por defecto en vez de devolver un 422
+    page: Optional[str] = Query(default=None),
+    per_page: Optional[str] = Query(default=None),
+    b_q: str = Query(default=""),
+    b_page: Optional[str] = Query(default=None),
     db: Session = Depends(get_db)
 ):
-    """Lista de alertas - Admin ve todas, agentes solo las suyas"""
+    """Lista de alertas - Admin ve todas, agentes solo las suyas.
+
+    Las dos tablas (alertas y compradores) se paginan en servidor: los
+    filtros se aplican sobre todo el conjunto y luego se corta la página.
+    """
 
     current_user = request.state.user
     company = get_active_company(request)
@@ -282,22 +359,52 @@ async def alerts_page(
             )
         )
 
-    # Filtro por estado (multi-select)
-    valid_status_filters = [s for s in status_filter if AlertStatus.is_valid(s)]
-    if valid_status_filters:
-        base_query = base_query.filter(PropertyAlert.status.in_(valid_status_filters))
-
     # Filtro por agente (solo admin; agentes ya están filtrados por su propio id)
     agent_id_int = int(agent_id) if agent_id and agent_id.strip() else None
     if agent_id_int and admin_view:
         base_query = base_query.filter(PropertyAlert.agent_id == agent_id_int)
 
-    # Ordenar por prioridad y fecha. Propiedad y agente se rellenan con el JOIN
-    # que ya hace la consulta, y los seguimientos se cargan todos en una
-    # segunda consulta: sin esto se hacía una consulta por alerta al pintar
-    # la tabla (N+1).
-    alerts = (
+    # Contar alertas por estado (una sola consulta agrupada) ANTES del filtro
+    # de estado y sin paginar: las tarjetas muestran los totales reales bajo
+    # los filtros de texto y agente, marque el usuario los estados que marque.
+    status_counts = dict(
         base_query
+        .with_entities(PropertyAlert.status, func.count(PropertyAlert.id))
+        .group_by(PropertyAlert.status)
+        .all()
+    )
+    pending_count = status_counts.get(AlertStatus.PENDING, 0)
+    in_progress_count = status_counts.get(AlertStatus.IN_PROGRESS, 0)
+    completed_count = status_counts.get(AlertStatus.COMPLETED, 0)
+
+    # Filtro por estado (multi-select). Sin estados marcados y sin texto se
+    # muestran solo las abiertas; sin estados y con texto, todas.
+    valid_status_filters = [s for s in status_filter if AlertStatus.is_valid(s)]
+    effective_statuses = effective_alert_statuses(status_filter, q)
+    default_status_view = not valid_status_filters and not (q and q.strip())
+    filtered_query = base_query
+    if effective_statuses:
+        filtered_query = filtered_query.filter(PropertyAlert.status.in_(effective_statuses))
+
+    # Tamaño de página: el explícito de la URL manda (y se recuerda en una
+    # cookie); si no llega, el de la cookie; si tampoco, 100.
+    per_page_explicit = per_page is not None and per_page.strip() != ""
+    per_page_value = normalize_per_page(
+        per_page if per_page_explicit else request.cookies.get(PER_PAGE_COOKIE)
+    )
+
+    # Total filtrado. Los JOIN a Property y Agent son N:1 (una fila por alerta),
+    # así que contar PropertyAlert.id no se multiplica.
+    total_alerts = filtered_query.with_entities(func.count(PropertyAlert.id)).scalar() or 0
+    alert_pagination = paginate_params(page, per_page_value, total_alerts)
+
+    # Ordenar por prioridad y fecha (el id solo desempata para que la
+    # paginación sea estable). Propiedad y agente se rellenan con el JOIN
+    # que ya hace la consulta, y los seguimientos de la página se cargan en
+    # una segunda consulta: sin esto se hacía una consulta por alerta al
+    # pintar la tabla (N+1).
+    alerts = (
+        filtered_query
         .options(
             contains_eager(PropertyAlert.property),
             contains_eager(PropertyAlert.agent),
@@ -310,21 +417,13 @@ async def alerts_page(
                 (PropertyAlert.priority == AlertPriority.BAJA, 3),
                 else_=4
             ),
-            PropertyAlert.created_at.desc()
+            PropertyAlert.created_at.desc(),
+            PropertyAlert.id.desc(),
         )
+        .offset(alert_pagination["offset"])
+        .limit(alert_pagination["per_page"])
         .all()
     )
-
-    # Contar alertas por estado (una sola consulta agrupada)
-    status_counts = dict(
-        base_query
-        .with_entities(PropertyAlert.status, func.count(PropertyAlert.id))
-        .group_by(PropertyAlert.status)
-        .all()
-    )
-    pending_count = status_counts.get(AlertStatus.PENDING, 0)
-    in_progress_count = status_counts.get(AlertStatus.IN_PROGRESS, 0)
-    completed_count = status_counts.get(AlertStatus.COMPLETED, 0)
 
     # Agentes para el formulario de creación (solo admin). Las propiedades no se
     # precargan: el formulario las busca por /alerts/search-properties.
@@ -335,10 +434,36 @@ async def alerts_page(
         # "Agente asignado" del alta y de la reasignación: todas las empresas (§4-1 B)
         assignable_groups = assignment.assignable_agents(db, company.id)
 
-    buyers = visible_buyers_query(db, current_user, company.id).order_by(Buyer.name.asc()).all()
+    # Compradores visibles: el título "Compradores (N)" y el desglose por
+    # operación usan el total; la tabla, la página pedida tras el buscador
+    # propio de la sección (b_q).
+    visible_buyers = visible_buyers_query(db, current_user, company.id)
+    total_visible_buyers = visible_buyers.count()
 
-    # Número de alertas de cada comprador listado (columna "Alertas"), en una
-    # consulta agrupada en vez de cargar `buyer.alerts` comprador por comprador.
+    buyers_filtered = visible_buyers
+    b_q_term = (b_q or "").strip()
+    if b_q_term:
+        b_like = f"%{b_q_term}%"
+        buyers_filtered = buyers_filtered.filter(
+            or_(
+                Buyer.name.ilike(b_like),
+                Buyer.phone.ilike(b_like),
+                Buyer.email.ilike(b_like),
+            )
+        )
+    total_buyers = buyers_filtered.count() if b_q_term else total_visible_buyers
+    buyer_pagination = paginate_params(b_page, per_page_value, total_buyers)
+
+    buyers = (
+        buyers_filtered
+        .order_by(Buyer.name.asc(), Buyer.id.asc())
+        .offset(buyer_pagination["offset"])
+        .limit(buyer_pagination["per_page"])
+        .all()
+    )
+
+    # Número de alertas de cada comprador de la página (columna "Alertas"), en
+    # una consulta agrupada en vez de cargar `buyer.alerts` comprador por comprador.
     buyer_ids = [b.id for b in buyers]
     buyer_alert_counts = {}
     buyer_operation_counts = {}
@@ -351,15 +476,16 @@ async def alerts_page(
             .all()
         )
 
-        # Conteo por tipo de operación de los compradores que efectivamente
-        # aparecen en `buyers` (no del total de alertas del sistema), para que
-        # el desglose "N Alquiler, N Venta" cuadre con la lista mostrada. Para
+    if total_visible_buyers:
+        # Conteo por tipo de operación de TODOS los compradores visibles (no
+        # solo los de la página ni del total de alertas del sistema), para que
+        # el desglose "N Alquiler, N Venta" cuadre con "Compradores (N)". Para
         # el admin cuentan todas sus alertas; para el agente, solo las que ya
         # iniciaron seguimiento y son suyas.
         operation_query = db.query(
             PropertyAlert.business_type, func.count(PropertyAlert.id)
         ).filter(
-            PropertyAlert.buyer_id.in_(buyer_ids),
+            PropertyAlert.buyer_id.in_(visible_buyers.with_entities(Buyer.id)),
             PropertyAlert.business_type.isnot(None),
             PropertyAlert.business_type != "",
         )
@@ -429,13 +555,22 @@ async def alerts_page(
                 "color": FollowUpActionType.stage_badge_color(latest.action_type),
             }
 
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request=request,
         name="alerts/list.html",
         context={
             "request": request,
             "alerts": alerts,
+            "total_alerts": total_alerts,
+            "alert_pagination": alert_pagination,
             "buyers": buyers,
+            "total_visible_buyers": total_visible_buyers,
+            "buyer_pagination": buyer_pagination,
+            "b_q": b_q_term,
+            "per_page": per_page_value,
+            "page_sizes": PAGE_SIZES,
+            "effective_statuses": effective_statuses or [],
+            "default_status_view": default_status_view,
             "buyer_alert_counts": buyer_alert_counts,
             "buyer_operation_counts": buyer_operation_counts,
             "current_user": current_user,
@@ -460,6 +595,19 @@ async def alerts_page(
             "selected_agent_id": agent_id_int,
         }
     )
+
+    # Preferencia de tamaño de página: solo se guarda cuando el usuario la elige
+    if per_page_explicit:
+        response.set_cookie(
+            key=PER_PAGE_COOKIE,
+            value=str(per_page_value),
+            max_age=PER_PAGE_COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+
+    return response
 
 
 @router.get("/alerts/search-buyers")

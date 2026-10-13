@@ -115,19 +115,23 @@
         </div>
 
         <!-- Sección: Alertas de Compradores -->
-        <div class="mb-8">
+        <div id="alertas" class="mb-8 scroll-mt-4">
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
             <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
                 <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
                 </svg>
                 Alertas de Compradores
-                <span class="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full font-medium">{{ alerts|length }}</span>
+                {# Total con los filtros aplicados (todas las páginas), no el tamaño de página #}
+                <span class="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full font-medium">{{ total_alerts }}</span>
             </h2>
         </div>
 
-        <!-- Búsqueda y filtros -->
-        <form method="GET" action="/alerts" class="bg-white border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
+        <!-- Búsqueda y filtros. Sin campo `page`: filtrar o cambiar el tamaño vuelve a la página 1 -->
+        <form method="GET" action="/alerts" id="alertFiltersForm" class="bg-white border border-gray-200 rounded-xl p-4 mb-4 space-y-3"
+              {% if default_status_view %}data-default-statuses{% endif %}>
+            {# Conserva la búsqueda de compradores al filtrar alertas (su página vuelve a la 1) #}
+            {% if b_q %}<input type="hidden" name="b_q" value="{{ b_q }}">{% endif %}
             <!-- Búsqueda por texto -->
             <div class="relative">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -157,37 +161,39 @@
             </div>
             {% endif %}
 
-            <!-- Filtro por estado (checkboxes) -->
+            <!-- Filtro por estado (checkboxes). Marcadas según los estados que filtra
+                 realmente el listado: en la vista por defecto, Pendiente y En Proceso;
+                 al buscar texto sin marcar ninguno, ninguna (= todos los estados). -->
             <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
                 <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Estados:</span>
                 <label class="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" name="status_filter" value="PENDING"
-                        {% if 'PENDING' in status_filter %}checked{% endif %}
+                        {% if 'PENDING' in effective_statuses %}checked{% endif %}
                         class="w-4 h-4 rounded text-yellow-500 border-gray-300 focus:ring-yellow-400">
                     <span class="text-sm text-gray-700">Pendiente</span>
                 </label>
                 <label class="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" name="status_filter" value="IN_PROGRESS"
-                        {% if 'IN_PROGRESS' in status_filter %}checked{% endif %}
+                        {% if 'IN_PROGRESS' in effective_statuses %}checked{% endif %}
                         class="w-4 h-4 rounded text-blue-500 border-gray-300 focus:ring-blue-400">
                     <span class="text-sm text-gray-700">En Proceso</span>
                 </label>
                 <label class="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" name="status_filter" value="COMPLETED"
-                        {% if 'COMPLETED' in status_filter %}checked{% endif %}
+                        {% if 'COMPLETED' in effective_statuses %}checked{% endif %}
                         class="w-4 h-4 rounded text-green-500 border-gray-300 focus:ring-green-400">
                     <span class="text-sm text-gray-700">Completada</span>
                 </label>
                 <label class="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" name="status_filter" value="CANCELLED"
-                        {% if 'CANCELLED' in status_filter %}checked{% endif %}
+                        {% if 'CANCELLED' in effective_statuses %}checked{% endif %}
                         class="w-4 h-4 rounded text-gray-400 border-gray-300 focus:ring-gray-400">
                     <span class="text-sm text-gray-700">Cancelada</span>
                 </label>
             </div>
 
-            <!-- Acciones -->
-            <div class="flex gap-2">
+            <!-- Acciones + tamaño de página (compartido por alertas y compradores) -->
+            <div class="flex flex-wrap items-center gap-2">
                 <button type="submit" class="px-4 py-2 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition-colors">
                     Filtrar
                 </button>
@@ -196,10 +202,25 @@
                     Limpiar filtros
                 </a>
                 {% endif %}
+                <div class="flex items-center gap-2 ml-auto">
+                    <label for="perPageSelect" class="text-sm text-gray-500">Por página</label>
+                    <select name="per_page" id="perPageSelect" aria-label="Alertas y compradores por página"
+                        onchange="this.form.requestSubmit()"
+                        class="rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500">
+                        {% for size in page_sizes %}
+                        <option value="{{ size }}" {% if size == per_page %}selected{% endif %}>{{ size }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
             </div>
+
+            {% if default_status_view %}
+            <p class="text-xs text-gray-500">Mostrando alertas pendientes y en proceso. Marca Completada o Cancelada para verlas.</p>
+            {% endif %}
         </form>
 
         <div id="panel-alerts">
+            <p class="text-sm text-gray-500 mb-2">{{ ui.pagination_summary(alert_pagination, "alertas") }}</p>
             <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
                 <div class="overflow-x-auto max-h-[480px] overflow-y-auto">
                     <table class="w-full">
@@ -366,29 +387,39 @@
                                 </tr>
                                 {% endfor %}
                             {% else %}
-                                <tr>
-                                    <td colspan="{{ '9' if is_admin else '8' }}" class="px-6 py-12 text-center text-gray-500">
-                                        No hay alertas de compradores registradas
-                                    </td>
-                                </tr>
+                                {% if default_status_view %}
+                                {{ ui.empty_state(
+                                    "No hay alertas pendientes ni en proceso",
+                                    "Marca Completada o Cancelada para ver las cerradas" ~ (", o limpia los filtros." if selected_agent_id else "."),
+                                    colspan=('9' if is_admin else '8')
+                                ) }}
+                                {% else %}
+                                {{ ui.empty_state(
+                                    "No hay alertas con estos filtros",
+                                    "Prueba a marcar otros estados o limpia los filtros.",
+                                    colspan=('9' if is_admin else '8')
+                                ) }}
+                                {% endif %}
                             {% endif %}
                         </tbody>
                     </table>
                 </div>
+                {{ ui.pagination(alert_pagination, request.query_params, param="page", label="alertas", anchor="alertas") }}
             </div>
         </div>
         </div>
 
         <!-- Sección: Compradores -->
-        <div class="mb-4">
-            <div class="flex items-center gap-3 mb-4">
+        <div id="compradores" class="mb-4 scroll-mt-4">
+            <div class="flex flex-wrap items-center gap-3 mb-4">
                 <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
                     <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path>
                     </svg>
                     Compradores
                 </h2>
-                <span class="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full font-medium">{{ buyers|length }}</span>
+                {# Totales de todos los compradores visibles (sin búsqueda ni paginación) #}
+                <span class="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full font-medium">{{ total_visible_buyers }}</span>
                 {% for business_type, count in buyer_operation_counts.items() %}
                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
                     {% if business_type == 'Venta' %}bg-green-100 text-green-800
@@ -398,6 +429,35 @@
                 </span>
                 {% endfor %}
             </div>
+
+            <!-- Buscador propio de compradores. Los campos ocultos conservan los filtros
+                 y la página de alertas; la página de compradores vuelve a la 1. -->
+            <form method="GET" action="/alerts#compradores" role="search" aria-label="Buscar compradores"
+                  class="flex flex-col sm:flex-row gap-3 mb-3">
+                {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+                {% for status in status_filter %}<input type="hidden" name="status_filter" value="{{ status }}">{% endfor %}
+                {% if selected_agent_id %}<input type="hidden" name="agent_id" value="{{ selected_agent_id }}">{% endif %}
+                {% if alert_pagination.page > 1 %}<input type="hidden" name="page" value="{{ alert_pagination.page }}">{% endif %}
+                <input type="hidden" name="per_page" value="{{ per_page }}">
+                <div class="flex-1">
+                    <label for="buyerListSearch" class="sr-only">Buscar compradores</label>
+                    <div class="relative">
+                        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+                        <input type="search" name="b_q" id="buyerListSearch" value="{{ b_q }}"
+                            placeholder="Buscar comprador por nombre, teléfono o email..."
+                            class="{{ ui.input_class }} pl-10">
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    {{ ui.button("Buscar", "secondary", type="submit", full_mobile=True) }}
+                    {% if b_q %}
+                    {% set buyer_keep = request.query_params.multi_items() | rejectattr("0", "in", ["b_q", "b_page"]) | list %}
+                    {{ ui.button("Limpiar", "text", href="/alerts" ~ (("?" ~ (buyer_keep | urlencode)) if buyer_keep else "") ~ "#compradores") }}
+                    {% endif %}
+                </div>
+            </form>
+
+            <p class="text-sm text-gray-500 mb-2">{{ ui.pagination_summary(buyer_pagination, "compradores") }}</p>
             <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
                 <div class="overflow-x-auto max-h-[400px] overflow-y-auto">
                     <table class="w-full">
@@ -445,6 +505,12 @@
                                     {% endif %}
                                 </tr>
                                 {% endfor %}
+                            {% elif b_q %}
+                                {{ ui.empty_state(
+                                    "No hay compradores que coincidan con «" ~ b_q ~ "»",
+                                    "Prueba con otro nombre, teléfono o email.",
+                                    colspan=('5' if is_admin else '4')
+                                ) }}
                             {% else %}
                                 <tr>
                                     <td colspan="{{ '5' if request.state.user.role.name.lower() == 'admin' else '4' }}" class="px-6 py-12 text-center text-gray-500">
@@ -466,6 +532,7 @@
                         </tbody>
                     </table>
                 </div>
+                {{ ui.pagination(buyer_pagination, request.query_params, param="b_page", label="compradores", anchor="compradores") }}
             </div>
         </div>
 
@@ -729,12 +796,17 @@ function openFilterAlertModal() {
 function closeFilterAlertModal() {
     UI.closeModal('filterAlertModal');
 }
+// Modo comprador del modal "Agregar alerta con filtro" (existente / nuevo)
+var fcBuyerMode = 'existing';
+
 function setFcBuyerMode(mode) {
+    fcBuyerMode = mode;
     var panelExisting = document.getElementById('fcPanelExisting');
     var panelNew = document.getElementById('fcPanelNew');
     var btnExisting = document.getElementById('fcBtnExisting');
     var btnNew = document.getElementById('fcBtnNew');
-    var selectEl = document.getElementById('fcBuyerSelect');
+    // El buyer_id lo rellena el autocompletado; en modo "nuevo" no se envía
+    var hiddenEl = document.getElementById('fcBuyerIdHidden');
     var nameEl = document.getElementById('fcBuyerName');
     if (mode === 'existing') {
         panelExisting.classList.remove('hidden');
@@ -743,7 +815,7 @@ function setFcBuyerMode(mode) {
         btnExisting.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
         btnNew.classList.remove('border-gray-900', 'bg-gray-900', 'text-white');
         btnNew.classList.add('border-gray-200', 'bg-white', 'text-gray-600');
-        if (selectEl) selectEl.setAttribute('name', 'buyer_id');
+        if (hiddenEl) hiddenEl.setAttribute('name', 'buyer_id');
         if (nameEl) nameEl.removeAttribute('required');
     } else {
         panelExisting.classList.add('hidden');
@@ -752,7 +824,8 @@ function setFcBuyerMode(mode) {
         btnNew.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
         btnExisting.classList.remove('border-gray-900', 'bg-gray-900', 'text-white');
         btnExisting.classList.add('border-gray-200', 'bg-white', 'text-gray-600');
-        if (selectEl) selectEl.removeAttribute('name');
+        if (hiddenEl) hiddenEl.removeAttribute('name');
+        if (window.clearFcBuyerSelection) window.clearFcBuyerSelection();
         if (nameEl) nameEl.setAttribute('required', 'required');
     }
 }
@@ -1160,7 +1233,7 @@ function setBuyerMode(mode) {
 </script>
 <!-- Modal: Agregar alerta con filtro (comprador + criterios de búsqueda) -->
 {% call ui.modal("filterAlertModal", "Agregar alerta con filtro", size="3xl", subtitle="Registra el comprador y sus criterios de búsqueda. Al guardar verás las propiedades compatibles.") %}
-        <form method="POST" action="/buyers/create-with-criteria" data-once>
+        <form method="POST" action="/buyers/create-with-criteria" id="filterAlertForm" data-once>
             <div class="p-6 space-y-6">
 
                 <!-- Sección comprador -->
@@ -1177,16 +1250,40 @@ function setBuyerMode(mode) {
                         </button>
                     </div>
 
+                    <!-- Comprador existente: autocompletado contra /alerts/search-buyers
+                         (mismo patrón que "Agregar alerta comprador"; no se precargan todos) -->
                     <div id="fcPanelExisting">
-                        <select name="buyer_id" id="fcBuyerSelect"
-                            class="{{ ui.input_class }} text-sm">
-                            <option value="">— Selecciona un comprador —</option>
-                            {% for buyer in buyers %}
-                            <option value="{{ buyer.id }}">
-                                {{ buyer.name }}{% if buyer.phone %} · {{ buyer.phone }}{% endif %}
-                            </option>
-                            {% endfor %}
-                        </select>
+                        <div class="relative">
+                            <input
+                                type="text"
+                                id="fcBuyerSearch"
+                                autocomplete="off"
+                                role="combobox"
+                                aria-autocomplete="list"
+                                aria-expanded="false"
+                                aria-controls="fcBuyerResults"
+                                aria-label="Buscar comprador"
+                                placeholder="Buscar por nombre, teléfono o email..."
+                                class="{{ ui.input_class }} text-sm"
+                            >
+                            <input type="hidden" name="buyer_id" id="fcBuyerIdHidden">
+
+                            <!-- Comprador seleccionado -->
+                            <div id="fcBuyerSelected" class="hidden mt-2 flex items-start justify-between gap-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                                <div class="text-sm">
+                                    <p class="font-medium text-gray-800" id="fcBuyerSelectedName"></p>
+                                    <p class="text-xs text-gray-600" id="fcBuyerSelectedMeta"></p>
+                                </div>
+                                <button type="button" onclick="clearFcBuyerSelection()" aria-label="Quitar comprador"
+                                    class="w-9 h-9 -mr-2 -my-1 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-blue-100 flex items-center justify-center shrink-0">
+                                    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+                                </button>
+                            </div>
+
+                            <ul id="fcBuyerResults" role="listbox" aria-label="Compradores encontrados"
+                                class="hidden absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                            </ul>
+                        </div>
                     </div>
 
                     <div id="fcPanelNew" class="hidden space-y-3">
@@ -1343,5 +1440,175 @@ function setBuyerMode(mode) {
             {{ ui.modal_footer(submit_label="Guardar y ver compatibles") }}
         </form>
 {% endcall %}
+
+<script>
+// ---- Filtros de alertas: buscar texto desde la vista por defecto ----
+// En la vista por defecto, Pendiente y En Proceso salen marcadas solo para
+// explicar qué se está viendo. Si el usuario escribe un texto sin tocar los
+// estados, se desmarcan al enviar: buscar sin estados busca en todos (si no,
+// un comprador con la alerta completada daría "sin resultados").
+(function () {
+    var form = document.getElementById('alertFiltersForm');
+    if (!form || !form.hasAttribute('data-default-statuses')) return;
+    var boxes = form.querySelectorAll('input[name="status_filter"]');
+    var touched = false;
+    boxes.forEach(function (box) {
+        box.addEventListener('change', function () { touched = true; });
+    });
+    form.addEventListener('submit', function () {
+        var q = form.querySelector('input[name="q"]');
+        if (touched || !q || !q.value.trim()) return;
+        boxes.forEach(function (box) { box.checked = false; });
+    });
+})();
+
+// ---- Autocompletado de compradores del modal "Agregar alerta con filtro" ----
+// Mismo patrón que el de "Agregar alerta comprador" (/alerts/search-buyers),
+// en vez de un <select> con todos los compradores de la empresa.
+(function () {
+    var input = document.getElementById('fcBuyerSearch');
+    if (!input) return;
+    var hidden = document.getElementById('fcBuyerIdHidden');
+    var list = document.getElementById('fcBuyerResults');
+    var selected = document.getElementById('fcBuyerSelected');
+    var selectedName = document.getElementById('fcBuyerSelectedName');
+    var selectedMeta = document.getElementById('fcBuyerSelectedMeta');
+    var form = document.getElementById('filterAlertForm');
+
+    var timer = null;
+    var items = [];
+    var activeIndex = -1;
+
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function hideResults() {
+        list.classList.add('hidden');
+        list.innerHTML = '';
+        items = [];
+        activeIndex = -1;
+        input.setAttribute('aria-expanded', 'false');
+        input.removeAttribute('aria-activedescendant');
+    }
+
+    function showMessage(text) {
+        list.innerHTML = '<li class="px-4 py-3 text-sm text-gray-500" role="presentation">' + escapeHtml(text) + '</li>';
+        list.classList.remove('hidden');
+        items = [];
+        activeIndex = -1;
+        input.setAttribute('aria-expanded', 'true');
+    }
+
+    function renderResults(results) {
+        items = results;
+        activeIndex = -1;
+
+        if (!results.length) {
+            showMessage('Sin coincidencias');
+            return;
+        }
+
+        list.innerHTML = results.map(function (b, i) {
+            var meta = [b.phone, b.email].filter(Boolean).join(' · ');
+            return '<li id="fcBuyerOption' + i + '" role="option" aria-selected="false" data-index="' + i + '" class="fc-buyer-option px-4 py-2 cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0">'
+                + '<p class="text-sm font-medium text-gray-800">' + escapeHtml(b.name) + '</p>'
+                + (meta ? '<p class="text-xs text-gray-500">' + escapeHtml(meta) + '</p>' : '')
+                + '</li>';
+        }).join('');
+
+        list.classList.remove('hidden');
+        input.setAttribute('aria-expanded', 'true');
+    }
+
+    function highlight(index) {
+        var options = list.querySelectorAll('.fc-buyer-option');
+        options.forEach(function (el, i) {
+            el.classList.toggle('bg-blue-50', i === index);
+            el.setAttribute('aria-selected', i === index ? 'true' : 'false');
+        });
+        if (options[index]) {
+            options[index].scrollIntoView({ block: 'nearest' });
+            input.setAttribute('aria-activedescendant', options[index].id);
+        }
+    }
+
+    function selectBuyer(buyer) {
+        hidden.value = buyer.id;
+        input.value = '';
+        input.classList.add('hidden');
+
+        selectedName.textContent = buyer.name;
+        selectedMeta.textContent = [buyer.phone, buyer.email].filter(Boolean).join(' · ');
+        selected.classList.remove('hidden');
+
+        hideResults();
+    }
+
+    window.clearFcBuyerSelection = function () {
+        hidden.value = '';
+        selected.classList.add('hidden');
+        input.classList.remove('hidden');
+        input.value = '';
+        hideResults();
+        if (fcBuyerMode === 'existing') input.focus();
+    };
+
+    input.addEventListener('input', function () {
+        var term = input.value.trim();
+        clearTimeout(timer);
+        if (term.length < 2) { hideResults(); return; }
+        timer = setTimeout(function () {
+            fetch('/alerts/search-buyers?q=' + encodeURIComponent(term))
+                .then(function (r) { return r.ok ? r.json() : { results: [] }; })
+                .then(function (data) { renderResults(data.results || []); })
+                .catch(function () { showMessage('No se pudo buscar. Intenta de nuevo.'); });
+        }, 250);
+    });
+
+    input.addEventListener('keydown', function (e) {
+        if (list.classList.contains('hidden') || !items.length) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeIndex = (activeIndex + 1) % items.length;
+            highlight(activeIndex);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeIndex = activeIndex <= 0 ? items.length - 1 : activeIndex - 1;
+            highlight(activeIndex);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (activeIndex >= 0) selectBuyer(items[activeIndex]);
+        } else if (e.key === 'Escape') {
+            // Solo cierra la lista; el siguiente Escape cierra el modal
+            e.stopPropagation();
+            hideResults();
+        }
+    });
+
+    list.addEventListener('click', function (e) {
+        var option = e.target.closest('.fc-buyer-option');
+        if (option) selectBuyer(items[Number(option.dataset.index)]);
+    });
+
+    document.addEventListener('click', function (e) {
+        if (!list.contains(e.target) && e.target !== input) hideResults();
+    });
+
+    // En modo "existente" hay que elegir un comprador de la lista antes de enviar
+    if (form) {
+        form.addEventListener('submit', function (e) {
+            if (fcBuyerMode === 'existing' && !hidden.value) {
+                e.preventDefault();
+                input.classList.remove('hidden');
+                input.focus();
+                showMessage('Selecciona un comprador de la lista o cambia a "Nuevo comprador"');
+            }
+        });
+    }
+})();
+</script>
 
 {% endblock %}

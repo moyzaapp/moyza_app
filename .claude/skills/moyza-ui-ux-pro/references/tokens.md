@@ -1,8 +1,9 @@
 # Tokens de diseño
 
 Todo lo que se escribe en una plantilla debe salir de aquí. Si falta algo, se añade aquí
-primero. Las clases son de Tailwind 3 (Play CDN local), así que los modificadores de
-opacidad (`blue-500/40`) y los valores arbitrarios (`max-h-[60vh]`) funcionan.
+primero. Las clases son de Tailwind 3.4 compilado en el build (ver `TAILWIND_BUILD.md`), así
+que los modificadores de opacidad (`blue-500/40`) y los valores arbitrarios (`max-h-[60vh]`)
+funcionan, siempre que la clase esté escrita entera en un archivo cubierto por `content`.
 
 ## Marca por empresa
 

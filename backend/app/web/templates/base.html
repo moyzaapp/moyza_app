@@ -19,7 +19,12 @@
         {% endblock %}
     </title>
 
+    {# Tailwind: CSS compilado si existe (build de Docker o scripts/build_css.sh); si no, compilador en navegador. Ver TAILWIND_BUILD.md #}
+    {% if tailwind_css_version %}
+    <link rel="stylesheet" href="/static/css/tailwind.css?v={{ tailwind_css_version }}">
+    {% else %}
     <script src="/static/js/tailwind.js"></script>
+    {% endif %}
     <!-- Modales accesibles (UI.openModal/closeModal) y guardia de doble envío; se carga una sola vez aquí -->
     <script src="/static/js/ui.js"></script>
 

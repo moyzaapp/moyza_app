@@ -10,10 +10,14 @@ cada pantalla nueva o retocada salga **igual que el resto**, sea **intuitiva** p
 agente que la usa desde el móvil en la calle, y no haga falta recordar cómo está hecho
 lo demás.
 
-Stack real: FastAPI + Jinja2 renderizado en servidor, Tailwind 3 cargado en local como
-Play CDN (`/static/js/tailwind.js`, genera clases en el navegador), JS vanilla en línea o
-en `/static/js/`, Chart.js 4 en local. No hay React, ni build de CSS, ni librería de
-componentes. Las clases Tailwind escritas desde Python o `innerHTML` funcionan.
+Stack real: FastAPI + Jinja2 renderizado en servidor, Tailwind 3.4 **compilado** a
+`/static/css/tailwind.css` (binario standalone en el build de Docker o con
+`backend/scripts/build_css.sh`; si el CSS no existe, `base.html` cae al Play CDN local
+`/static/js/tailwind.js`), JS vanilla en línea o en `/static/js/`, Chart.js 4 en local.
+No hay React, ni Node, ni librería de componentes. Solo se generan las clases escritas
+**enteras** en los archivos de `content` de `backend/tailwind.config.js` (plantillas,
+`app/static/js/*.js` y `app/**/*.py`): nada de `bg-{{ color }}-100`. Detalle en
+`TAILWIND_BUILD.md`.
 
 ## Cómo trabajar con este skill
 
@@ -34,7 +38,13 @@ componentes. Las clases Tailwind escritas desde Python o `innerHTML` funcionan.
    disco (bind mount) pero Jinja cachea, así que también conviene reiniciar. Para ver el
    HTML renderizado como admin sin navegador:
    `python .claude/skills/moyza-ui-ux-pro/scripts/fetch_page.py /alerts --company MOES`.
-6. Si el cambio toca algo que el audit marca como deuda (ver `references/audit-2026-10.md`),
+6. **Clases Tailwind nuevas**: escríbelas completas (`'bg-green-100' if x else
+   'bg-gray-100'`). Si las escribes desde Python o JS, el archivo debe estar cubierto por
+   `content` en `backend/tailwind.config.js` (hoy: plantillas, `app/static/js/**/*.js` y
+   `app/**/*.py`); si no, añádelo. Si en local existe `app/static/css/tailwind.css`, una
+   clase que no se usaba antes no tendrá estilo hasta recompilar
+   (`bash backend/scripts/build_css.sh`, o `--watch` mientras trabajas) y reiniciar.
+7. Si el cambio toca algo que el audit marca como deuda (ver `references/audit-2026-10.md`),
    aprovecha para arreglarlo en esa pantalla, pero no reformes el resto de la app sin que
    lo pidan.
 

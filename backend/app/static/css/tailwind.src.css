@@ -1,0 +1,7 @@
+/*
+ * Entrada de Tailwind. El resultado compilado es app/static/css/tailwind.css
+ * (no se sube a git). Ver TAILWIND_BUILD.md en la raíz del repo.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
