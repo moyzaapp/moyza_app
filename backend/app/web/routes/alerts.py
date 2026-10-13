@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from app.web.template_env import templates
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, contains_eager, selectinload
 from sqlalchemy import func, case, or_
 
 from app.core.constants import AlertType, PropertyStatus
@@ -184,10 +184,6 @@ def _real_follow_ups(db: Session, alert_id: int):
     )
 
 
-def _alert_has_followup(alert_id: int, db: Session) -> bool:
-    return _real_follow_ups(db, alert_id).first() is not None
-
-
 def get_locked_alert_ids(agent_id: int, db: Session, company_id: int) -> set:
     """Devuelve el conjunto de IDs de alertas bloqueadas para un agente en la empresa.
 
@@ -196,14 +192,28 @@ def get_locked_alert_ids(agent_id: int, db: Session, company_id: int) -> set:
     cualquier seguimiento en la alerta actual, la siguiente se desbloquea.
     """
     open_alerts = _get_agent_open_alerts_ordered(agent_id, db, company_id)
+    if not open_alerts:
+        return set()
+
+    # Una sola consulta para saber qué alertas de la cola ya tienen seguimiento
+    # (antes era una consulta por alerta)
+    started_ids = {
+        row[0]
+        for row in db.query(AlertFollowUp.alert_id)
+        .filter(
+            AlertFollowUp.alert_id.in_([a.id for a in open_alerts]),
+            AlertFollowUp.action_type.notin_(FollowUpActionType.SYSTEM_ACTIONS),
+        )
+        .distinct()
+    }
+
     locked = set()
     all_preceding_started = True
     for alert in open_alerts:
         if not all_preceding_started:
             locked.add(alert.id)
-        else:
-            if not _alert_has_followup(alert.id, db):
-                all_preceding_started = False
+        elif alert.id not in started_ids:
+            all_preceding_started = False
     return locked
 
 
@@ -223,14 +233,9 @@ def is_alert_locked_for_user(alert: PropertyAlert, current_user, db: Session) ->
     if not agent:
         return False
 
-    # La cola se evalúa dentro de la empresa de la propia alerta
-    open_alerts = _get_agent_open_alerts_ordered(agent.id, db, alert.property.company_id)
-    for oa in open_alerts:
-        if oa.id == alert.id:
-            return False  # Todas las anteriores tienen seguimiento → accesible
-        if not _alert_has_followup(oa.id, db):
-            return True  # Alerta anterior sin seguimiento → esta está bloqueada
-    return False
+    # La cola se evalúa dentro de la empresa de la propia alerta. Misma regla
+    # que el listado: bloqueada si alguna anterior de la cola no tiene seguimiento.
+    return alert.id in get_locked_alert_ids(agent.id, db, alert.property.company_id)
 
 
 @router.get("/alerts", response_class=HTMLResponse)
@@ -245,6 +250,8 @@ async def alerts_page(
 
     current_user = request.state.user
     company = get_active_company(request)
+    admin_view = is_admin(current_user)
+    agent = None if admin_view else get_agent_from_user(current_user, db)
 
     # Base query: solo alertas de propiedades de la empresa activa. El JOIN con
     # agentes va por el agente de la ALERTA (no el captador de la propiedad):
@@ -257,8 +264,7 @@ async def alerts_page(
     )
 
     # Si es agente, filtrar solo sus alertas
-    if not is_admin(current_user):
-        agent = get_agent_from_user(current_user, db)
+    if not admin_view:
         if agent:
             base_query = base_query.filter(PropertyAlert.agent_id == agent.id)
         else:
@@ -283,60 +289,91 @@ async def alerts_page(
 
     # Filtro por agente (solo admin; agentes ya están filtrados por su propio id)
     agent_id_int = int(agent_id) if agent_id and agent_id.strip() else None
-    if agent_id_int and is_admin(current_user):
+    if agent_id_int and admin_view:
         base_query = base_query.filter(PropertyAlert.agent_id == agent_id_int)
 
-    # Ordenar por prioridad y fecha
-    alerts = base_query.order_by(
-        case(
-            (PropertyAlert.priority == AlertPriority.ALTA, 1),
-            (PropertyAlert.priority == AlertPriority.NORMAL, 2),
-            (PropertyAlert.priority == AlertPriority.BAJA, 3),
-            else_=4
-        ),
-        PropertyAlert.created_at.desc()
-    ).all()
+    # Ordenar por prioridad y fecha. Propiedad y agente se rellenan con el JOIN
+    # que ya hace la consulta, y los seguimientos se cargan todos en una
+    # segunda consulta: sin esto se hacía una consulta por alerta al pintar
+    # la tabla (N+1).
+    alerts = (
+        base_query
+        .options(
+            contains_eager(PropertyAlert.property),
+            contains_eager(PropertyAlert.agent),
+            selectinload(PropertyAlert.follow_ups),
+        )
+        .order_by(
+            case(
+                (PropertyAlert.priority == AlertPriority.ALTA, 1),
+                (PropertyAlert.priority == AlertPriority.NORMAL, 2),
+                (PropertyAlert.priority == AlertPriority.BAJA, 3),
+                else_=4
+            ),
+            PropertyAlert.created_at.desc()
+        )
+        .all()
+    )
 
-    # Contar alertas por estado
-    pending_count = base_query.filter(PropertyAlert.status == AlertStatus.PENDING).count()
-    in_progress_count = base_query.filter(PropertyAlert.status == AlertStatus.IN_PROGRESS).count()
-    completed_count = base_query.filter(PropertyAlert.status == AlertStatus.COMPLETED).count()
+    # Contar alertas por estado (una sola consulta agrupada)
+    status_counts = dict(
+        base_query
+        .with_entities(PropertyAlert.status, func.count(PropertyAlert.id))
+        .group_by(PropertyAlert.status)
+        .all()
+    )
+    pending_count = status_counts.get(AlertStatus.PENDING, 0)
+    in_progress_count = status_counts.get(AlertStatus.IN_PROGRESS, 0)
+    completed_count = status_counts.get(AlertStatus.COMPLETED, 0)
 
     # Agentes para el formulario de creación (solo admin). Las propiedades no se
     # precargan: el formulario las busca por /alerts/search-properties.
     agents = []
     assignable_groups = []
-    if is_admin(current_user):
+    if admin_view:
         agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
         # "Agente asignado" del alta y de la reasignación: todas las empresas (§4-1 B)
         assignable_groups = assignment.assignable_agents(db, company.id)
 
     buyers = visible_buyers_query(db, current_user, company.id).order_by(Buyer.name.asc()).all()
 
-    # Conteo por tipo de operación de los compradores que efectivamente
-    # aparecen en `buyers` (no del total de alertas del sistema), para que el
-    # desglose "N Alquiler, N Venta" cuadre con la lista mostrada. Para el
-    # admin cuentan todas sus alertas; para el agente, solo las que ya
-    # iniciaron seguimiento y son suyas (mismo criterio con el que se armó
-    # `buyers` arriba).
+    # Número de alertas de cada comprador listado (columna "Alertas"), en una
+    # consulta agrupada en vez de cargar `buyer.alerts` comprador por comprador.
+    buyer_ids = [b.id for b in buyers]
+    buyer_alert_counts = {}
     buyer_operation_counts = {}
-    admin_view = is_admin(current_user)
-    for buyer in buyers:
-        for buyer_alert in buyer.alerts:
-            if not buyer_alert.business_type:
-                continue
-            if admin_view:
-                counted = True
-            else:
-                counted = (
-                    buyer_alert.status != AlertStatus.PENDING
-                    and agent
-                    and buyer_alert.agent_id == agent.id
-                )
-            if counted:
-                buyer_operation_counts[buyer_alert.business_type] = (
-                    buyer_operation_counts.get(buyer_alert.business_type, 0) + 1
-                )
+
+    if buyer_ids:
+        buyer_alert_counts = dict(
+            db.query(PropertyAlert.buyer_id, func.count(PropertyAlert.id))
+            .filter(PropertyAlert.buyer_id.in_(buyer_ids))
+            .group_by(PropertyAlert.buyer_id)
+            .all()
+        )
+
+        # Conteo por tipo de operación de los compradores que efectivamente
+        # aparecen en `buyers` (no del total de alertas del sistema), para que
+        # el desglose "N Alquiler, N Venta" cuadre con la lista mostrada. Para
+        # el admin cuentan todas sus alertas; para el agente, solo las que ya
+        # iniciaron seguimiento y son suyas.
+        operation_query = db.query(
+            PropertyAlert.business_type, func.count(PropertyAlert.id)
+        ).filter(
+            PropertyAlert.buyer_id.in_(buyer_ids),
+            PropertyAlert.business_type.isnot(None),
+            PropertyAlert.business_type != "",
+        )
+        if not admin_view:
+            operation_query = operation_query.filter(
+                PropertyAlert.status != AlertStatus.PENDING,
+                PropertyAlert.agent_id == (agent.id if agent else -1),
+            )
+        buyer_operation_counts = dict(
+            operation_query
+            .group_by(PropertyAlert.business_type)
+            .order_by(PropertyAlert.business_type)
+            .all()
+        )
 
     # Valores para selectores del modal de criteria
     filter_values = _property_filter_values(db, company.id)
@@ -366,10 +403,8 @@ async def alerts_page(
 
     # Calcular alertas bloqueadas y etapa actual de cada alerta
     locked_alert_ids = set()
-    if not is_admin(current_user):
-        agent = get_agent_from_user(current_user, db)
-        if agent:
-            locked_alert_ids = get_locked_alert_ids(agent.id, db, company.id)
+    if agent:
+        locked_alert_ids = get_locked_alert_ids(agent.id, db, company.id)
 
     # Etapa actual de cada alerta: último seguimiento de progresión (ignora
     # SIN_RESPUESTA para no retroceder la etapa visible; si solo hay sin-respuesta,
@@ -401,6 +436,7 @@ async def alerts_page(
             "request": request,
             "alerts": alerts,
             "buyers": buyers,
+            "buyer_alert_counts": buyer_alert_counts,
             "buyer_operation_counts": buyer_operation_counts,
             "current_user": current_user,
             "pending_count": pending_count,

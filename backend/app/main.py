@@ -13,6 +13,7 @@ from app.web.routes import dashboard, clients, agents, auth, properties, reports
 from app.web.middleware.auth import AuthMiddleware
 from app.web.middleware.flash import FlashMiddleware
 from app.web.middleware.activity import ActivityMiddleware
+from app.core.request_metrics import RequestMetricsMiddleware, install_query_counter
 from app.jobs.scheduler import start_scheduler, shutdown_scheduler
 
 # Configurar logging antes de inicializar la app
@@ -40,6 +41,9 @@ if os.getenv("DB_AUTOCREATE", "false").lower() == "true":
 app.add_middleware(AuthMiddleware)
 app.add_middleware(FlashMiddleware)
 app.add_middleware(ActivityMiddleware)
+# El último añadido es el más externo: mide la petición completa
+app.add_middleware(RequestMetricsMiddleware)
+install_query_counter(engine)
 
 app.include_router(api_router, prefix="/api/v1")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")

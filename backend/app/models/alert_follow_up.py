@@ -25,7 +25,8 @@ class AlertFollowUp(Base):
     alert_id = Column(
         Integer,
         ForeignKey("property_alerts.id"),
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     # Tipo de acción
