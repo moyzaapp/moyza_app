@@ -255,7 +255,55 @@ código anterior desplegado (borra la tabla y sus notificaciones).
 docker exec moyza_backend python -m pytest tests/test_dashboard_service.py tests/test_notification_service.py tests/test_dashboard_routes.py tests/test_visit_preview_edit.py -q
 ```
 
-## 9. Pendientes conocidos
+## 9. Asignación de alertas de comprador a otro agente
+
+Detalle en `PLAN_ASIGNACION_ALERTAS.md`. La alerta sigue yendo por defecto al
+captador de la propiedad, pero el **admin** puede elegir otro agente al
+crearla (modal "Nueva alerta" y formulario rápido de la ficha del comprador)
+y **reasignarla** mientras está abierta (detalle y acción de fila del
+listado). El agente no elige: ve "Se asignará a {captador}".
+
+- Se puede elegir un agente de **cualquier empresa**. Si no pertenece a la
+  empresa de la propiedad, se le añade a esa empresa (`agent_companies`,
+  igual que desde la ficha del agente) y su usuario gana acceso a ella por
+  la ficha (`get_allowed_companies`), sin tocar `user_companies`. El
+  formulario lo avisa antes de guardar y `/alerts` le muestra al agente un
+  banner con el cambio de empresa si tiene alertas abiertas en la otra.
+- Propiedad sin captador: el admin puede crear la alerta eligiendo agente.
+- Motivo opcional. Reasignar deja la alerta Pendiente y sin leer, conserva
+  los seguimientos, la anota en el historial (`alert_assignment_logs`) y con
+  una nota `REASIGNADA` en los seguimientos que no cuenta como gestión (no
+  desbloquea la cola ni permite cerrar).
+- Cola secuencial, recordatorio de 48 h, abandonados y tiempo de respuesta
+  cuentan desde la asignación; contactos y cierres pasan al nuevo agente.
+- Aviso **solo in-app** (`alert_assigned`) al nuevo agente, en la empresa de
+  la propiedad; nunca email ni WhatsApp, ni aviso al agente anterior.
+
+Despliegue (migración `v5w6x7y8z9a0_add_alert_assignment`: 4 columnas en
+`property_alerts` con backfill `assigned_at = created_at`,
+`assigned_by = created_by`, y la tabla `alert_assignment_logs` vacía; ninguna
+alerta cambia de agente ni de orden en la cola):
+
+```bash
+docker exec moyza_backend alembic upgrade head
+docker exec moyza_db psql -U <usuario> -d <bd> -c "
+  select count(*) as total,
+         count(*) filter (where assigned_at = created_at) as backfill_ok
+  from property_alerts;"
+docker restart moyza_backend
+```
+
+Rollback: `docker exec moyza_backend alembic downgrade u4v5w6x7y8z9` con el
+código anterior desplegado (borra el historial y las columnas de asignación;
+el agente actual de cada alerta se conserva). Las altas en empresa hechas al
+asignar no se deshacen: se quitan a mano desde la ficha del agente.
+
+```bash
+# Tests (servicio con base de datos; rutas contra la app levantada)
+docker exec moyza_backend python -m pytest tests/test_alert_assignment.py tests/test_alert_assignment_routes.py -q
+```
+
+## 10. Pendientes conocidos
 
 - Datos legales y logo reales de MOES PREMIUM (sección 4).
 - Eliminar las columnas heredadas `users.company` y `agents.company` cuando ya

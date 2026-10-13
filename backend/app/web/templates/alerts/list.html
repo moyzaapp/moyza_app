@@ -729,9 +729,10 @@
 
 <script src="/static/js/alert-duplicates.js"></script>
 <script src="/static/js/alert-assign.js"></script>
+{% if is_admin %}
 <script src="/static/js/ui.js"></script>
 <script>
-// ---- Reasignar desde el listado (un modal para todas las filas) ----
+// ---- Reasignar desde el listado (un modal para todas las filas, solo admin) ----
 (function () {
     var modal = document.getElementById('reassignModal');
     if (!modal || !window.AlertAssign) return;
@@ -747,6 +748,9 @@
         UI.openModal('reassignModal', btn);
     });
 })();
+</script>
+{% endif %}
+<script>
 
 
 // ---- Modales ----
