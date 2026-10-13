@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% import "components/ui_macros.html" as ui %}
+{% from "alerts/assign_fields.html" import assign_fields with context %}
 
 {% block title %}Compradores - {{ brand_name }}{% endblock %}
 
@@ -18,8 +20,9 @@
             {# Acciones disponibles para admin y agentes #}
             <div class="flex flex-wrap gap-2">
                 <button
+                    type="button"
                     onclick="openCreateBuyerModal()"
-                    class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2 text-sm font-medium border border-gray-300"
+                    class="bg-white text-gray-700 px-4 py-2.5 rounded-xl hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium border border-gray-300"
                 >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
@@ -27,8 +30,9 @@
                     Nuevo Comprador
                 </button>
                 <button
+                    type="button"
                     onclick="openCreateAlertModal()"
-                    class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 text-sm font-medium"
+                    class="bg-gray-900 text-white px-4 py-2.5 rounded-xl hover:bg-gray-800 transition-colors flex items-center gap-2 text-sm font-medium"
                 >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
@@ -36,8 +40,9 @@
                     Agregar alerta comprador
                 </button>
                 <button
+                    type="button"
                     onclick="openFilterAlertModal()"
-                    class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 text-sm font-medium"
+                    class="bg-white text-gray-700 px-4 py-2.5 rounded-xl hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium border border-gray-300"
                 >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"></path>
@@ -46,6 +51,23 @@
                 </button>
             </div>
         </div>
+
+        <!-- Compradores asignados en otra empresa (agente): no salen en este listado -->
+        {% for item in other_company_alerts %}
+        <div class="mb-6">
+            {% call ui.banner(
+                "Tienes " ~ item.count ~ (" comprador asignado" if item.count == 1 else " compradores asignados") ~ " en " ~ item.company.name,
+                tone="blue",
+                text="Este listado solo muestra " ~ brand_name ~ ". Cambia de empresa para atenderlos."
+            ) %}
+            <form method="post" action="/switch-company">
+                <input type="hidden" name="code" value="{{ item.company.code }}">
+                <input type="hidden" name="next" value="/alerts">
+                {{ ui.button("Cambiar a " ~ item.company.name, "secondary", type="submit", extra="px-3 py-2 text-xs border-blue-300 text-blue-800") }}
+            </form>
+            {% endcall %}
+        </div>
+        {% endfor %}
 
         <!-- Stats Cards -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -166,7 +188,7 @@
 
             <!-- Acciones -->
             <div class="flex gap-2">
-                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+                <button type="submit" class="px-4 py-2 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition-colors">
                     Filtrar
                 </button>
                 {% if q or status_filter or selected_agent_id %}
@@ -301,32 +323,40 @@
                                     </td>
 
                                     <td class="px-6 py-4 text-center">
-                                        <div class="flex items-center justify-center gap-2">
-                                            <a
-                                                href="/alerts/{{ alert.id }}"
-                                                class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                                            >
-                                                Ver Detalle
+                                        {# Acciones de fila (skill moyza-ui-ux-pro): icono + texto desde sm, solo icono en móvil, máximo tres #}
+                                        {% set row_btn = "inline-flex items-center justify-center gap-1.5 rounded-lg min-w-[2.25rem] h-9 px-2.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20" %}
+                                        <div class="flex items-center justify-center gap-1">
+                                            <a href="/alerts/{{ alert.id }}" class="{{ row_btn }} text-blue-700 bg-blue-50 hover:bg-blue-100" title="Ver detalle" aria-label="Ver detalle de la alerta de {{ alert.lead_name }}">
+                                                <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+                                                <span class="hidden sm:inline">Ver</span>
                                             </a>
+
+                                            {% if is_admin and alert.status in [AlertStatus.PENDING, AlertStatus.IN_PROGRESS] %}
+                                            <button type="button" class="{{ row_btn }} text-gray-700 bg-gray-100 hover:bg-gray-200"
+                                                data-reassign
+                                                data-alert-id="{{ alert.id }}"
+                                                data-agent-id="{{ alert.agent_id }}"
+                                                data-agent-name="{{ alert.agent.name if alert.agent else '' }}"
+                                                data-lead="{{ alert.lead_name }} · {{ alert.property.title }}"
+                                                title="Reasignar" aria-label="Reasignar la alerta de {{ alert.lead_name }}">
+                                                <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+                                                <span class="hidden sm:inline">Reasignar</span>
+                                            </button>
+                                            {% endif %}
 
                                             {% if is_admin and alert.status == AlertStatus.COMPLETED %}
                                             <form method="POST" action="/alerts/{{ alert.id }}/reactivate" onsubmit="return confirm('¿Reactivar esta alerta? Volverá a la cola del agente.');" class="inline">
-                                                <button
-                                                    type="submit"
-                                                    class="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors text-sm font-medium"
-                                                >
-                                                    Reactivar
+                                                <button type="submit" class="{{ row_btn }} text-amber-700 bg-amber-50 hover:bg-amber-100" title="Reactivar" aria-label="Reactivar la alerta de {{ alert.lead_name }}">
+                                                    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+                                                    <span class="hidden sm:inline">Reactivar</span>
                                                 </button>
                                             </form>
                                             {% endif %}
 
-                                            {% if request.state.user.role.name.lower() == 'admin' %}
-                                            <form method="POST" action="/alerts/{{ alert.id }}/delete" onsubmit="return confirm('¿Estás seguro de eliminar esta alerta?');" class="inline">
-                                                <button
-                                                    type="submit"
-                                                    class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
-                                                >
-                                                    Eliminar
+                                            {% if is_admin %}
+                                            <form method="POST" action="/alerts/{{ alert.id }}/delete" onsubmit="return confirm('¿Eliminar esta alerta? Esta acción no se puede deshacer.');" class="inline">
+                                                <button type="submit" class="{{ row_btn }} text-red-700 bg-red-50 hover:bg-red-100" title="Eliminar" aria-label="Eliminar la alerta de {{ alert.lead_name }}">
+                                                    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>
                                                 </button>
                                             </form>
                                             {% endif %}
@@ -443,64 +473,38 @@
 
 </div>
 
-<!-- Modal: Nuevo Comprador -->
-<div id="createBuyerModal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full">
-        <form method="POST" action="/buyers/create">
-            <div class="p-6 border-b border-gray-200">
-                <h2 class="text-xl font-bold text-gray-800">Nuevo Comprador</h2>
-                <p class="text-sm text-gray-500 mt-1">Registra un comprador sin asociar a una alerta</p>
-            </div>
-
-            <div class="p-6 space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        Nombre <span class="text-red-500">*</span>
-                    </label>
-                    <input type="text" name="name" required
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Teléfono</label>
-                        <input type="tel" name="phone"
-                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
-                        <input type="email" name="email"
-                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Notas</label>
-                    <textarea name="notes" rows="2"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"></textarea>
-                </div>
-            </div>
-
-            <div class="p-6 border-t border-gray-200 flex gap-3 justify-end">
-                <button type="button" onclick="closeCreateBuyerModal()"
-                    class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-                    Cancelar
-                </button>
-                <button type="submit"
-                    class="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
-                    Crear Comprador
-                </button>
-            </div>
-        </form>
+{% if is_admin %}
+<!-- Modal: Reasignar alerta (acción de fila; solo admin, alertas abiertas) -->
+{% call ui.modal("reassignModal", "Reasignar alerta", size="lg", subtitle=" ") %}
+<form method="POST" action="" id="reassignForm" data-once data-loading-text="Reasignando…">
+    <input type="hidden" name="next" value="/alerts{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+    <div class="p-6 space-y-4">
+        {{ assign_fields("ra", groups=assignable_groups, is_admin=True, mode="reassign") }}
+        <p class="text-sm text-gray-500">La alerta volverá a Pendiente y sin leer para el nuevo agente, que recibirá un aviso. Los seguimientos se conservan.</p>
     </div>
-</div>
+    {{ ui.modal_footer(submit_label="Reasignar") }}
+</form>
+{% endcall %}
+{% endif %}
+
+<!-- Modal: Nuevo Comprador -->
+{% call ui.modal("createBuyerModal", "Nuevo comprador", size="lg", subtitle="Registra un comprador sin asociar a una alerta") %}
+<form method="POST" action="/buyers/create" data-once>
+    <div class="p-6 space-y-4">
+        {{ ui.field("name", "Nombre", required=True, id="cbName") }}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {{ ui.field("phone", "Teléfono", type="tel", id="cbPhone", attrs='inputmode="tel"') }}
+            {{ ui.field("email", "Email", type="email", id="cbEmail") }}
+        </div>
+        {{ ui.field("notes", "Notas", type="textarea", id="cbNotes") }}
+    </div>
+    {{ ui.modal_footer(submit_label="Crear comprador") }}
+</form>
+{% endcall %}
 
 <!-- Modal: Agregar Alerta de Comprador -->
-<div id="createAlertModal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <form method="POST" action="/alerts/create" id="createAlertForm">
-            <div class="p-6 border-b border-gray-200">
-                <h2 class="text-2xl font-bold text-gray-800">Agregar alerta de comprador</h2>
-            </div>
-
+{% call ui.modal("createAlertModal", "Agregar alerta de comprador", size="2xl") %}
+        <form method="POST" action="/alerts/create" id="createAlertForm" data-once>
             <div class="p-6 space-y-5">
 
                 <!-- Sección Comprador -->
@@ -513,7 +517,7 @@
                             type="button"
                             id="btnBuyerExisting"
                             onclick="setBuyerMode('existing')"
-                            class="flex-1 py-2 px-3 rounded-lg border-2 border-blue-600 bg-blue-600 text-white text-sm font-medium transition-colors"
+                            class="flex-1 py-2 px-3 rounded-lg border-2 border-gray-900 bg-gray-900 text-white text-sm font-medium transition-colors"
                         >
                             Comprador existente
                         </button>
@@ -534,8 +538,10 @@
                                 type="text"
                                 id="buyerSearch"
                                 autocomplete="off"
+                                autofocus
+                                aria-label="Buscar comprador"
                                 placeholder="Buscar por nombre, teléfono o email..."
-                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                                class="{{ ui.input_class }} text-sm"
                             >
                             <input type="hidden" name="buyer_id" id="buyerIdHidden">
 
@@ -566,18 +572,18 @@
                                 Nombre <span class="text-red-500">*</span>
                             </label>
                             <input type="text" name="buyer_name" id="buyerNameInput"
-                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
+                                class="{{ ui.input_class }} text-sm">
                         </div>
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
                                 <input type="tel" name="buyer_phone" id="buyerPhoneInput"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
+                                    class="{{ ui.input_class }} text-sm">
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
                                 <input type="email" name="buyer_email" id="buyerEmailInput"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
+                                    class="{{ ui.input_class }} text-sm">
                             </div>
                         </div>
 
@@ -598,7 +604,7 @@
                             id="propertySearch"
                             autocomplete="off"
                             placeholder="Escribe el nombre, dirección o ciudad..."
-                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            class="{{ ui.input_class }}"
                         >
                         <input type="hidden" name="property_id" id="propertyId" required>
 
@@ -621,6 +627,9 @@
                     </div>
                 </div>
 
+                <!-- Agente asignado: aparece al elegir la propiedad (el admin puede cambiarlo) -->
+                {{ assign_fields("ca", groups=assignable_groups, is_admin=is_admin) }}
+
                 <!-- Aviso: ya existe una alerta para este comprador y esta propiedad -->
                 <div id="dupBanner" class="hidden"></div>
                 <input type="hidden" name="confirm_duplicate" id="confirmDuplicate">
@@ -629,7 +638,7 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-2">Origen / Portal</label>
                     <input type="text" name="source" id="alertSourceInput" placeholder="Ej: Idealista, Fotocasa, Web, Llamada"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                        class="{{ ui.input_class }}">
                 </div>
 
                 <div class="grid grid-cols-3 gap-4">
@@ -647,7 +656,7 @@
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Tipo</label>
-                        <select name="alert_type" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
+                        <select name="alert_type" class="{{ ui.input_class }} text-sm">
                             <option value="LEAD_INTERES">Lead Interesado</option>
                             <option value="VISITA_SOLICITADA">Visita Solicitada</option>
                             <option value="CAMBIO_PRECIO">Cambio de Precio</option>
@@ -656,7 +665,7 @@
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">Prioridad</label>
-                        <select name="priority" id="alertPrioritySelect" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
+                        <select name="priority" id="alertPrioritySelect" class="{{ ui.input_class }} text-sm">
                             <option value="NORMAL">Normal</option>
                             <option value="ALTA">Alta</option>
                             <option value="BAJA">Baja</option>
@@ -667,47 +676,58 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-2">Mensaje / Notas</label>
                     <textarea name="message" id="alertMessageInput" rows="3"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"></textarea>
+                        class="{{ ui.input_class }}"></textarea>
                 </div>
             </div>
 
-            <div class="p-6 border-t border-gray-200 flex gap-3 justify-end">
-                <button type="button" onclick="closeCreateAlertModal()"
-                    class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">
-                    Cancelar
-                </button>
-                <button type="submit" id="createAlertSubmit"
-                    class="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
-                    Crear Alerta
-                </button>
-            </div>
+            {{ ui.modal_footer(submit_label="Crear alerta", submit_id="createAlertSubmit") }}
         </form>
-    </div>
-</div>
+{% endcall %}
 
 <script src="/static/js/alert-duplicates.js"></script>
+<script src="/static/js/alert-assign.js"></script>
+{% if is_admin %}
 <script>
+// ---- Reasignar desde el listado (un modal para todas las filas, solo admin) ----
+(function () {
+    var modal = document.getElementById('reassignModal');
+    if (!modal || !window.AlertAssign) return;
+    var form = document.getElementById('reassignForm');
+    var subtitle = modal.querySelector('#reassignModalTitle + p');
+    var assign = AlertAssign.init('ra');
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-reassign]');
+        if (!btn) return;
+        form.action = '/alerts/' + encodeURIComponent(btn.dataset.alertId) + '/reassign';
+        if (subtitle) subtitle.textContent = btn.dataset.lead;
+        assign.setCurrent(btn.dataset.agentId, btn.dataset.agentName);
+        UI.openModal('reassignModal', btn);
+    });
+})();
+</script>
+{% endif %}
+<script>
+
 
 // ---- Modales ----
 function openCreateBuyerModal() {
-    document.getElementById('createBuyerModal').classList.remove('hidden');
+    UI.openModal('createBuyerModal');
 }
 function closeCreateBuyerModal() {
-    document.getElementById('createBuyerModal').classList.add('hidden');
+    UI.closeModal('createBuyerModal');
 }
 function openCreateAlertModal() {
-    document.getElementById('createAlertModal').classList.remove('hidden');
-    document.getElementById('buyerSearch').focus();
+    UI.openModal('createAlertModal');
 }
 function closeCreateAlertModal() {
-    document.getElementById('createAlertModal').classList.add('hidden');
+    UI.closeModal('createAlertModal');
 }
 function openFilterAlertModal() {
-    document.getElementById('filterAlertModal').classList.remove('hidden');
     setFcBuyerMode('existing');
+    UI.openModal('filterAlertModal');
 }
 function closeFilterAlertModal() {
-    document.getElementById('filterAlertModal').classList.add('hidden');
+    UI.closeModal('filterAlertModal');
 }
 function setFcBuyerMode(mode) {
     var panelExisting = document.getElementById('fcPanelExisting');
@@ -719,18 +739,18 @@ function setFcBuyerMode(mode) {
     if (mode === 'existing') {
         panelExisting.classList.remove('hidden');
         panelNew.classList.add('hidden');
-        btnExisting.classList.add('border-indigo-600', 'bg-indigo-600', 'text-white');
+        btnExisting.classList.add('border-gray-900', 'bg-gray-900', 'text-white');
         btnExisting.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
-        btnNew.classList.remove('border-indigo-600', 'bg-indigo-600', 'text-white');
+        btnNew.classList.remove('border-gray-900', 'bg-gray-900', 'text-white');
         btnNew.classList.add('border-gray-200', 'bg-white', 'text-gray-600');
         if (selectEl) selectEl.setAttribute('name', 'buyer_id');
         if (nameEl) nameEl.removeAttribute('required');
     } else {
         panelExisting.classList.add('hidden');
         panelNew.classList.remove('hidden');
-        btnNew.classList.add('border-indigo-600', 'bg-indigo-600', 'text-white');
+        btnNew.classList.add('border-gray-900', 'bg-gray-900', 'text-white');
         btnNew.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
-        btnExisting.classList.remove('border-indigo-600', 'bg-indigo-600', 'text-white');
+        btnExisting.classList.remove('border-gray-900', 'bg-gray-900', 'text-white');
         btnExisting.classList.add('border-gray-200', 'bg-white', 'text-gray-600');
         if (selectEl) selectEl.removeAttribute('name');
         if (nameEl) nameEl.setAttribute('required', 'required');
@@ -750,17 +770,17 @@ function setBuyerMode(mode) {
     const buyerNameInput = document.getElementById('buyerNameInput');
 
     if (mode === 'existing') {
-        btnExisting.classList.add('border-blue-600', 'bg-blue-600', 'text-white');
+        btnExisting.classList.add('border-gray-900', 'bg-gray-900', 'text-white');
         btnExisting.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
-        btnNew.classList.remove('border-blue-600', 'bg-blue-600', 'text-white');
+        btnNew.classList.remove('border-gray-900', 'bg-gray-900', 'text-white');
         btnNew.classList.add('border-gray-200', 'bg-white', 'text-gray-600');
         panelExisting.classList.remove('hidden');
         panelNew.classList.add('hidden');
         buyerNameInput.removeAttribute('required');
     } else {
-        btnNew.classList.add('border-blue-600', 'bg-blue-600', 'text-white');
+        btnNew.classList.add('border-gray-900', 'bg-gray-900', 'text-white');
         btnNew.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
-        btnExisting.classList.remove('border-blue-600', 'bg-blue-600', 'text-white');
+        btnExisting.classList.remove('border-gray-900', 'bg-gray-900', 'text-white');
         btnExisting.classList.add('border-gray-200', 'bg-white', 'text-gray-600');
         panelNew.classList.remove('hidden');
         panelExisting.classList.add('hidden');
@@ -905,6 +925,7 @@ function setBuyerMode(mode) {
     const selectedTitle = document.getElementById('propertySelectedTitle');
     const selectedMeta = document.getElementById('propertySelectedMeta');
     const form = document.getElementById('createAlertForm');
+    const assign = window.AlertAssign ? AlertAssign.init('ca') : null;
 
     let timer = null;
     let items = [];
@@ -938,7 +959,7 @@ function setBuyerMode(mode) {
             return '<li data-index="' + i + '" class="property-option px-4 py-2 cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0">'
                 + '<p class="text-sm font-medium text-gray-800">' + escapeHtml(p.title) + '</p>'
                 + (meta ? '<p class="text-xs text-gray-500">' + escapeHtml(meta) + '</p>' : '')
-                + (p.agent ? '<p class="text-xs text-gray-400">Agente: ' + escapeHtml(p.agent) + '</p>' : '')
+                + '<p class="text-xs text-gray-500">' + (p.agent ? 'Agente: ' + escapeHtml(p.agent) : 'Sin agente captador') + '</p>'
                 + '</li>';
         }).join('');
         list.classList.remove('hidden');
@@ -960,11 +981,13 @@ function setBuyerMode(mode) {
         selectedMeta.textContent = [property.address, property.city].filter(Boolean).join(' · ');
         selected.classList.remove('hidden');
         hideResults();
+        if (assign) assign.setOwner(property.agent_id, property.agent);
         if (window.alertDupRefresh) window.alertDupRefresh();
     }
 
     window.clearPropertySelection = function () {
         hidden.value = '';
+        if (assign) assign.clear();
         selected.classList.add('hidden');
         input.classList.remove('hidden');
         input.value = '';
@@ -1136,14 +1159,8 @@ function setBuyerMode(mode) {
 })();
 </script>
 <!-- Modal: Agregar alerta con filtro (comprador + criterios de búsqueda) -->
-<div id="filterAlertModal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[92vh] overflow-y-auto">
-        <form method="POST" action="/buyers/create-with-criteria">
-            <div class="p-6 border-b border-gray-200">
-                <h2 class="text-xl font-bold text-gray-800">Agregar alerta con filtro</h2>
-                <p class="text-sm text-gray-500 mt-1">Registra el comprador y sus criterios de búsqueda. Al guardar verás las propiedades compatibles.</p>
-            </div>
-
+{% call ui.modal("filterAlertModal", "Agregar alerta con filtro", size="3xl", subtitle="Registra el comprador y sus criterios de búsqueda. Al guardar verás las propiedades compatibles.") %}
+        <form method="POST" action="/buyers/create-with-criteria" data-once>
             <div class="p-6 space-y-6">
 
                 <!-- Sección comprador -->
@@ -1151,7 +1168,7 @@ function setBuyerMode(mode) {
                     <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Comprador</h3>
                     <div class="flex gap-3">
                         <button type="button" id="fcBtnExisting" onclick="setFcBuyerMode('existing')"
-                            class="flex-1 py-2 px-3 rounded-lg border-2 border-indigo-600 bg-indigo-600 text-white text-sm font-medium transition-colors">
+                            class="flex-1 py-2 px-3 rounded-lg border-2 border-gray-900 bg-gray-900 text-white text-sm font-medium transition-colors">
                             Comprador existente
                         </button>
                         <button type="button" id="fcBtnNew" onclick="setFcBuyerMode('new')"
@@ -1162,7 +1179,7 @@ function setBuyerMode(mode) {
 
                     <div id="fcPanelExisting">
                         <select name="buyer_id" id="fcBuyerSelect"
-                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm">
+                            class="{{ ui.input_class }} text-sm">
                             <option value="">— Selecciona un comprador —</option>
                             {% for buyer in buyers %}
                             <option value="{{ buyer.id }}">
@@ -1176,18 +1193,18 @@ function setBuyerMode(mode) {
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Nombre <span class="text-red-500">*</span></label>
                             <input type="text" name="buyer_name" id="fcBuyerName"
-                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm">
+                                class="{{ ui.input_class }} text-sm">
                         </div>
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
                                 <input type="tel" name="buyer_phone"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm">
+                                    class="{{ ui.input_class }} text-sm">
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
                                 <input type="email" name="buyer_email"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm">
+                                    class="{{ ui.input_class }} text-sm">
                             </div>
                         </div>
                     </div>
@@ -1208,7 +1225,7 @@ function setBuyerMode(mode) {
                                     {% for zone in zones %}
                                     <label class="flex items-center gap-2 cursor-pointer">
                                         <input type="checkbox" name="zones" value="{{ zone }}"
-                                            class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                            class="w-4 h-4 text-gray-900 border-gray-300 rounded focus:ring-gray-900/30">
                                         <span class="text-sm text-gray-700">{{ zone }}</span>
                                     </label>
                                     {% endfor %}
@@ -1222,7 +1239,7 @@ function setBuyerMode(mode) {
                                     {% for city in cities %}
                                     <label class="flex items-center gap-2 cursor-pointer">
                                         <input type="checkbox" name="cities" value="{{ city }}"
-                                            class="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                            class="w-4 h-4 text-gray-900 border-gray-300 rounded focus:ring-gray-900/30">
                                         <span class="text-sm text-gray-700">{{ city }}</span>
                                     </label>
                                     {% endfor %}
@@ -1236,7 +1253,7 @@ function setBuyerMode(mode) {
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Tipo de inmueble</label>
                                 <select name="property_type"
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
+                                    class="{{ ui.input_class }}">
                                     <option value="">Cualquier tipo</option>
                                     {% for pt in property_types %}
                                     <option value="{{ pt }}">{{ pt }}</option>
@@ -1259,18 +1276,18 @@ function setBuyerMode(mode) {
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">Dorm. mín.</label>
                                     <input type="number" name="min_bedrooms" min="0" max="20" placeholder="–"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
+                                        class="{{ ui.input_class }}">
                                 </div>
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">Dorm. máx.</label>
                                     <input type="number" name="max_bedrooms" min="0" max="20" placeholder="–"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
+                                        class="{{ ui.input_class }}">
                                 </div>
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-600 mb-1">Baños mín.</label>
                                 <input type="number" name="min_bathrooms" min="0" max="10" placeholder="–"
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
+                                    class="{{ ui.input_class }}">
                             </div>
                         </div>
 
@@ -1280,31 +1297,31 @@ function setBuyerMode(mode) {
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">Precio mín. €</label>
                                     <input type="number" name="min_price" min="0" step="1000" placeholder="–"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
+                                        class="{{ ui.input_class }}">
                                 </div>
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">Precio máx. €</label>
                                     <input type="number" name="max_price" min="0" step="1000" placeholder="–"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
+                                        class="{{ ui.input_class }}">
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-2">
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">m² mín.</label>
                                     <input type="number" name="min_m2" min="0" placeholder="–"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
+                                        class="{{ ui.input_class }}">
                                 </div>
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">m² máx.</label>
                                     <input type="number" name="max_m2" min="0" placeholder="–"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
+                                        class="{{ ui.input_class }}">
                                 </div>
                             </div>
                             {% if is_admin %}
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Agente responsable</label>
                                 <select name="agent_id"
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500">
+                                    class="{{ ui.input_class }}">
                                     <option value="">Sin asignar</option>
                                     {% for agent in agents %}
                                     <option value="{{ agent.id }}">{{ agent.name }}</option>
@@ -1315,7 +1332,7 @@ function setBuyerMode(mode) {
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Imprescindibles</label>
                                 <textarea name="notes" rows="3" placeholder="Ej: planta baja, piscina, sin reformar..."
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
+                                    class="{{ ui.input_class }} resize-none"></textarea>
                             </div>
                         </div>
                     </div>
@@ -1323,21 +1340,8 @@ function setBuyerMode(mode) {
 
             </div>
 
-            <div class="p-6 border-t border-gray-200 flex gap-3 justify-end">
-                <button type="button" onclick="closeFilterAlertModal()"
-                    class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors text-sm">
-                    Cancelar
-                </button>
-                <button type="submit"
-                    class="px-4 py-2 text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium flex items-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                    </svg>
-                    Guardar y ver propiedades compatibles
-                </button>
-            </div>
+            {{ ui.modal_footer(submit_label="Guardar y ver compatibles") }}
         </form>
-    </div>
-</div>
+{% endcall %}
 
 {% endblock %}

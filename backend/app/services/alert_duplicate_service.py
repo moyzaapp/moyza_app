@@ -20,6 +20,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.constants import AlertStatus, AlertType
+from app.core.constants import FollowUpActionType
 from app.models.buyer import Buyer
 from app.models.property_alert import PropertyAlert
 from app.models.user import User
@@ -175,7 +176,11 @@ def serialize_alert(alert: PropertyAlert, user_names: Dict[int, str]) -> dict:
         "completed_at": madrid_dt(alert.completed_at, "%d/%m/%Y") if alert.completed_at else "",
         "created_by": user_names.get(alert.created_by, ""),
         "agent": alert.agent.name if alert.agent else "",
-        "follow_ups": len(alert.follow_ups or []),
+        # Seguimientos reales (sin la nota automática de reasignación)
+        "follow_ups": sum(
+            1 for f in (alert.follow_ups or [])
+            if f.action_type not in FollowUpActionType.SYSTEM_ACTIONS
+        ),
     }
 
 

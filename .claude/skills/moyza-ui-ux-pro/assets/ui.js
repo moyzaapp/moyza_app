@@ -1,13 +1,15 @@
 /*
  * UI helpers MOYZA / MOES PREMIUM.
  *
- * Instalación: copiar a backend/app/static/js/ui.js y cargar en base.html antes del
- * cierre de <body>:  <script src="/static/js/ui.js"></script>
+ * Se carga una sola vez en base.html (en <head>, no depende del DOM al cargar).
  *
  * Qué hace:
- *  - Modales accesibles: UI.openModal(id) / UI.closeModal(id). Cierra con Escape, con
- *    cualquier [data-modal-close] dentro del modal y con clic en el fondo. Mueve el foco
- *    al primer control y lo devuelve al elemento que abrió el modal.
+ *  - Modales accesibles: UI.openModal(id, opener) / UI.closeModal(id). Cierra con Escape,
+ *    con cualquier [data-modal-close] dentro del modal y con clic en el fondo. Mueve el
+ *    foco dentro del modal y lo devuelve al elemento que lo abrió. En pantallas táctiles
+ *    no enfoca ningún campo al abrir (abriría el teclado y taparía medio modal); enfoca
+ *    el panel, y el usuario toca el campo que quiera.
+ *  - Hoja móvil: arrastrar hacia abajo la barra superior (o la cabecera) cierra el modal.
  *  - Guardia de doble envío: <form data-once> desactiva el botón de envío al enviar y
  *    muestra "Guardando…" (o el texto de data-loading-text).
  *  - Botones [data-modal-open="id"] abren el modal sin JS en línea.
@@ -24,6 +26,14 @@ window.UI = (function () {
         return typeof id === 'string' ? document.getElementById(id) : id;
     }
 
+    function isTouch() {
+        return window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    }
+
+    function isMobileSheet() {
+        return window.matchMedia && window.matchMedia('(max-width: 639px)').matches;
+    }
+
     // ---- Modales ----------------------------------------------------------
 
     function openModal(id, opener) {
@@ -36,8 +46,19 @@ window.UI = (function () {
         document.body.classList.add('overflow-hidden');
         openStack.push({ id: modal.id, opener: opener || document.activeElement });
 
-        var first = modal.querySelector('[autofocus]') || modal.querySelector(FOCUSABLE);
-        if (first) setTimeout(function () { first.focus(); }, 20);
+        var body = modal.querySelector('[data-modal-body]');
+        if (body) body.scrollTop = 0;
+
+        var panel = modal.querySelector('[data-modal-panel]');
+        var explicit = modal.querySelector('[autofocus]');
+        var target;
+        if (isTouch()) {
+            // No abrir el teclado solo por abrir el modal
+            target = panel || modal.querySelector(FOCUSABLE);
+        } else {
+            target = explicit || modal.querySelector('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])') || modal.querySelector(FOCUSABLE) || panel;
+        }
+        if (target) setTimeout(function () { try { target.focus({ preventScroll: true }); } catch (e) { target.focus(); } }, 20);
     }
 
     function closeModal(id) {
@@ -52,11 +73,18 @@ window.UI = (function () {
             if (openStack[i].id === modal.id) { entry = openStack.splice(i, 1)[0]; break; }
         }
         if (!openStack.length) document.body.classList.remove('overflow-hidden');
-        if (entry && entry.opener && typeof entry.opener.focus === 'function') entry.opener.focus();
+        if (entry && entry.opener && typeof entry.opener.focus === 'function' && document.contains(entry.opener)) {
+            try { entry.opener.focus({ preventScroll: true }); } catch (e) { entry.opener.focus(); }
+        }
     }
 
     function closeTop() {
         if (openStack.length) closeModal(openStack[openStack.length - 1].id);
+    }
+
+    function isOpen(id) {
+        var modal = el(id);
+        return !!modal && !modal.classList.contains('hidden');
     }
 
     document.addEventListener('keydown', function (e) {
@@ -79,6 +107,49 @@ window.UI = (function () {
             if (modal) { e.preventDefault(); closeModal(modal.id); }
         }
     });
+
+    // Hoja móvil: arrastrar hacia abajo desde la barra o la cabecera cierra el modal
+    (function enableSwipeToClose() {
+        var startY = null, startX = null, panel = null, dialog = null, dragging = false;
+
+        document.addEventListener('touchstart', function (e) {
+            if (!isMobileSheet()) return;
+            var handle = e.target.closest('[data-modal-panel] > header, [data-modal-panel] > [aria-hidden="true"]');
+            if (!handle) return;
+            panel = handle.closest('[data-modal-panel]');
+            dialog = panel && panel.closest('[role="dialog"]');
+            if (!dialog) return;
+            startY = e.touches[0].clientY;
+            startX = e.touches[0].clientX;
+            dragging = true;
+            panel.style.transition = 'none';
+        }, { passive: true });
+
+        document.addEventListener('touchmove', function (e) {
+            if (!dragging || !panel) return;
+            var dy = e.touches[0].clientY - startY;
+            var dx = Math.abs(e.touches[0].clientX - startX);
+            if (dy > 0 && dy > dx) panel.style.transform = 'translateY(' + dy + 'px)';
+        }, { passive: true });
+
+        document.addEventListener('touchend', function (e) {
+            if (!dragging || !panel) return;
+            var dy = (e.changedTouches[0].clientY - startY);
+            panel.style.transition = 'transform 150ms ease-out';
+            if (dy > 90) {
+                panel.style.transform = 'translateY(100%)';
+                var toClose = dialog, p = panel;
+                setTimeout(function () {
+                    closeModal(toClose.id);
+                    p.style.transform = '';
+                    p.style.transition = '';
+                }, 150);
+            } else {
+                panel.style.transform = '';
+            }
+            dragging = false; panel = null; dialog = null;
+        });
+    })();
 
     // ---- Doble envío ------------------------------------------------------
 
@@ -117,6 +188,7 @@ window.UI = (function () {
         openModal: openModal,
         closeModal: closeModal,
         closeTop: closeTop,
+        isOpen: isOpen,
         escapeHtml: escapeHtml
     };
 })();

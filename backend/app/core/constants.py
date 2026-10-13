@@ -234,8 +234,18 @@ class FollowUpActionType:
     # Etapas que cierran la alerta automáticamente al registrarlas
     CLOSING_STAGES = {"CERRADO", "SIN_INTERES", "SIN_SOLVENCIA_ECONOMICA", "NO_APTO_PROPIETARIO"}
 
+    # Nota automática del sistema (PLAN_ASIGNACION_ALERTAS.md §2.2): la escribe
+    # la reasignación, nunca el formulario de seguimiento (no está en
+    # STAGE_ORDER, así que `is_valid` la rechaza). No avanza etapa y no cuenta
+    # como gestión del agente: no desbloquea la cola, no permite cerrar la
+    # alerta ni marca actividad.
+    REASIGNADA = "REASIGNADA"
+
     # Acciones que no avanzan la etapa de progresión visible
     REPEATABLE_ACTIONS = {"SIN_RESPUESTA"}
+
+    # Acciones del sistema: se muestran en el historial pero no son seguimientos
+    SYSTEM_ACTIONS = {"REASIGNADA"}
 
     # Orden numérico de las etapas de progresión
     STAGE_ORDER = {
@@ -264,6 +274,7 @@ class FollowUpActionType:
             cls.SIN_INTERES: "Sin Interés",
             cls.SIN_SOLVENCIA_ECONOMICA: "Sin Solvencia Económica",
             cls.NO_APTO_PROPIETARIO: "No apto para el propietario",
+            cls.REASIGNADA: "Reasignada",
             # Etiquetas heredadas para registros antiguos
             "LLAMADA": "Llamada",
             "EMAIL_ENVIADO": "Email Enviado",
@@ -312,6 +323,8 @@ class FollowUpActionType:
             "SIN_INTERES": "bg-red-100 text-red-700",
             "SIN_SOLVENCIA_ECONOMICA": "bg-red-100 text-red-700",
             "NO_APTO_PROPIETARIO": "bg-red-100 text-red-700",
+            # Nota del sistema: neutro, no es una etapa
+            "REASIGNADA": "bg-gray-100 text-gray-700",
             # Legados
             "LLAMADA": "bg-gray-100 text-gray-700",
             "EMAIL_ENVIADO": "bg-gray-100 text-gray-700",

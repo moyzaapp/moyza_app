@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% import "components/ui_macros.html" as ui %}
 
 {% block title %}
 Detalle Propiedad
@@ -79,8 +80,8 @@ Detalle Propiedad
         <!-- Botón de registrar actividad -->
         <button
             type="button"
-            onclick="document.getElementById('activityModal').classList.remove('hidden')"
-            class="bg-purple-600 text-white px-4 py-3 rounded-xl hover:bg-purple-700 active:bg-purple-800 transition-colors text-center font-medium flex items-center justify-center gap-2"
+            data-modal-open="activityModal"
+            class="bg-gray-900 text-white px-4 py-3 rounded-xl hover:bg-gray-800 transition-colors text-center font-medium flex items-center justify-center gap-2"
         >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
@@ -818,99 +819,23 @@ Detalle Propiedad
 </div>
 
 <!-- Modal para Registrar actividad -->
-<div id="activityModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div class="p-6">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-xl font-bold">Registrar actividad</h3>
-                <button
-                    type="button"
-                    onclick="document.getElementById('activityModal').classList.add('hidden')"
-                    class="text-gray-400 hover:text-gray-600"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
-            </div>
-
-            <form
-                action="/properties/{{ property.id }}/interactions/create"
-                method="POST"
-                class="grid grid-cols-1 sm:grid-cols-2 gap-4"
-            >
-                <div class="sm:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Tipo</label>
-                    <select
-                        name="interaction_type"
-                        class="w-full border border-gray-300 p-3 rounded-xl text-base"
-                        required
-                    >
-                        <option value="CONSULTA">Consulta</option>
-                        <option value="VISITA">Visita</option>
-                        <option value="INTERESADO">Interesado</option>
-                        <option value="OFERTA">Oferta</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Contacto</label>
-                    <input
-                        type="text"
-                        name="contact_name"
-                        placeholder="Nombre contacto"
-                        class="w-full border border-gray-300 p-3 rounded-xl text-base"
-                    >
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Teléfono</label>
-                    <input
-                        type="text"
-                        name="phone"
-                        placeholder="Teléfono"
-                        class="w-full border border-gray-300 p-3 rounded-xl text-base"
-                    >
-                </div>
-
-                <div class="sm:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Origen</label>
-                    <input
-                        type="text"
-                        name="source"
-                        placeholder="Origen"
-                        class="w-full border border-gray-300 p-3 rounded-xl text-base"
-                    >
-                </div>
-
-                <div class="sm:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Observaciones</label>
-                    <textarea
-                        name="notes"
-                        class="w-full border border-gray-300 p-3 rounded-xl text-base"
-                        placeholder="Observaciones"
-                        rows="3"
-                    ></textarea>
-                </div>
-
-                <div class="sm:col-span-2 flex justify-end gap-3">
-                    <button
-                        type="button"
-                        onclick="document.getElementById('activityModal').classList.add('hidden')"
-                        class="px-5 py-3 rounded-xl border border-gray-300 hover:bg-gray-50 transition-colors font-medium"
-                    >
-                        Cancelar
-                    </button>
-                    <button
-                        type="submit"
-                        class="bg-purple-600 text-white px-5 py-3 rounded-xl hover:bg-purple-700 active:bg-purple-800 transition-colors font-medium"
-                    >
-                        Registrar
-                    </button>
-                </div>
-            </form>
+{% call ui.modal("activityModal", "Registrar actividad", size="2xl", subtitle=property.title) %}
+<form action="/properties/{{ property.id }}/interactions/create" method="POST" data-once data-loading-text="Registrando…">
+    <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="sm:col-span-2">
+            {{ ui.select("interaction_type", "Tipo", [("CONSULTA", "Consulta"), ("VISITA", "Visita"), ("INTERESADO", "Interesado"), ("OFERTA", "Oferta")], value="CONSULTA", required=True, empty=None, id="actInteractionType") }}
+        </div>
+        {{ ui.field("contact_name", "Contacto", placeholder="Nombre del contacto", id="actContactName") }}
+        {{ ui.field("phone", "Teléfono", type="tel", placeholder="Teléfono", id="actPhone", attrs='inputmode="tel"') }}
+        <div class="sm:col-span-2">
+            {{ ui.field("source", "Origen", placeholder="Ej: Idealista, llamada, visita a oficina", id="actSource") }}
+        </div>
+        <div class="sm:col-span-2">
+            {{ ui.field("notes", "Observaciones", type="textarea", id="actNotes") }}
         </div>
     </div>
-</div>
+    {{ ui.modal_footer(submit_label="Registrar") }}
+</form>
+{% endcall %}
 
 {% endblock %}

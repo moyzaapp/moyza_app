@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% import "components/ui_macros.html" as ui %}
+{% from "alerts/assign_fields.html" import assign_fields with context %}
 
 {% block title %}Detalle Alerta - {{ brand_name }}{% endblock %}
 
@@ -107,10 +109,61 @@
                         </div>
                         {% endif %}
 
-                        <div>
-                            <label class="text-sm text-gray-600">Agente Responsable</label>
-                            <p class="text-gray-800 font-medium">{{ alert.agent.name }}</p>
+                    </div>
+
+                    <!-- Agente asignado (PLAN_ASIGNACION_ALERTAS.md §2.3) -->
+                    {% set owner = alert.property.agent %}
+                    {% set reassignments = alert.assignment_logs | selectattr('from_agent_id') | list %}
+                    <div class="mt-4 pt-4 border-t border-gray-200" id="alertAssignment">
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                            <div class="min-w-0">
+                                <p class="text-sm text-gray-600">Agente asignado</p>
+                                <p class="text-gray-900 font-medium">{{ alert.agent.name if alert.agent else '—' }}</p>
+                                <p class="text-xs text-gray-500 mt-0.5">
+                                    Asignada{% if alert.assigned_by_user %} por {{ alert.assigned_by_user.full_name or alert.assigned_by_user.email }}{% endif %}
+                                    el {{ (alert.assigned_at or alert.created_at) | madrid_dt('%d/%m/%Y %H:%M') }}
+                                </p>
+                                {% if not owner %}
+                                <p class="text-xs text-gray-500">La propiedad no tiene agente captador</p>
+                                {% elif owner.id != alert.agent_id %}
+                                <p class="text-xs text-gray-500">Agente de la propiedad: {{ owner.name }}</p>
+                                {% endif %}
+                                {% if alert.previous_agent %}
+                                <p class="text-xs text-gray-500">Antes: {{ alert.previous_agent.name }}</p>
+                                {% endif %}
+                                {% if alert.assignment_reason %}
+                                <p class="text-xs text-gray-500">Motivo: {{ alert.assignment_reason }}</p>
+                                {% endif %}
+                            </div>
+                            {% if can_reassign %}
+                            {{ ui.button("Reasignar", "secondary", attrs='data-modal-open="reassignModal"', extra="shrink-0 px-3 py-2", full_mobile=True) }}
+                            {% endif %}
                         </div>
+
+                        {% if reassignments %}
+                        <details class="mt-3 group">
+                            <summary class="cursor-pointer text-sm font-medium text-blue-600 hover:text-blue-700 select-none">
+                                Historial de asignaciones ({{ alert.assignment_logs | length }})
+                            </summary>
+                            <ol class="mt-3 space-y-3 border-l-2 border-gray-200 pl-4">
+                                {% for log in alert.assignment_logs %}
+                                <li class="text-sm text-gray-700">
+                                    <p>
+                                        {% if log.from_agent_id %}
+                                        De <span class="font-medium">{{ log.from_agent.name if log.from_agent else 'agente eliminado' }}</span>
+                                        a <span class="font-medium">{{ log.to_agent.name if log.to_agent else 'agente eliminado' }}</span>
+                                        {% else %}
+                                        Alta asignada a <span class="font-medium">{{ log.to_agent.name if log.to_agent else 'agente eliminado' }}</span>
+                                        {% endif %}
+                                    </p>
+                                    <p class="text-xs text-gray-500">
+                                        {{ log.created_at | madrid_dt('%d/%m/%Y %H:%M') }}{% if log.assigned_by_user %} · {{ log.assigned_by_user.full_name or log.assigned_by_user.email }}{% endif %}{% if log.reason %} · {{ log.reason }}{% endif %}
+                                    </p>
+                                </li>
+                                {% endfor %}
+                            </ol>
+                        </details>
+                        {% endif %}
                     </div>
                 </div>
 
@@ -260,76 +313,73 @@
 
 </div>
 
-<!-- Modal Agregar Seguimiento -->
-<div id="followUpModal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-        <form method="POST" action="/alerts/{{ alert.id }}/follow-up">
-            <div class="p-6 border-b border-gray-200">
-                <h2 class="text-2xl font-bold text-gray-800">Agregar Seguimiento</h2>
-            </div>
-
-            <div class="p-6 space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Etapa de Seguimiento</label>
-                    <select name="action_type" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                        <optgroup label="Seguimiento">
-                            {% for value, label in FollowUpActionType.progression_stages() %}
-                            <option value="{{ value }}">{{ label }}</option>
-                            {% endfor %}
-                        </optgroup>
-                        <optgroup label="Cierre (completa la alerta)">
-                            {% for value, label in FollowUpActionType.closing_stages() %}
-                            <option value="{{ value }}">{{ label }}</option>
-                            {% endfor %}
-                        </optgroup>
-                    </select>
-                    <p class="text-xs text-gray-500 mt-1">Las opciones de cierre completan la alerta automáticamente.</p>
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        Notas <span id="notesRequired" class="text-red-500 hidden">*</span>
-                    </label>
-                    <textarea id="followUpNotes" name="notes" rows="4"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                        placeholder="Describe qué ocurrió en este seguimiento..."></textarea>
-                    <p id="notesHint" class="text-xs text-gray-500 mt-1 hidden">Obligatorio al cerrar la alerta.</p>
-                </div>
-
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Fecha Próxima Acción (Opcional)</label>
-                    <input type="datetime-local" name="next_action_date" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-                </div>
-            </div>
-
-            <div class="p-6 border-t border-gray-200 flex gap-3 justify-end">
-                <button
-                    type="button"
-                    onclick="closeFollowUpModal()"
-                    class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                >
-                    Cancelar
-                </button>
-                <button
-                    type="submit"
-                    class="px-4 py-2 text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
-                >
-                    Guardar Seguimiento
-                </button>
-            </div>
-        </form>
+{% if can_reassign %}
+<!-- Modal Reasignar (solo admin, alertas abiertas) -->
+{% call ui.modal("reassignModal", "Reasignar alerta", size="lg", subtitle=alert.lead_name ~ " · " ~ alert.property.title) %}
+<form method="POST" action="/alerts/{{ alert.id }}/reassign" data-once data-loading-text="Reasignando…">
+    <input type="hidden" name="next" value="/alerts/{{ alert.id }}">
+    <div class="p-6 space-y-4">
+        {{ assign_fields("ra", groups=assignable_groups, is_admin=True, mode="reassign") }}
+        <p class="text-sm text-gray-500">La alerta volverá a Pendiente y sin leer para el nuevo agente, que recibirá un aviso. Los seguimientos se conservan.</p>
     </div>
-</div>
+    {{ ui.modal_footer(submit_label="Reasignar") }}
+</form>
+{% endcall %}
+<script src="/static/js/alert-assign.js"></script>
+<script>
+(function () {
+    var assign = window.AlertAssign && AlertAssign.init('ra');
+    if (assign) assign.setCurrent({{ alert.agent_id | tojson }}, {{ (alert.agent.name if alert.agent else '') | tojson }});
+})();
+</script>
+{% endif %}
+
+<!-- Modal Agregar Seguimiento -->
+{% call ui.modal("followUpModal", "Agregar seguimiento", size="lg", subtitle=alert.lead_name ~ " · " ~ alert.property.title) %}
+<form method="POST" action="/alerts/{{ alert.id }}/follow-up" data-once>
+    <div class="p-6 space-y-4">
+        <div>
+            <label for="followUpActionType" class="block text-sm font-medium text-gray-700 mb-1">Etapa de seguimiento <span class="text-red-500" aria-hidden="true">*</span></label>
+            <select id="followUpActionType" name="action_type" required class="{{ ui.input_class }}" aria-describedby="followUpActionHelp">
+                <optgroup label="Seguimiento">
+                    {% for value, label in FollowUpActionType.progression_stages() %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </optgroup>
+                <optgroup label="Cierre (completa la alerta)">
+                    {% for value, label in FollowUpActionType.closing_stages() %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </optgroup>
+            </select>
+            <p id="followUpActionHelp" class="text-xs text-gray-500 mt-1">Las opciones de cierre completan la alerta automáticamente.</p>
+        </div>
+
+        <div>
+            <label for="followUpNotes" class="block text-sm font-medium text-gray-700 mb-1">
+                Notas <span id="notesRequired" class="text-red-500 hidden" aria-hidden="true">*</span>
+            </label>
+            <textarea id="followUpNotes" name="notes" rows="4" class="{{ ui.input_class }} resize-y"
+                placeholder="Describe qué ocurrió en este seguimiento"></textarea>
+            <p id="notesHint" class="text-xs text-gray-500 mt-1 hidden">Obligatorio al cerrar la alerta.</p>
+        </div>
+
+        {{ ui.field("next_action_date", "Fecha de la próxima acción", type="datetime-local", optional_label=True, id="followUpNextDate") }}
+    </div>
+
+    {{ ui.modal_footer(submit_label="Guardar seguimiento") }}
+</form>
+{% endcall %}
 
 <script>
 const CLOSING_STAGES = new Set(['CERRADO', 'SIN_INTERES', 'SIN_SOLVENCIA_ECONOMICA']);
 
 function openFollowUpModal() {
-    document.getElementById('followUpModal').classList.remove('hidden');
+    UI.openModal('followUpModal');
 }
 
 function closeFollowUpModal() {
-    document.getElementById('followUpModal').classList.add('hidden');
+    UI.closeModal('followUpModal');
 }
 
 (function () {

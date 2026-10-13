@@ -169,11 +169,22 @@ def test_datos_de_moes_asignados_a_moes(moes_data, companies):
     assert [c.code for c in moes_data["client"].companies] == ["MOES"]
 
 
+def _without_assign_select(html: str) -> str:
+    """Quita los selects de agente de la nueva alerta y de la reasignación.
+
+    Ofrece agentes de todas las empresas a propósito (PLAN_ASIGNACION_ALERTAS.md
+    §4-1 B, como el acompañante de visitas); fuera de él no debe haber datos de
+    la otra empresa.
+    """
+    import re
+    return re.sub(r'<select name="agent_id" id="[a-z]+AgentSelect".*?</select>', "", html, flags=re.S)
+
+
 @pytest.mark.parametrize("path", ["/properties", "/agents", "/clients", "/alerts?tab=buyers"])
 def test_listados_aislados(moyza, moes, moes_data, path):
     tag = moes_data["tag"]
     assert tag in moes.get(path)[1]
-    assert tag not in moyza.get(path)[1]
+    assert tag not in _without_assign_select(moyza.get(path)[1])
 
 
 def test_detalle_por_id_cruzado_redirige(moyza, moes, moes_data):

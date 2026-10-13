@@ -253,7 +253,8 @@ def _alerts_for(db, buyer_id, property_id):
 @integration
 def test_flujo_duplicado_comprador_existente(moes, db, data):
     buyer_id, prop_id = data["buyer"].id, data["property"].id
-    form = {"buyer_id": buyer_id, "property_id": prop_id, "source": "Idealista", "message": "Primer contacto"}
+    form = {"buyer_id": buyer_id, "property_id": prop_id, "source": "Idealista", "message": "Primer contacto",
+            "business_type": "Venta"}
 
     # Sin alertas: la consulta previa no devuelve nada
     status, body = moes.get_json(f"/alerts/check-duplicate?buyer_id={buyer_id}&property_id={prop_id}")
@@ -350,6 +351,7 @@ def test_comprador_nuevo_con_telefono_repetido(moes, db, data):
     # Alta como nuevo comprador con el mismo teléfono: se rechaza con aviso
     status, _, headers = moes.post("/alerts/create", {
         "property_id": prop_id, "buyer_name": f"{tag} OTRO", "buyer_phone": "611 22 33 44",
+        "business_type": "Venta",
     })
     flash = flash_of(headers)
     assert status == 302 and flash.get("category") == "warning"
@@ -360,7 +362,7 @@ def test_comprador_nuevo_con_telefono_repetido(moes, db, data):
     # Confirmando que es otra persona: se crea
     status, _, headers = moes.post("/alerts/create", {
         "property_id": prop_id, "buyer_name": f"{tag} OTRO", "buyer_phone": "611 22 33 44",
-        "confirm_new_buyer": "1",
+        "confirm_new_buyer": "1", "business_type": "Venta",
     })
     assert status == 302 and flash_of(headers).get("category") == "success"
     db.expire_all()

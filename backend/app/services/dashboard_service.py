@@ -358,12 +358,14 @@ class DashboardService:
     # ------------------------------------------------------------------
 
     def _latest_follow_up_subquery(self):
-        """Último seguimiento (por id) de cada alerta."""
+        """Último seguimiento (por id) de cada alerta, sin las notas del sistema
+        (la de reasignación no tiene próxima acción y ocultaría la pendiente)."""
         return (
             self.db.query(
                 AlertFollowUp.alert_id.label("alert_id"),
                 func.max(AlertFollowUp.id).label("follow_up_id"),
             )
+            .filter(AlertFollowUp.action_type.notin_(FollowUpActionType.SYSTEM_ACTIONS))
             .group_by(AlertFollowUp.alert_id)
             .subquery()
         )
@@ -650,11 +652,17 @@ class DashboardService:
         )
 
     def abandoned_buyers_count(self, now: datetime) -> int:
-        """Compradores PENDING con más de 7 días (misma regla que Resultados Comerciales)."""
+        """Compradores PENDING con más de 7 días (misma regla que Resultados Comerciales).
+
+        Se cuenta desde la asignación: una alerta recién reasignada no está abandonada.
+        """
         cutoff = now - timedelta(days=DashboardThresholds.ABANDONED_BUYER_DAYS)
         return (
             self._company_alerts()
-            .filter(PropertyAlert.status == AlertStatus.PENDING, PropertyAlert.created_at < cutoff)
+            .filter(
+                PropertyAlert.status == AlertStatus.PENDING,
+                func.coalesce(PropertyAlert.assigned_at, PropertyAlert.created_at) < cutoff,
+            )
             .count()
         )
 
@@ -756,7 +764,15 @@ class DashboardService:
             self.db.query(PropertyAlert.agent_id, func.max(AlertFollowUp.created_at))
             .join(AlertFollowUp, AlertFollowUp.alert_id == PropertyAlert.id)
             .join(Property, Property.id == PropertyAlert.property_id)
-            .filter(Property.company_id == self.company_id, PropertyAlert.agent_id.in_(agent_ids))
+            .filter(
+                Property.company_id == self.company_id,
+                PropertyAlert.agent_id.in_(agent_ids),
+                # La nota de reasignación la escribe el admin y los seguimientos
+                # anteriores a la asignación son del agente previo: no son
+                # actividad del agente actual
+                AlertFollowUp.action_type.notin_(FollowUpActionType.SYSTEM_ACTIONS),
+                AlertFollowUp.created_at >= func.coalesce(PropertyAlert.assigned_at, PropertyAlert.created_at),
+            )
             .group_by(PropertyAlert.agent_id)
         ):
             keep(agent_id, when)

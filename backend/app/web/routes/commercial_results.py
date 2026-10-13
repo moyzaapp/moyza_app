@@ -90,17 +90,23 @@ def _hours(delta) -> float:
     return delta.total_seconds() / 3600
 
 
+def _assigned(alert):
+    """Desde cuándo tiene la alerta su agente actual (PLAN_ASIGNACION_ALERTAS.md §2.5)."""
+    return alert.assigned_at or alert.created_at
+
+
 def buyers_context(db: Session, company_id: int) -> dict:
     all_alerts = scope_alerts(db.query(PropertyAlert), company_id).all()
 
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
     abandoned_alerts = [
         a for a in all_alerts
-        if a.status == AlertStatus.PENDING and a.created_at and a.created_at < seven_days_ago
+        # Desde la asignación: una alerta recién reasignada no está abandonada
+        if a.status == AlertStatus.PENDING and _assigned(a) and _assigned(a) < seven_days_ago
     ]
 
     response_times = [
-        _hours(a.read_at - a.created_at) for a in all_alerts if a.read_at and a.created_at
+        _hours(a.read_at - _assigned(a)) for a in all_alerts if a.read_at and _assigned(a)
     ]
     avg_response_time = sum(response_times) / len(response_times) if response_times else 0
 
@@ -110,7 +116,7 @@ def buyers_context(db: Session, company_id: int) -> dict:
         if not agent_alerts:
             continue
         agent_times = [
-            _hours(a.read_at - a.created_at) for a in agent_alerts if a.read_at and a.created_at
+            _hours(a.read_at - _assigned(a)) for a in agent_alerts if a.read_at and _assigned(a)
         ]
         latest = max(agent_alerts, key=lambda a: a.created_at or datetime.min)
         agents_data.append({
