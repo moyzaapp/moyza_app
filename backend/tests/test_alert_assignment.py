@@ -266,3 +266,71 @@ def test_lista_de_agentes_agrupada_por_empresa(ctx):
     # Cada agente una sola vez; primero los grupos con la empresa activa
     assert len(by_agent) == sum(len(g["agents"]) for g in groups)
     assert "MOYZA" in groups[0]["label"]
+
+
+# ---------------------------------------------------------------------------
+# Cola secuencial, recordatorio 48 h y cierre (§2.5)
+# ---------------------------------------------------------------------------
+
+def test_cola_ordena_por_asignacion_y_la_nota_no_desbloquea(ctx):
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.web.routes.alerts import _get_agent_open_alerts_ordered, get_locked_alert_ids
+
+    base = datetime.utcnow() - timedelta(days=10)
+    # Y: la más antigua, de Ana; X: de Bea, posterior
+    y, _ = _new_alert(ctx, ctx.ana, created_at=base, name="PYTEST-ASIG Y")
+    x, _ = _new_alert(ctx, ctx.bea, created_at=base + timedelta(days=1), name="PYTEST-ASIG X")
+    # Y se reasigna a Bea después: entra al final de su cola
+    svc.assign(ctx.db, y, ctx.bea, ctx.admin, None, is_new=False, now=base + timedelta(days=2))
+    ctx.db.flush()
+
+    queue = [a.id for a in _get_agent_open_alerts_ordered(ctx.bea.id, ctx.db, ctx.moyza.id)]
+    assert queue == [x.id, y.id]
+    assert get_locked_alert_ids(ctx.bea.id, ctx.db, ctx.moyza.id) == {y.id}
+
+    # Un seguimiento real en X desbloquea Y; la nota REASIGNADA de Y no cuenta como gestión
+    ctx.db.add(AlertFollowUp(alert_id=x.id, action_type="PRIMERA_LLAMADA", created_by=ctx.users["bea"].id))
+    z, _ = _new_alert(ctx, ctx.bea, created_at=base + timedelta(days=3), name="PYTEST-ASIG Z")
+    ctx.db.flush()
+    assert get_locked_alert_ids(ctx.bea.id, ctx.db, ctx.moyza.id) == {z.id}
+    # Ana ya no tiene Y en su cola
+    assert y.id not in [a.id for a in _get_agent_open_alerts_ordered(ctx.ana.id, ctx.db, ctx.moyza.id)]
+
+
+def test_recordatorio_48h_cuenta_desde_la_reasignacion(ctx):
+    from app.services.buyer_reminder_service import get_pending_buyers_by_agent
+
+    old = datetime.utcnow() - timedelta(days=5)
+    kept, _ = _new_alert(ctx, ctx.ana, created_at=old, name="PYTEST-ASIG SIGUE")
+    moved, _ = _new_alert(ctx, ctx.ana, created_at=old, name="PYTEST-ASIG REASIGNADA")
+    svc.assign(ctx.db, moved, ctx.bea, ctx.admin, None, is_new=False, now=datetime.utcnow())
+    ctx.db.flush()
+
+    pending = get_pending_buyers_by_agent(ctx.db, 48)
+    ana_ids = [b["alert_id"] for b in pending.get((ctx.ana.id, ctx.moyza.id), [])]
+    bea_ids = [b["alert_id"] for b in pending.get((ctx.bea.id, ctx.moyza.id), [])]
+    assert kept.id in ana_ids
+    assert moved.id not in ana_ids and moved.id not in bea_ids
+
+
+def test_nota_de_reasignacion_no_es_seguimiento(ctx):
+    """La nota REASIGNADA no oculta la próxima acción pendiente, no es
+    actividad del nuevo agente y no cuenta en el aviso de duplicados."""
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.services.alert_duplicate_service import serialize_alert
+    from app.services.dashboard_service import DashboardService
+
+    now = datetime.utcnow()
+    alert, _ = _new_alert(ctx, ctx.ana, created_at=now - timedelta(days=2))
+    ctx.db.add(AlertFollowUp(alert_id=alert.id, action_type="CONTACTADO", created_by=ctx.users["ana"].id,
+                             created_at=now - timedelta(days=1), next_action_date=now - timedelta(hours=30)))
+    ctx.db.flush()
+    svc.assign(ctx.db, alert, ctx.bea, ctx.admin, None, is_new=False, now=now)
+    ctx.db.flush()
+    ctx.db.refresh(alert)
+
+    dashboard = DashboardService(ctx.db, ctx.moyza.id)
+    due = dashboard.agenda(ctx.bea, now=now)["due"]
+    assert [d["alert_id"] for d in due] == [alert.id]
+    assert dashboard.last_activity_by_agent([ctx.bea.id]).get(ctx.bea.id) is None
+    assert serialize_alert(alert, {})["follow_ups"] == 1

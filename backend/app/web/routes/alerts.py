@@ -85,7 +85,8 @@ def _property_filter_values(db: Session, company_id: int) -> dict:
 
 
 def _get_agent_open_alerts_ordered(agent_id: int, db: Session, company_id: int):
-    """Devuelve las alertas abiertas del agente en la empresa, ordenadas FIFO.
+    """Devuelve las alertas abiertas del agente en la empresa, ordenadas FIFO
+    por fecha de asignación.
 
     La cola secuencial es por empresa: una alerta pendiente en MOYZA no
     bloquea el trabajo del mismo agente en MOES (y viceversa).
@@ -96,7 +97,13 @@ def _get_agent_open_alerts_ordered(agent_id: int, db: Session, company_id: int):
             PropertyAlert.agent_id == agent_id,
             PropertyAlert.status.in_(OPEN_ALERT_STATUSES),
         )
-        .order_by(PropertyAlert.created_at.asc(), PropertyAlert.id.asc())
+        # Una alerta reasignada entra en la cola del nuevo agente por la fecha
+        # de asignación (PLAN_ASIGNACION_ALERTAS.md §2.5); las no reasignadas
+        # tienen assigned_at = created_at, así que su orden no cambia.
+        .order_by(
+            func.coalesce(PropertyAlert.assigned_at, PropertyAlert.created_at).asc(),
+            PropertyAlert.id.asc(),
+        )
         .all()
     )
 
@@ -165,12 +172,20 @@ def visible_buyers_query(db: Session, current_user, company_id: int):
     return query.filter(or_(*conditions))
 
 
+def _real_follow_ups(db: Session, alert_id: int):
+    """Seguimientos registrados por un agente o admin (sin las notas del sistema).
+
+    La nota automática de reasignación no cuenta como gestión: no desbloquea
+    la cola ni permite cerrar la alerta.
+    """
+    return db.query(AlertFollowUp).filter(
+        AlertFollowUp.alert_id == alert_id,
+        AlertFollowUp.action_type.notin_(FollowUpActionType.SYSTEM_ACTIONS),
+    )
+
+
 def _alert_has_followup(alert_id: int, db: Session) -> bool:
-    return (
-        db.query(AlertFollowUp)
-        .filter(AlertFollowUp.alert_id == alert_id)
-        .count()
-    ) > 0
+    return _real_follow_ups(db, alert_id).first() is not None
 
 
 def get_locked_alert_ids(agent_id: int, db: Session, company_id: int) -> set:
@@ -343,13 +358,15 @@ async def alerts_page(
     alert_stages = {}
     labels = FollowUpActionType.labels()
     for alert in alerts:
-        if alert.follow_ups:
+        # Las notas del sistema (reasignación) no son una etapa
+        real = [f for f in alert.follow_ups if f.action_type not in FollowUpActionType.SYSTEM_ACTIONS]
+        if real:
             progression = [
-                f for f in alert.follow_ups
+                f for f in real
                 if f.action_type not in FollowUpActionType.REPEATABLE_ACTIONS
             ]
             latest = max(
-                progression if progression else alert.follow_ups,
+                progression if progression else real,
                 key=lambda f: f.created_at,
             )
             alert_stages[alert.id] = {
@@ -798,6 +815,9 @@ async def alert_detail(
     # Cola secuencial: si alguna alerta anterior no tiene seguimiento, bloquear acciones
     alert_locked = is_alert_locked_for_user(alert, current_user, db)
 
+    admin_view = is_admin(current_user)
+    can_reassign = admin_view and alert.status in assignment.REASSIGNABLE_STATUSES
+
     return templates.TemplateResponse(
         request=request,
         name="alerts/detail.html",
@@ -807,8 +827,15 @@ async def alert_detail(
             "follow_ups": follow_ups,
             "current_user": current_user,
             "alert_locked": alert_locked,
-            "is_admin": is_admin(current_user),
-            "can_complete": len(follow_ups) > 0,
+            "is_admin": admin_view,
+            # Cerrar exige un seguimiento real (la nota de reasignación no cuenta)
+            "can_complete": any(
+                f.action_type not in FollowUpActionType.SYSTEM_ACTIONS for f in follow_ups
+            ),
+            "can_reassign": can_reassign,
+            "assignable_groups": (
+                assignment.assignable_agents(db, get_active_company(request).id) if can_reassign else []
+            ),
             "FollowUpActionType": FollowUpActionType,
             "follow_up_labels": FollowUpActionType.labels(),
             "AlertStatus": AlertStatus,
@@ -1023,6 +1050,75 @@ async def create_alert(
         response = RedirectResponse(url="/alerts", status_code=302)
         set_flash(response, "error", "Ocurrió un error al crear la alerta")
         return response
+
+
+def _safe_back_url(next_url: Optional[str], default: str) -> str:
+    """Solo rutas internas de alertas ("/alerts..."), para volver al listado o al detalle."""
+    if next_url and next_url.startswith("/alerts") and "//" not in next_url and "\\" not in next_url:
+        return next_url
+    return default
+
+
+@router.post("/alerts/{alert_id}/reassign")
+async def reassign_alert(
+    alert_id: int,
+    request: Request,
+    agent_id: str = Form(None),
+    assignment_reason: str = Form(None),
+    next_url: str = Form(None, alias="next"),
+    db: Session = Depends(get_db)
+):
+    """Reasigna una alerta abierta a otro agente (solo admin).
+
+    PLAN_ASIGNACION_ALERTAS.md §2.2: cualquier agente de cualquier empresa (si
+    no pertenece a la de la propiedad se le da acceso), motivo opcional. La
+    alerta vuelve a pendiente y sin leer, conserva sus seguimientos, queda en
+    el historial con una nota automática y el nuevo agente recibe un aviso
+    in-app. Vuelve a `next` (listado o detalle).
+    """
+    current_user = request.state.user
+    detail_url = f"/alerts/{alert_id}"
+
+    if not is_admin(current_user):
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Solo un administrador puede reasignar alertas")
+        return response
+
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
+    if not alert:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Alerta no encontrada")
+        return response
+
+    back_url = _safe_back_url(next_url, detail_url)
+
+    agent_id_int = assignment._to_int(agent_id)
+    agent = assignment.lookup_any_agent(db)(agent_id_int) if agent_id_int is not None else None
+
+    try:
+        assignment.validate_reassignment(alert, agent, is_admin_user=True)
+    except AlertAssignmentError as error:
+        response = RedirectResponse(url=back_url, status_code=302)
+        set_flash(response, "error", str(error))
+        return response
+
+    try:
+        result = assignment.assign(db, alert, agent, current_user, assignment_reason, is_new=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error reasignando alerta: alert_id=%s", alert_id)
+        response = RedirectResponse(url=back_url, status_code=302)
+        set_flash(response, "error", "Ocurrió un error al reasignar la alerta")
+        return response
+
+    previous_name = result.previous_agent.name if result.previous_agent is not None else "sin agente"
+    message = f"Alerta de {alert.lead_name} reasignada de {previous_name} a {agent.name}"
+    if result.granted_company is not None:
+        message += f". {agent.name} ahora tiene acceso a {result.granted_company.name}"
+    response = RedirectResponse(url=back_url, status_code=302)
+    set_flash(response, "success", message)
+    return response
 
 
 @router.post("/alerts/{alert_id}/mark-read")
@@ -1269,9 +1365,8 @@ async def complete_alert(
         return response
 
     # No se puede cerrar una alerta sin al menos un seguimiento registrado
-    follow_ups_count = db.query(AlertFollowUp).filter(
-        AlertFollowUp.alert_id == alert_id
-    ).count()
+    # (la nota automática de reasignación no cuenta)
+    follow_ups_count = _real_follow_ups(db, alert_id).count()
 
     if follow_ups_count == 0:
         response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)

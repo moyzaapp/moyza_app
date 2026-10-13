@@ -333,6 +333,7 @@ def run_follow_up_due(db: Session, now: Optional[datetime] = None) -> int:
 
     latest = (
         db.query(AlertFollowUp.alert_id.label("alert_id"), func.max(AlertFollowUp.id).label("follow_up_id"))
+        .filter(AlertFollowUp.action_type.notin_(FollowUpActionType.SYSTEM_ACTIONS))
         .group_by(AlertFollowUp.alert_id)
         .subquery()
     )

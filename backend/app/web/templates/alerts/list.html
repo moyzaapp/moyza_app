@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "components/ui_macros.html" as ui %}
 {% from "alerts/assign_fields.html" import assign_fields with context %}
 
 {% block title %}Compradores - {{ brand_name }}{% endblock %}
@@ -302,32 +303,40 @@
                                     </td>
 
                                     <td class="px-6 py-4 text-center">
-                                        <div class="flex items-center justify-center gap-2">
-                                            <a
-                                                href="/alerts/{{ alert.id }}"
-                                                class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                                            >
-                                                Ver Detalle
+                                        {# Acciones de fila (skill moyza-ui-ux-pro): icono + texto desde sm, solo icono en móvil, máximo tres #}
+                                        {% set row_btn = "inline-flex items-center justify-center gap-1.5 rounded-lg min-w-[2.25rem] h-9 px-2.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20" %}
+                                        <div class="flex items-center justify-center gap-1">
+                                            <a href="/alerts/{{ alert.id }}" class="{{ row_btn }} text-blue-700 bg-blue-50 hover:bg-blue-100" title="Ver detalle" aria-label="Ver detalle de la alerta de {{ alert.lead_name }}">
+                                                <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+                                                <span class="hidden sm:inline">Ver</span>
                                             </a>
+
+                                            {% if is_admin and alert.status in [AlertStatus.PENDING, AlertStatus.IN_PROGRESS] %}
+                                            <button type="button" class="{{ row_btn }} text-gray-700 bg-gray-100 hover:bg-gray-200"
+                                                data-reassign
+                                                data-alert-id="{{ alert.id }}"
+                                                data-agent-id="{{ alert.agent_id }}"
+                                                data-agent-name="{{ alert.agent.name if alert.agent else '' }}"
+                                                data-lead="{{ alert.lead_name }} · {{ alert.property.title }}"
+                                                title="Reasignar" aria-label="Reasignar la alerta de {{ alert.lead_name }}">
+                                                <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+                                                <span class="hidden sm:inline">Reasignar</span>
+                                            </button>
+                                            {% endif %}
 
                                             {% if is_admin and alert.status == AlertStatus.COMPLETED %}
                                             <form method="POST" action="/alerts/{{ alert.id }}/reactivate" onsubmit="return confirm('¿Reactivar esta alerta? Volverá a la cola del agente.');" class="inline">
-                                                <button
-                                                    type="submit"
-                                                    class="bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors text-sm font-medium"
-                                                >
-                                                    Reactivar
+                                                <button type="submit" class="{{ row_btn }} text-amber-700 bg-amber-50 hover:bg-amber-100" title="Reactivar" aria-label="Reactivar la alerta de {{ alert.lead_name }}">
+                                                    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+                                                    <span class="hidden sm:inline">Reactivar</span>
                                                 </button>
                                             </form>
                                             {% endif %}
 
-                                            {% if request.state.user.role.name.lower() == 'admin' %}
-                                            <form method="POST" action="/alerts/{{ alert.id }}/delete" onsubmit="return confirm('¿Estás seguro de eliminar esta alerta?');" class="inline">
-                                                <button
-                                                    type="submit"
-                                                    class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
-                                                >
-                                                    Eliminar
+                                            {% if is_admin %}
+                                            <form method="POST" action="/alerts/{{ alert.id }}/delete" onsubmit="return confirm('¿Eliminar esta alerta? Esta acción no se puede deshacer.');" class="inline">
+                                                <button type="submit" class="{{ row_btn }} text-red-700 bg-red-50 hover:bg-red-100" title="Eliminar" aria-label="Eliminar la alerta de {{ alert.lead_name }}">
+                                                    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>
                                                 </button>
                                             </form>
                                             {% endif %}
@@ -443,6 +452,18 @@
     </div>
 
 </div>
+
+{% if is_admin %}
+<!-- Modal: Reasignar alerta (acción de fila; solo admin, alertas abiertas) -->
+{% call ui.modal("reassignModal", "Reasignar alerta", size="lg", subtitle=" ") %}
+<form method="POST" action="" id="reassignForm" class="p-6 space-y-4" data-once data-loading-text="Reasignando…">
+    <input type="hidden" name="next" value="/alerts{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+    {{ assign_fields("ra", groups=assignable_groups, is_admin=True, mode="reassign") }}
+    <p class="text-sm text-gray-500">La alerta volverá a Pendiente y sin leer para el nuevo agente, que recibirá un aviso. Los seguimientos se conservan.</p>
+    {{ ui.modal_footer(submit_label="Reasignar") }}
+</form>
+{% endcall %}
+{% endif %}
 
 <!-- Modal: Nuevo Comprador -->
 <div id="createBuyerModal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
@@ -691,7 +712,25 @@
 
 <script src="/static/js/alert-duplicates.js"></script>
 <script src="/static/js/alert-assign.js"></script>
+<script src="/static/js/ui.js"></script>
 <script>
+// ---- Reasignar desde el listado (un modal para todas las filas) ----
+(function () {
+    var modal = document.getElementById('reassignModal');
+    if (!modal || !window.AlertAssign) return;
+    var form = document.getElementById('reassignForm');
+    var subtitle = modal.querySelector('#reassignModalTitle + p');
+    var assign = AlertAssign.init('ra');
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-reassign]');
+        if (!btn) return;
+        form.action = '/alerts/' + encodeURIComponent(btn.dataset.alertId) + '/reassign';
+        if (subtitle) subtitle.textContent = btn.dataset.lead;
+        assign.setCurrent(btn.dataset.agentId, btn.dataset.agentName);
+        UI.openModal('reassignModal', btn);
+    });
+})();
+
 
 // ---- Modales ----
 function openCreateBuyerModal() {

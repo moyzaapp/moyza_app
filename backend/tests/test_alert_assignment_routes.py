@@ -3,8 +3,8 @@ Rutas de asignación de alertas (PLAN_ASIGNACION_ALERTAS.md), contra la app
 levantada (patrón de test_visit_agents.py; se omite si la app no responde).
 
 Datos propios en MOYZA: una propiedad captada por CAPTADOR, otra sin captador,
-un segundo agente de MOYZA (OTRO) y uno solo de MOES (MOES), cada uno con su
-usuario. Todo se borra al terminar (alertas, seguimientos, historial,
+dos agentes más de MOYZA (OTRO; NUEVO, con la cola vacía para ver la alerta
+reasignada sin bloqueo) y uno solo de MOES (MOES), cada uno con su usuario. Todo se borra al terminar (alertas, seguimientos, historial,
 notificaciones, compradores, propiedades, usuarios y agentes).
 
     docker exec moyza_backend python -m pytest tests/test_alert_assignment_routes.py -q
@@ -91,7 +91,7 @@ def data():
     role = db.query(Role).filter(Role.name.ilike("agent")).first()
 
     agents = {}
-    for key, companies in (("captador", [moyza]), ("otro", [moyza]), ("moes", [moes])):
+    for key, companies in (("captador", [moyza]), ("otro", [moyza]), ("nuevo", [moyza]), ("moes", [moes])):
         ag = Agent(name=f"{TAG} {key.upper()}", email=EMAIL.format(key))
         ag.companies.extend(companies)
         user = User(email=EMAIL.format(key), full_name=f"{TAG} {key}", hashed_password="pytest-sin-login",
@@ -280,3 +280,123 @@ def test_formulario_select_solo_para_admin(data):
     status, body, _ = _Client(EMAIL.format("otro"), "MOYZA").get("/alerts")
     assert status == 200
     assert 'id="caAgentSelect"' not in body and "Se asignará a" in body
+
+
+# ---------------------------------------------------------------------------
+# Fase 3: reasignar alertas existentes
+# ---------------------------------------------------------------------------
+
+def _new_alert_for(data, name, agent_key=None):
+    admin = _Client(ADMIN_EMAIL, "MOYZA")
+    extra = {"agent_id": data[agent_key]} if agent_key else {}
+    status, _, headers = _create(admin, data["property_id"], name, **extra)
+    assert status == 302 and _flash(headers).get("category") == "success", _flash(headers)
+    db = _session()
+    [alert] = _alerts_of_buyer(db, name)
+    db.close()
+    return alert.id
+
+
+def test_reasignar_desde_detalle(data):
+    from app.models.property_alert import PropertyAlert
+
+    alert_id = _new_alert_for(data, f"{TAG} REASIGNAR DETALLE")
+    captador = _Client(EMAIL.format("captador"), "MOYZA")
+    nuevo = _Client(EMAIL.format("nuevo"), "MOYZA")
+
+    # El captador la abre (queda en proceso y leída)
+    status, body, _ = captador.get(f"/alerts/{alert_id}")
+    assert status == 200 and 'id="reassignModal"' not in body and "Reasignar" not in body
+
+    admin = _Client(ADMIN_EMAIL, "MOYZA")
+    status, body, _ = admin.get(f"/alerts/{alert_id}")
+    assert status == 200 and 'id="reassignModal"' in body and 'id="raAgentSelect"' in body
+
+    status, _, headers = admin.post(f"/alerts/{alert_id}/reassign", {
+        "agent_id": data["nuevo"], "assignment_reason": "Sin respuesta", "next": f"/alerts/{alert_id}",
+    })
+    assert status == 302 and headers.get("location") == f"/alerts/{alert_id}"
+    flash = _flash(headers)
+    assert flash.get("category") == "success"
+    assert f"reasignada de {TAG} CAPTADOR a {TAG} NUEVO" in flash.get("message", "")
+
+    db = _session()
+    alert = db.get(PropertyAlert, alert_id)
+    assert alert.agent_id == data["nuevo"] and alert.previous_agent_id == data["captador"]
+    assert alert.status == "PENDING" and alert.read_at is None
+    assert alert.assignment_reason == "Sin respuesta"
+    assert [f.action_type for f in alert.follow_ups] == ["REASIGNADA"]
+    assert len([n for n in _assigned_notifications(db, "nuevo") if n.entity_id == alert_id]) == 1
+    db.close()
+
+    # El anterior deja de verla y el nuevo la ve
+    assert captador.get(f"/alerts/{alert_id}")[0] == 302
+    assert f"{TAG} REASIGNAR DETALLE" not in captador.get("/alerts")[1]
+    status, body, _ = nuevo.get("/alerts")
+    assert status == 200 and f"{TAG} REASIGNAR DETALLE" in body
+    status, body, _ = nuevo.get(f"/alerts/{alert_id}")
+    assert status == 200 and "Antes: " + f"{TAG} CAPTADOR" in body and "Motivo: Sin respuesta" in body
+    assert "Historial de asignaciones (2)" in body
+
+    # La campana del Inicio del nuevo agente tiene el aviso
+    status, body, _ = nuevo.get("/dashboard")
+    assert status == 200 and f"Te han asignado un comprador: {TAG} REASIGNAR DETALLE" in body
+
+
+def test_reasignar_desde_listado_vuelve_al_listado(data):
+    alert_id = _new_alert_for(data, f"{TAG} REASIGNAR LISTADO")
+    admin = _Client(ADMIN_EMAIL, "MOYZA")
+
+    status, body, _ = admin.get("/alerts")
+    assert f'data-alert-id="{alert_id}"' in body and 'id="reassignForm"' in body
+
+    status, _, headers = admin.post(f"/alerts/{alert_id}/reassign", {
+        "agent_id": data["otro"], "next": "/alerts?q=PYTEST",
+    })
+    assert status == 302 and headers.get("location") == "/alerts?q=PYTEST"
+    assert _flash(headers).get("category") == "success"
+
+    # `next` externo: se ignora y vuelve al detalle
+    status, _, headers = admin.post(f"/alerts/{alert_id}/reassign", {
+        "agent_id": data["captador"], "next": "https://evil.example.com/",
+    })
+    assert headers.get("location") == f"/alerts/{alert_id}"
+
+
+def test_reasignar_rechazos(data):
+    from app.models.property_alert import PropertyAlert
+
+    alert_id = _new_alert_for(data, f"{TAG} REASIGNAR RECHAZOS")
+    admin = _Client(ADMIN_EMAIL, "MOYZA")
+
+    # Un agente no puede (ni siendo el asignado)
+    agent = _Client(EMAIL.format("captador"), "MOYZA")
+    status, _, headers = agent.post(f"/alerts/{alert_id}/reassign", {"agent_id": data["otro"]})
+    assert status == 302 and "Solo un administrador" in _flash(headers).get("message", "")
+
+    # Al mismo agente, a uno inexistente o sin agente
+    for agent_id, text in ((data["captador"], "ya está asignada"), (999999, "no existe"), ("", "no existe")):
+        status, _, headers = admin.post(f"/alerts/{alert_id}/reassign", {"agent_id": agent_id})
+        assert _flash(headers).get("category") == "error" and text in _flash(headers).get("message", "")
+
+    db = _session()
+    assert db.get(PropertyAlert, alert_id).agent_id == data["captador"]
+
+    # Cerrada: no se puede reasignar ni se ofrece el botón
+    alert = db.get(PropertyAlert, alert_id)
+    alert.status = "COMPLETED"
+    db.commit()
+    db.close()
+    status, _, headers = admin.post(f"/alerts/{alert_id}/reassign", {"agent_id": data["otro"]})
+    assert "abiertas" in _flash(headers).get("message", "")
+    status, body, _ = admin.get(f"/alerts/{alert_id}")
+    assert 'id="reassignModal"' not in body
+
+
+def test_nota_de_reasignacion_no_permite_cerrar(data):
+    alert_id = _new_alert_for(data, f"{TAG} CERRAR TRAS REASIGNAR")
+    admin = _Client(ADMIN_EMAIL, "MOYZA")
+    admin.post(f"/alerts/{alert_id}/reassign", {"agent_id": data["otro"]})
+
+    status, _, headers = admin.post(f"/alerts/{alert_id}/complete", {})
+    assert "al menos un seguimiento" in _flash(headers).get("message", "")

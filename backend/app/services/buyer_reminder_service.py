@@ -1,8 +1,8 @@
 """
 Servicio de recordatorio de compradores sin gestión.
 
-Identifica compradores cuya última gestión (follow-up o creación de alerta)
-supera el umbral de horas configurado, y envía un email de recordatorio al
+Identifica compradores cuya última gestión (follow-up, creación o
+reasignación de la alerta) supera el umbral de horas configurado, y envía un email de recordatorio al
 agente responsable con el listado de compradores pendientes.
 
 Multiempresa: los recordatorios se agrupan por agente Y empresa. Un agente
@@ -66,8 +66,13 @@ def get_pending_buyers_by_agent(
         .options(selectinload(PropertyAlert.follow_ups), joinedload(PropertyAlert.property))
         .outerjoin(last_followup, last_followup.c.alert_id == PropertyAlert.id)
         .filter(PropertyAlert.status.in_(REMINDER_STATUSES))
+        # El reloj se reinicia al reasignar (PLAN_ASIGNACION_ALERTAS.md §2.5): no
+        # se reclama al nuevo agente por el tiempo que la tuvo el anterior.
         .filter(
-            func.coalesce(last_followup.c.last_followup_at, PropertyAlert.created_at)
+            func.greatest(
+                func.coalesce(last_followup.c.last_followup_at, PropertyAlert.created_at),
+                func.coalesce(PropertyAlert.assigned_at, PropertyAlert.created_at),
+            )
             < cutoff
         )
         .all()
@@ -77,8 +82,8 @@ def get_pending_buyers_by_agent(
 
     for alert in alerts:
         last_action = max(
-            (fu.created_at for fu in alert.follow_ups),
-            default=alert.created_at,
+            [fu.created_at for fu in alert.follow_ups if fu.created_at]
+            + [alert.created_at, alert.assigned_at or alert.created_at]
         )
         entry = {
             "alert_id": alert.id,
