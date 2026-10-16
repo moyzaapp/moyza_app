@@ -5,7 +5,8 @@ from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 
-from app.core.constants import BusinessType
+from app.core.constants import BusinessType, PhoneCountryCodes
+from app.core.phone import phone_display, split_phone, tel_href
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,14 @@ templates = Jinja2Templates(
     context_processors=[company_context],
 )
 templates.env.filters["madrid_dt"] = madrid_dt
+# Teléfono para mostrar ('+34 600 112 233'), enlace tel: y (código, local) del
+# selector de país (PLAN_TELEFONO_COMPRADOR.md)
+templates.env.filters["phone_display"] = phone_display
+templates.env.filters["tel_href"] = tel_href
+templates.env.filters["split_phone"] = split_phone
+# Opciones del selector de país; globales para que las vea el macro phone_field
+templates.env.globals["phone_country_choices"] = PhoneCountryCodes.choices()
+templates.env.globals["phone_default_country"] = PhoneCountryCodes.DEFAULT
 templates.env.globals["current_year"] = lambda: datetime.now().year
 # Operaciones fijas (Venta / Alquiler) para los selects: BusinessType.values()
 templates.env.globals["BusinessType"] = BusinessType
