@@ -217,6 +217,8 @@ def test_edicion_conserva_pais_y_numero(db):
     html = client.get_html(f"/buyers/{old.id}")
     assert 'name="phone_number" value="3001234567"' in html
     assert 'data-short="+57" selected' in html
+    # Cabecera de la ficha con el teléfono formateado (fase 3)
+    assert "+57 300 123 4567" in html
 
     # Número no válido: error y no se toca
     status, headers = client.post(f"/buyers/{old.id}/update-contact", {

@@ -351,7 +351,47 @@ generados no cambian).
 docker exec moyza_backend python -m pytest tests/test_visit_agent_signatures.py -q
 ```
 
-## 11. Pendientes conocidos
+## 11. Teléfono del comprador con indicativo de país
+
+Detalle en `PLAN_TELEFONO_COMPRADOR.md`. Los cuatro formularios de comprador
+(nuevo comprador, comprador con criterios, comprador nuevo de "Nueva alerta" y
+edición de contacto) piden el país (por defecto +34) y el número por separado
+(macro `phone_field` de `components/phone_macros.html` + `static/js/phone-field.js`).
+Se guarda `código + dígitos` sin `+` ("34600112233"), igual que las visitas;
+si el agente repite el indicativo ("+34 600…", "0034…") se quita una vez y la
+interfaz lo avisa antes de guardar. La parte local debe tener entre 6 y 12
+dígitos; el teléfono sigue siendo opcional. Las rutas aceptan aún el campo
+antiguo de texto libre (`phone` / `buyer_phone`) si llega solo.
+
+- **Sin migración ni backfill.** Los teléfonos antiguos se siguen leyendo
+  (`split_phone`, `phone_display`, `whatsapp_url`) y se editan con el país
+  preseleccionado (los que no traen indicativo salen con +34 y el número
+  completo, para que el agente lo revise). Guardar la ficha sin tocar el
+  teléfono no lo reescribe.
+- Script opcional para normalizar `buyers.phone` y `property_alerts.lead_phone`.
+  Por defecto solo informa; con `--apply` reescribe solo los inequívocos
+  (indicativo explícito, o 9 dígitos que empiezan por 6-9) y lista el resto
+  para revisarlo a mano. Ejecutarlo es decisión del usuario tras ver el
+  dry-run:
+
+```bash
+docker exec moyza_backend python scripts/normalize_buyer_phones.py            # dry-run
+docker exec moyza_backend python scripts/normalize_buyer_phones.py --apply
+```
+
+- **Deuda (Visitas)**: `properties/visit_form.html` y `visits/edit_form.html`
+  tienen su propio select de país y su copia del JS de acortado, y
+  `routes/visits.py` compone el número a mano en `create_visit` y
+  `update_visit`. Cuando se cierre el trabajo en curso sobre visitas, pasar a
+  `phone.phone_field(...)`, cargar `phone-field.js` (y quitar el JS en línea)
+  y usar `app.core.phone.phone_from_form` / `compose_phone`.
+
+```bash
+# Tests (unitarios sin base de datos; rutas contra la app levantada)
+docker exec moyza_backend python -m pytest tests/test_phone.py tests/test_buyer_phone_routes.py -q
+```
+
+## 12. Pendientes conocidos
 
 - Datos legales y logo reales de MOES PREMIUM (sección 4).
 - Eliminar las columnas heredadas `users.company` y `agents.company` cuando ya

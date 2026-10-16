@@ -128,9 +128,13 @@ def test_phone_display(phone, expected):
 
 
 def test_tel_href():
+    # Canónico: con "+"
     assert tel_href("34600112233") == "tel:+34600112233"
-    assert tel_href("600 11 22 33") == "tel:+34600112233"
-    assert tel_href("12 34") == "tel:1234"
+    assert tel_href("573001234567") == "tel:+573001234567"
+    # Antiguos: tal cual, como antes
+    assert tel_href("600112233") == "tel:600112233"
+    assert tel_href("+34 600 11 22 33") == "tel:+34 600 11 22 33"
+    assert tel_href(None) == "tel:"
 
 
 def test_canonical_y_whatsapp_coinciden():

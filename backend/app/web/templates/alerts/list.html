@@ -283,7 +283,7 @@
                                         <div class="flex flex-col">
                                             <span class="font-medium">{{ alert.lead_name }}</span>
                                             {% if alert.lead_phone %}
-                                            <span class="text-xs text-gray-500">{{ alert.lead_phone }}</span>
+                                            <span class="text-xs text-gray-500">{{ alert.lead_phone | phone_display }}</span>
                                             {% endif %}
                                         </div>
                                     </td>

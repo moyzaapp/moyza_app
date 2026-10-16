@@ -42,8 +42,8 @@
                         <div>
                             <label class="text-sm text-gray-600">Teléfono</label>
                             <p class="text-gray-800 font-medium">
-                                <a href="tel:{{ alert.lead_phone }}" class="text-blue-600 hover:underline">
-                                    {{ alert.lead_phone }}
+                                <a href="{{ alert.lead_phone | tel_href }}" class="text-blue-600 hover:underline">
+                                    {{ alert.lead_phone | phone_display }}
                                 </a>
                             </p>
                         </div>
