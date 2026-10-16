@@ -315,6 +315,129 @@ class TestFinalizeGuards:
 
 
 # ---------------------------------------------------------------------------
+# PDF: tabla de firmas (sin base de datos)
+# ---------------------------------------------------------------------------
+
+def _cell_text(cell):
+    if isinstance(cell, str):
+        return cell
+    if isinstance(cell, (list, tuple)):
+        return "".join(_cell_text(c) for c in cell)
+    return getattr(cell, "text", type(cell).__name__)
+
+
+def _pdf_elements(monkeypatch, tmp_path, visit, agent, companion_agent=None):
+    """Genera el PDF de verdad (comprueba que maqueta) y devuelve sus elements."""
+    from app.services import visit_sheet_generator as generator
+
+    captured = {}
+    original_build = generator.SimpleDocTemplate.build
+
+    def build(self, elements, *args, **kwargs):
+        captured["elements"] = list(elements)
+        return original_build(self, elements, *args, **kwargs)
+
+    monkeypatch.setattr(generator.SimpleDocTemplate, "build", build)
+    output = tmp_path / "ficha.pdf"
+    generator.generate_visit_sheet(
+        property_item=SimpleNamespace(id=3, address="Calle 1", title="Piso", price=100000, company=None),
+        visit=visit,
+        agent=agent,
+        companion_agent=companion_agent,
+        output_path=str(output),
+    )
+    assert output.exists() and output.stat().st_size > 0
+    return captured["elements"]
+
+
+def _signature_table(elements):
+    from reportlab.platypus import Table
+    tables = [e for e in elements if isinstance(e, Table)]
+    return tables[-1]  # la tabla de firmas es la última
+
+
+def _metadata_text(elements):
+    from reportlab.platypus import Paragraph
+    return next(e.text for e in elements if isinstance(e, Paragraph) and "METADATOS" in e.text)
+
+
+@pytest.fixture
+def pdf_visit(signature_file):
+    return SimpleNamespace(
+        id=9, created_at=datetime(2026, 10, 16, 12, 0), visitor_name="Cliente Prueba", dni="1",
+        phone=None, email=None, purchase_fees_display="€2500 + IVA", interest_level=4,
+        price_feedback=None, location_feedback=None, condition_feedback=None, lighting_feedback=None,
+        elevator_feedback=None, garage_feedback=None, notes=None, signature_filepath=signature_file,
+        signature_captured_at=datetime(2026, 10, 16, 12, 5), data_consent_accepted_at=None,
+        data_consent_ip=None, agent_signatures_confirmed_at=None,
+    )
+
+
+@pytest.fixture
+def pdf_agents(signature_file):
+    principal = SimpleNamespace(name="Ana Principal", signature_filepath=signature_file,
+                                signature_uploaded_at=datetime(2026, 1, 2, 10, 0))
+    companion = SimpleNamespace(name="Luis Acompañante", signature_filepath=signature_file,
+                                signature_uploaded_at=datetime(2026, 3, 4, 11, 0))
+    return principal, companion
+
+
+class TestVisitSheetSignatures:
+
+    def test_sin_acompanante_dos_columnas_como_siempre(self, monkeypatch, tmp_path, pdf_visit, pdf_agents):
+        """Estructura de la tabla de firmas anterior al cambio, celda a celda."""
+        principal, _ = pdf_agents
+        table = _signature_table(_pdf_elements(monkeypatch, tmp_path, pdf_visit, principal))
+        assert list(table._colWidths) == [40, 155, 40, 40, 155, 40]
+        assert list(table._rowHeights) == [15, 15, 50, 5, 20]
+        assert [_cell_text(c) for c in table._cellvalues[1]] == ["", "COMPRADOR", "", "", "AGENTE INMOBILIARIO", ""]
+        images = [type(c[0] if isinstance(c, (list, tuple)) else c).__name__ for c in table._cellvalues[2]]
+        assert images == ["str", "Image", "str", "str", "Image", "str"]
+        assert len(table._cellvalues) == 5
+        assert "Ana Principal" not in "".join(_cell_text(c) for row in table._cellvalues for c in row)
+
+    def test_con_acompanante_tres_columnas_con_nombres(self, monkeypatch, tmp_path, pdf_visit, pdf_agents):
+        principal, companion = pdf_agents
+        table = _signature_table(_pdf_elements(monkeypatch, tmp_path, pdf_visit, principal, companion))
+        assert list(table._colWidths) == [150, 15, 150, 15, 150]
+        assert sum(table._colWidths) <= 483  # ancho útil del marco en A4 con márgenes de 50
+        assert [_cell_text(c) for c in table._cellvalues[1]] == [
+            "COMPRADOR", "", "AGENTE INMOBILIARIO", "", "AGENTE ACOMPAÑANTE"
+        ]
+        names = [_cell_text(c) for c in table._cellvalues[2]]
+        assert "Cliente Prueba" in names[0]
+        assert "Ana Principal" in names[2]
+        assert "Luis Acompañante" in names[4]
+        assert "size=8" in names[4]
+        dates = [_cell_text(c) for c in table._cellvalues[5]]
+        assert "02/01/2026 10:00" in dates[2] and "04/03/2026 11:00" in dates[4]
+
+    def test_acompanante_sin_archivo_deja_la_linea_vacia(self, monkeypatch, tmp_path, pdf_visit, pdf_agents):
+        principal, companion = pdf_agents
+        companion.signature_filepath = str(tmp_path / "no_existe.png")
+        table = _signature_table(_pdf_elements(monkeypatch, tmp_path, pdf_visit, principal, companion))
+        companion_image = table._cellvalues[3][4]
+        assert _cell_text(companion_image) == ""
+
+    def test_metadatos_con_la_confirmacion(self, monkeypatch, tmp_path, pdf_visit, pdf_agents):
+        principal, companion = pdf_agents
+        assert "Firmas de agentes confirmadas" not in _metadata_text(
+            _pdf_elements(monkeypatch, tmp_path, pdf_visit, principal, companion))
+        pdf_visit.agent_signatures_confirmed_at = datetime(2026, 10, 16, 12, 7)
+        assert "Firmas de agentes confirmadas el 16/10/2026 12:07" in _metadata_text(
+            _pdf_elements(monkeypatch, tmp_path, pdf_visit, principal, companion))
+
+    def test_pdf_extraido_con_pypdf(self, monkeypatch, tmp_path, pdf_visit, pdf_agents):
+        """Texto real del PDF; solo si pypdf está instalado (no está en requirements)."""
+        pypdf = pytest.importorskip("pypdf")
+        principal, companion = pdf_agents
+        _pdf_elements(monkeypatch, tmp_path, pdf_visit, principal, companion)
+        text = " ".join(page.extract_text() for page in pypdf.PdfReader(str(tmp_path / "ficha.pdf")).pages)
+        for expected in ("COMPRADOR", "AGENTE INMOBILIARIO", "AGENTE ACOMPAÑANTE", "Ana Principal", "Luis Acompañante"):
+            assert expected in text
+
+
+# ---------------------------------------------------------------------------
 # Integración contra la app levantada
 # ---------------------------------------------------------------------------
 
@@ -677,3 +800,48 @@ def test_acompanante_sin_firma_bloquea_y_se_puede_quitar(data):
     status, payload = admin.post_json(f"/api/v1/visits/{visit_id}/finalize")
     assert status == 200, payload
     assert _load_visit(visit_id).visit_status == "completed"
+
+
+# ---------------------------------------------------------------------------
+# Integración: vista previa (fase 3)
+# ---------------------------------------------------------------------------
+
+def test_preview_muestra_los_recuadros_de_firma(data):
+    admin = _Client(ADMIN_EMAIL, "MOYZA")
+
+    joint_id = _new_visit(data["property_id"], data["principal"], data["acomp"], status="draft", name="PREVIEW CONJUNTA")
+    status, body, _ = admin.get(f"/visits/preview/{joint_id}")
+    assert status == 200
+    section = body[body.index('id="preview-signatures"'):]
+    section = section[:section.index("AUTORIZACIÓN DE USO")]
+    for expected in ("COMPRADOR", "AGENTE INMOBILIARIO", "AGENTE ACOMPAÑANTE",
+                     f"{TAG} PREVIEW CONJUNTA", f"{TAG} PRINCIPAL", f"{TAG} ACOMP"):
+        assert expected in section
+    assert "sm:grid-cols-3" in section
+    assert "Firmas agentes" in body  # paso extra en el progreso
+
+    single_id = _new_visit(data["property_id"], data["principal"], status="draft", name="PREVIEW INDIVIDUAL")
+    status, body, _ = admin.get(f"/visits/preview/{single_id}")
+    assert status == 200
+    section = body[body.index('id="preview-signatures"'):]
+    section = section[:section.index("AUTORIZACIÓN DE USO")]
+    assert "AGENTE INMOBILIARIO" in section and "AGENTE ACOMPAÑANTE" not in section
+    assert "sm:grid-cols-2" in section
+    assert "Firmas agentes" not in body
+
+
+def test_pdf_finalizado_de_visita_conjunta_lleva_tres_firmas(data, monkeypatch):
+    """El PDF que genera finalize incluye al acompañante con su firma registrada."""
+    visit_id = _new_visit(data["property_id"], data["principal"], data["acomp"], name="PDF CONJUNTA")
+    admin = _Client(ADMIN_EMAIL, "MOYZA")
+    _sign_as_client(admin, visit_id)
+    status, _ = admin.post_json(f"/api/v1/visits/{visit_id}/confirm-agent-signatures", {"confirmed": True})
+    assert status == 200
+    status, payload = admin.post_json(f"/api/v1/visits/{visit_id}/finalize")
+    assert status == 200, payload
+
+    visit = _load_visit(visit_id)
+    raw = open(visit.visit_sheet_filepath, "rb").read()
+    assert raw.startswith(b"%PDF")
+    # Tres imágenes de firma (cliente y dos agentes) además del logo, si lo hay
+    assert raw.count(b"/Subtype /Image") >= 3
