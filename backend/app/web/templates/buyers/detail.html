@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "components/ui_macros.html" as ui %}
+{% import "components/phone_macros.html" as phone %}
 {% from "alerts/assign_fields.html" import assign_fields with context %}
 
 {% block title %}{{ buyer.name }} - Comprador - {{ brand_name }}{% endblock %}
@@ -638,7 +639,9 @@
 <form method="POST" action="/buyers/{{ buyer.id }}/update-contact" data-once>
     <div class="p-6 space-y-4">
         {{ ui.field("name", "Nombre", value=buyer.name, required=True, id="ecName") }}
-        {{ ui.field("phone", "Teléfono", type="tel", value=buyer.phone or "", placeholder="Ej: +34 600 000 000", id="ecPhone", attrs='inputmode="tel"') }}
+        {# País y número local del teléfono guardado; los antiguos sin indicativo salen con +34 #}
+        {% set phone_code, phone_local = buyer.phone | split_phone %}
+        {{ phone.phone_field("phone_", phone_code, phone_local, id="ecPhone") }}
         {{ ui.field("email", "Correo electrónico", type="email", value=buyer.email or "", placeholder="Ej: comprador@email.com", id="ecEmail") }}
     </div>
     {{ ui.modal_footer(submit_label="Guardar cambios") }}
@@ -647,6 +650,7 @@
 
 <script src="/static/js/alert-duplicates.js"></script>
 <script src="/static/js/alert-assign.js"></script>
+<script src="/static/js/phone-field.js"></script>
 <script>
 var qaDupRequest = 0;
 var qaAssign = window.AlertAssign ? AlertAssign.init('qa') : null;

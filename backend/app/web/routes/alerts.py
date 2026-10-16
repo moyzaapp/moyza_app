@@ -22,6 +22,7 @@ from app.core.constants import BusinessType
 from app.core.constants import AlertPriority
 from app.core.constants import AlertStatus
 from app.core.constants import FollowUpActionType
+from app.core.phone import PhoneValidationError, phone_display, phone_from_form, split_phone, valid_country_code
 from app.db.deps import get_db
 
 from app.models.property_alert import PropertyAlert
@@ -648,6 +649,7 @@ async def search_buyers(
             "id": b.id,
             "name": b.name,
             "phone": b.phone or "",
+            "phone_display": phone_display(b.phone),
             "email": b.email or "",
         }
         for b in buyers
@@ -660,6 +662,8 @@ async def search_buyers(
 async def create_buyer(
     request: Request,
     name: str = Form(...),
+    phone_country_code: str = Form(None),
+    phone_number: str = Form(None),
     phone: str = Form(None),
     email: str = Form(None),
     notes: str = Form(None),
@@ -668,7 +672,10 @@ async def create_buyer(
     """Crear nuevo comprador sin alerta asociada (admin y agentes).
 
     El comprador queda registrado a nombre del usuario (`created_by`), que es
-    lo que le da acceso al agente que lo creó."""
+    lo que le da acceso al agente que lo creó.
+
+    Teléfono: indicativo + número (PLAN_TELEFONO_COMPRADOR.md); `phone` es el
+    campo antiguo de texto libre, aceptado si llega solo."""
 
     current_user = request.state.user
 
@@ -679,9 +686,16 @@ async def create_buyer(
         return response
 
     try:
+        buyer_phone = phone_from_form(phone_country_code, phone_number, phone)
+    except PhoneValidationError as error:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", str(error))
+        return response
+
+    try:
         buyer = Buyer(
             name=name,
-            phone=(phone or "").strip() or None,
+            phone=buyer_phone,
             email=(email or "").strip() or None,
             notes=notes,
             created_by=current_user.id,
@@ -707,6 +721,8 @@ async def create_buyer_with_criteria(
     request: Request,
     buyer_id: int = Form(None),
     buyer_name: str = Form(None),
+    buyer_phone_country_code: str = Form(None),
+    buyer_phone_number: str = Form(None),
     buyer_phone: str = Form(None),
     buyer_email: str = Form(None),
     agent_id: int = Form(None),
@@ -776,9 +792,15 @@ async def create_buyer_with_criteria(
                 response = RedirectResponse(url="/alerts", status_code=302)
                 set_flash(response, "error", "El nombre del comprador es obligatorio")
                 return response
+            try:
+                new_phone = phone_from_form(buyer_phone_country_code, buyer_phone_number, buyer_phone)
+            except PhoneValidationError as error:
+                response = RedirectResponse(url="/alerts", status_code=302)
+                set_flash(response, "error", str(error))
+                return response
             buyer = Buyer(
                 name=buyer_name,
-                phone=(buyer_phone or "").strip() or None,
+                phone=new_phone,
                 email=(buyer_email or "").strip() or None,
                 created_by=current_user.id,
                 company_id=get_active_company(request).id
@@ -1061,6 +1083,8 @@ async def create_alert(
     property_id: int = Form(...),
     buyer_id: int = Form(None),
     buyer_name: str = Form(None),
+    buyer_phone_country_code: str = Form(None),
+    buyer_phone_number: str = Form(None),
     buyer_phone: str = Form(None),
     buyer_email: str = Form(None),
     source: str = Form(None),
@@ -1121,16 +1145,25 @@ async def create_alert(
             set_flash(response, "error", "El nombre del comprador es obligatorio")
             return response
 
+        # Teléfono canónico con indicativo (PLAN_TELEFONO_COMPRADOR.md); `buyer_phone`
+        # es el campo antiguo de texto libre, aceptado si llega solo
+        try:
+            new_phone = phone_from_form(buyer_phone_country_code, buyer_phone_number, buyer_phone)
+        except PhoneValidationError as error:
+            response = RedirectResponse(url="/alerts", status_code=302)
+            set_flash(response, "error", str(error))
+            return response
+
         if not confirm_new_buyer:
             # Mismo criterio que /alerts/check-buyer: al agente solo se le
             # avisa de coincidencias con compradores a los que tiene acceso
             matches = [
-                b for b in find_matching_buyers(db, company_id, phone=buyer_phone, email=buyer_email)
+                b for b in find_matching_buyers(db, company_id, phone=new_phone, email=buyer_email)
                 if can_access_buyer(b, current_user, db)
             ]
             if matches:
                 existing = matches[0]
-                contact = existing.phone or existing.email or ""
+                contact = phone_display(existing.phone) or existing.email or ""
                 response = RedirectResponse(url="/alerts", status_code=302)
                 set_flash(
                     response,
@@ -1142,7 +1175,7 @@ async def create_alert(
 
         buyer = Buyer(
             name=buyer_name,
-            phone=(buyer_phone or "").strip() or None,
+            phone=new_phone,
             email=(buyer_email or "").strip() or None,
             created_by=current_user.id,
             company_id=company_id
@@ -1851,11 +1884,18 @@ async def update_buyer_contact(
     buyer_id: int,
     request: Request,
     name: str = Form(...),
+    phone_country_code: str = Form(None),
+    phone_number: str = Form(None),
     phone: str = Form(None),
     email: str = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Actualiza nombre, teléfono y email del comprador. Accesible para admin y agentes asignados."""
+    """Actualiza nombre, teléfono y email del comprador. Accesible para admin y agentes asignados.
+
+    Teléfono: indicativo + número (PLAN_TELEFONO_COMPRADOR.md). Si llega igual
+    que lo que pintó el formulario (`split_phone` del guardado), se conserva el
+    valor guardado tal cual: editar solo el correo no reescribe un teléfono
+    antiguo. `phone` es el campo antiguo, aceptado si llega solo."""
     current_user = request.state.user
 
     buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
@@ -1869,8 +1909,21 @@ async def update_buyer_contact(
         set_flash(response, "error", "No tienes acceso a este comprador")
         return response
 
+    unchanged = (
+        buyer.phone
+        and phone_number is not None
+        and (valid_country_code(phone_country_code), phone_number.strip()) == split_phone(buyer.phone)
+    )
+    if not unchanged:
+        try:
+            new_phone = phone_from_form(phone_country_code, phone_number, phone)
+        except PhoneValidationError as error:
+            response = RedirectResponse(url=f"/buyers/{buyer_id}", status_code=303)
+            set_flash(response, "error", str(error))
+            return response
+        buyer.phone = new_phone
+
     buyer.name = name.strip()
-    buyer.phone = phone.strip() if phone and phone.strip() else None
     buyer.email = email.strip() if email and email.strip() else None
     db.commit()
 

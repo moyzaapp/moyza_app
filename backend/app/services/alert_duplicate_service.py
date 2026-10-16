@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.constants import AlertStatus, AlertType
 from app.core.constants import FollowUpActionType
+from app.core.phone import phone_display
 from app.models.buyer import Buyer
 from app.models.property_alert import PropertyAlert
 from app.models.user import User
@@ -199,6 +200,7 @@ def serialize_buyer(buyer: Buyer) -> dict:
         "id": buyer.id,
         "name": buyer.name,
         "phone": buyer.phone or "",
+        "phone_display": phone_display(buyer.phone),
         "email": buyer.email or "",
         "url": f"/buyers/{buyer.id}",
     }

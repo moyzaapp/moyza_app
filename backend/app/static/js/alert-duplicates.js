@@ -156,7 +156,7 @@ window.AlertDuplicates = (function () {
         }
 
         var items = buyers.map(function (b, i) {
-            var meta = [b.phone, b.email].filter(Boolean).join(' · ');
+            var meta = [b.phone_display || b.phone, b.email].filter(Boolean).join(' · ');
             return '<li class="flex flex-wrap items-center justify-between gap-2 pt-2">'
                 + '<div class="min-w-0"><p class="text-sm font-medium">' + escapeHtml(b.name) + '</p>'
                 + (meta ? '<p class="text-xs text-amber-800">' + escapeHtml(meta) + '</p>' : '') + '</div>'
