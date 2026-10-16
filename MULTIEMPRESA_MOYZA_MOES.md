@@ -304,7 +304,54 @@ asignar no se deshacen: se quitan a mano desde la ficha del agente.
 docker exec moyza_backend python -m pytest tests/test_alert_assignment.py tests/test_alert_assignment_routes.py -q
 ```
 
-## 10. Pendientes conocidos
+## 10. Firma de los dos agentes en visitas conjuntas
+
+Detalle en `PLAN_FIRMA_AGENTES_VISITA.md`. En una visita **con acompañante**,
+tras la firma del cliente hay un paso nuevo, "Firmas de los agentes"
+(`/visits/agent-signatures/{id}`): el usuario logueado en la tablet confirma
+que la ficha se firma con las firmas **registradas** de los dos agentes (las
+ve en miniatura). Queda guardado quién, cuándo y desde qué IP, más el evento
+de auditoría `agent_signatures_confirmed`. Sin confirmar no se finaliza.
+
+- Si un agente no tiene firma registrada, no se puede confirmar: o la
+  registra (él mismo o el admin desde Agentes) o se pulsa "Quitar
+  acompañante" y la visita se finaliza como individual (auditoría
+  `companion_removed_before_confirmation`).
+- El PDF de una visita conjunta lleva tres firmas con nombre (comprador,
+  agente, acompañante) y "Firmas de agentes confirmadas el …" en los
+  metadatos. La vista previa muestra los recuadros de firma. Las visitas
+  individuales no cambian (mismo PDF de dos columnas, sin paso extra).
+- Una visita conjunta que esté en `signed` al desplegar pasará por la
+  confirmación al retomarla; las ya completadas no cambian. Si un agente
+  cambia su firma registrada, los PDFs ya generados no cambian; regenerar
+  uno usa la firma nueva.
+- **Cambio de seguridad**: los endpoints `/api/v1/visits/{id}/accept-terms`,
+  `save-signature`, `finalize` y el nuevo `confirm-agent-signatures` exigen
+  la sesión de la app (401 sin cookie) y que la visita sea de la empresa
+  activa (404). Antes no comprobaban nada; si alguna integración externa
+  los llamaba sin sesión, dejará de funcionar. Las pantallas de la app no
+  se ven afectadas (envían la cookie, mismo origen).
+
+Despliegue (migración `x7y8z9a0b1c2_add_agent_signature_confirmation_to_visits`:
+3 columnas nulas en `property_visits`, sin backfill; va después de
+`w6x7y8z9a0b1_add_alert_indexes`, que se aplica en el mismo `upgrade` si
+aún no estaba):
+
+```bash
+docker exec moyza_backend alembic upgrade head
+docker restart moyza_backend
+```
+
+Rollback: `docker exec moyza_backend alembic downgrade w6x7y8z9a0b1` con el
+código anterior desplegado (borra las confirmaciones guardadas; los PDFs ya
+generados no cambian).
+
+```bash
+# Tests (unitarios sin base de datos; integración contra la app levantada)
+docker exec moyza_backend python -m pytest tests/test_visit_agent_signatures.py -q
+```
+
+## 11. Pendientes conocidos
 
 - Datos legales y logo reales de MOES PREMIUM (sección 4).
 - Eliminar las columnas heredadas `users.company` y `agents.company` cuando ya

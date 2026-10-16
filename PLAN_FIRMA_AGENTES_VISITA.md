@@ -1,6 +1,6 @@
 # Plan: firma de los dos agentes en visitas conjuntas
 
-Fecha: 2026-10-16 · Rama `63-agregar-moes` · Depende de `PLAN_VISITAS_AGENTES.md` (hecho)
+Fecha: 2026-10-16 · Rama `63-agregar-moes` · Depende de `PLAN_VISITAS_AGENTES.md` (hecho) · **Estado: implementado (fases 1-4)**
 
 ## 1. Cómo funciona hoy la firma en la ficha de visita
 
@@ -39,7 +39,8 @@ empresa** (problema previo detectado el 2026-10-08).
 
 ### 3.1 Modelo de datos
 
-Columnas nuevas en `property_visits` (migración `w6x7y8z9a0b1`, `down_revision = 'v5w6x7y8z9a0'`, sin backfill):
+Columnas nuevas en `property_visits` (migración `x7y8z9a0b1c2`, `down_revision = 'w6x7y8z9a0b1'`, sin backfill; el id
+`w6x7y8z9a0b1` ya lo usaba la migración de índices de alertas):
 
 ```python
 agent_signatures_confirmed_at = Column(DateTime, nullable=True)
@@ -103,7 +104,8 @@ draft → preview → RGPD → signature (cliente) → signed
 ### 3.4 PDF y preview
 
 - Tabla de firmas con **tres columnas** cuando hay acompañante: COMPRADOR · AGENTE INMOBILIARIO · AGENTE
-  ACOMPAÑANTE (anchos 155 / 155 / 155 con separadores de 20). Bajo cada etiqueta, el nombre del firmante
+  ACOMPAÑANTE (anchos 150 / 150 / 150 con separadores de 15: 155/20 suman 505 pt y el ancho útil de A4
+  con márgenes de 50 y el padding del marco es ~483 pt). Bajo cada etiqueta, el nombre del firmante
   (`<font size=8>`). Bajo la firma, "Firmado digitalmente el {fecha de registro}" como hoy.
 - Sin acompañante: dos columnas, exactamente como hoy (comprobar con un PDF antes/después que no cambia).
 - Fuente de la firma del acompañante: `companion_agent.signature_filepath`. Si no existe el archivo, línea vacía
@@ -130,34 +132,34 @@ draft → preview → RGPD → signature (cliente) → signed
 Un commit por fase: `feat(visitas): fase N - firma de agentes …`. Skill `moyza-ui-ux-pro` en lo visual.
 
 ### Fase 1 · Modelo, migración y protección de la API
-- [ ] Columnas de §3.1, propiedades del modelo, migración `w6x7y8z9a0b1` + downgrade.
-- [ ] Helper `_visit_for_api` y su uso en `accept-terms`, `save-signature`, `finalize` (decisión 6).
-- [ ] Tests: propiedades del modelo (sin BD); los tres endpoints devuelven 401 sin sesión y 404 con la
+- [x] Columnas de §3.1, propiedades del modelo, migración `w6x7y8z9a0b1` + downgrade.
+- [x] Helper `_visit_for_api` y su uso en `accept-terms`, `save-signature`, `finalize` (decisión 6).
+- [x] Tests: propiedades del modelo (sin BD); los tres endpoints devuelven 401 sin sesión y 404 con la
       visita de otra empresa; con sesión siguen funcionando (flujo completo de una visita individual).
 
 ### Fase 2 · Paso de confirmación
-- [ ] Ruta web + plantilla `visits/agent_signatures.html` (§3.2), parcial de progreso compartido si procede.
-- [ ] Endpoint `confirm-agent-signatures`, ruta `remove-companion`, redirección desde `save_signature`,
+- [x] Ruta web + plantilla `visits/agent_signatures.html` (§3.2), parcial de progreso compartido si procede.
+- [x] Endpoint `confirm-agent-signatures`, ruta `remove-companion`, redirección desde `save_signature`,
       guardas en `complete_visit_page` y `finalize_visit`.
-- [ ] Auditoría: `agent_signatures_confirmed`, `companion_removed_before_confirmation`.
-- [ ] Tests de ruta: visita individual no pasa por el paso; con acompañante no finaliza sin confirmar;
+- [x] Auditoría: `agent_signatures_confirmed`, `companion_removed_before_confirmation`.
+- [x] Tests de ruta: visita individual no pasa por el paso; con acompañante no finaliza sin confirmar;
       confirmación bloqueada si falta firma registrada (mensaje con el nombre); confirmación repetida
       rechazada; quitar acompañante antes de confirmar pasa a individual y permite finalizar; quitar
       acompañante después de confirmar rechazado; evento de auditoría presente.
 
 ### Fase 3 · PDF y preview
-- [ ] `visit_sheet_generator`: tres columnas con nombres y fallback (§3.4); pie con la confirmación.
-- [ ] `preview.html`: sección "Firmas".
-- [ ] Tests: PDF con acompañante contiene las tres etiquetas y los dos nombres (texto extraído con
+- [x] `visit_sheet_generator`: tres columnas con nombres y fallback (§3.4); pie con la confirmación.
+- [x] `preview.html`: sección "Firmas".
+- [x] Tests: PDF con acompañante contiene las tres etiquetas y los dos nombres (texto extraído con
       `pypdf`/`pdfplumber`, el que esté en requirements; si ninguno, comprobar el `elements` del generador
       mediante un hook de test); PDF sin acompañante idéntico en estructura al actual.
 
 ### Fase 4 · QA y despliegue
-- [ ] Flujo completo en local: visita conjunta (cliente → confirmación → PDF con tres firmas) con agentes 6 y 12;
+- [x] Flujo completo en local: visita conjunta (cliente → confirmación → PDF con tres firmas) con agentes 6 y 12;
       visita conjunta con un acompañante sin firma registrada (bloqueo + quitar acompañante); visita individual
       sin cambios.
-- [ ] `ui_lint.py` sobre plantillas tocadas; revisión en móvil con `fetch_page.py`.
-- [ ] Nota de despliegue en `MULTIEMPRESA_MOYZA_MOES.md` (§10): `alembic upgrade head` + reinicio; aviso de
+- [x] `ui_lint.py` sobre plantillas tocadas; revisión en móvil con `fetch_page.py`.
+- [x] Nota de despliegue en `MULTIEMPRESA_MOYZA_MOES.md` (§10): `alembic upgrade head` + reinicio; aviso de
       que los endpoints de firma ahora exigen sesión (si alguna integración externa los usaba, dejará de funcionar).
 
 ### Criterios de aceptación
