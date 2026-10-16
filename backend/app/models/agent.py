@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 from sqlalchemy import Column
@@ -72,3 +73,8 @@ class Agent(Base):
         back_populates="companion_agent",
         passive_deletes=True
     )
+
+    @property
+    def has_signature_file(self) -> bool:
+        """Firma registrada y su imagen existe en disco (la que estampa el PDF)."""
+        return bool(self.signature_filepath) and os.path.exists(self.signature_filepath)

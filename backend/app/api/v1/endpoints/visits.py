@@ -5,6 +5,10 @@ Estos endpoints manejan el proceso de:
 - Aceptación de términos RGPD
 - Captura de firma digital
 - Finalización y generación de PDF
+
+Las rutas /api no pasan por AuthMiddleware: cada endpoint resuelve usuario y
+empresa activa desde las cookies con `_visit_for_api` (401 sin sesión, 404 si
+la visita no es de la empresa activa). PLAN_FIRMA_AGENTES_VISITA.md, decisión 6.
 """
 
 import logging
@@ -19,7 +23,6 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
-from app.models.property_visit import PropertyVisit
 from app.models.property import Property
 from app.services.visit_audit_service import (
     log_visit_event,
@@ -27,10 +30,32 @@ from app.services.visit_audit_service import (
     get_user_agent
 )
 from app.services.visit_whatsapp_log_service import log_whatsapp_attempt
+from app.services.company_scope import get_visit_in_company
+from app.web.dependencies.company import get_api_user
+from app.web.dependencies.company import resolve_company_for_api
 
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _visit_for_api(request: Request, db: Session, visit_id: int):
+    """Visita de la empresa activa del usuario de la sesión.
+
+    Devuelve (visit, user). Lanza 401 si no hay sesión válida y 404 si la
+    visita no existe o es de otra empresa (no se distingue, para no revelar
+    visitas ajenas).
+    """
+    user = get_api_user(request, db)
+    if user is None:
+        raise HTTPException(status_code=401, detail="No autenticado")
+
+    company = resolve_company_for_api(request, user, db)
+    visit = get_visit_in_company(db, visit_id, company.id) if company is not None else None
+    if visit is None:
+        raise HTTPException(status_code=404, detail="Visita no encontrada")
+
+    return visit, user
 
 
 class AcceptTermsRequest(BaseModel):
@@ -53,12 +78,7 @@ async def accept_terms(
     Registra la aceptación de términos RGPD por parte del cliente.
     FASE 2 del flujo legal.
     """
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
-
-    if not visit:
-        raise HTTPException(status_code=404, detail="Visita no encontrada")
+    visit, user = _visit_for_api(request, db, visit_id)
 
     # Verificar que la visita está en estado preview
     if visit.visit_status != 'preview':
@@ -85,6 +105,7 @@ async def accept_terms(
             event_type='consent_accepted',
             db=db,
             request=request,
+            user_id=user.id,
             event_data={
                 'accepted_at': visit.data_consent_accepted_at.isoformat(),
                 'ip_masked': visit.data_consent_ip[:10] + "..." if visit.data_consent_ip else None
@@ -120,12 +141,7 @@ async def save_signature(
         save_signature_to_file
     )
 
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
-
-    if not visit:
-        raise HTTPException(status_code=404, detail="Visita no encontrada")
+    visit, user = _visit_for_api(request, db, visit_id)
 
     # Verificar que se aceptaron los términos
     if not visit.data_consent_accepted:
@@ -162,6 +178,7 @@ async def save_signature(
             event_type='signature_captured',
             db=db,
             request=request,
+            user_id=user.id,
             event_data={
                 'filename': filename,
                 'captured_at': visit.signature_captured_at.isoformat()
@@ -198,12 +215,7 @@ async def finalize_visit(
     from app.services.whatsapp import send_report
     from app.core.config import settings
 
-    visit = db.query(PropertyVisit).filter(
-        PropertyVisit.id == visit_id
-    ).first()
-
-    if not visit:
-        raise HTTPException(status_code=404, detail="Visita no encontrada")
+    visit, user = _visit_for_api(request, db, visit_id)
 
     property_item = db.query(Property).filter(
         Property.id == visit.property_id
@@ -249,6 +261,7 @@ async def finalize_visit(
             event_type='pdf_generated',
             db=db,
             request=request,
+            user_id=user.id,
             event_data={
                 'filename': filename,
                 'generated_at': visit.visit_sheet_generated_at.isoformat()
@@ -337,6 +350,7 @@ async def finalize_visit(
             event_type='visit_completed',
             db=db,
             request=request,
+            user_id=user.id,
             event_data={
                 'sent_to': sent_to,
                 'completed_at': datetime.utcnow().isoformat()
@@ -346,15 +360,13 @@ async def finalize_visit(
         logger.info(f"Visit {visit_id} completed successfully")
 
         # Avisos in-app (nunca email ni WhatsApp). Esta ruta /api no pasa por
-        # el middleware: el actor se resuelve desde la cookie.
+        # el middleware: el actor es el usuario de la cookie (_visit_for_api).
         from app.services.notification_service import notify_visit_completed
         from app.services.notification_service import notify_visit_sheet_failed
-        from app.web.dependencies.company import get_api_user
 
-        actor = get_api_user(request, db)
-        notify_visit_completed(db, visit, actor=actor, sent=bool(sent_to))
+        notify_visit_completed(db, visit, actor=user, sent=bool(sent_to))
         if send_failed:
-            notify_visit_sheet_failed(db, visit, actor=actor)
+            notify_visit_sheet_failed(db, visit, actor=user)
 
         return {
             "success": True,

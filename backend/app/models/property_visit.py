@@ -196,6 +196,25 @@ class PropertyVisit(Base):
         index=True
     )
 
+    # Confirmación de las firmas registradas de los dos agentes en una visita
+    # conjunta (PLAN_FIRMA_AGENTES_VISITA.md): quién la confirmó en la
+    # tablet, cuándo y desde qué IP. NULL en visitas individuales.
+    agent_signatures_confirmed_at = Column(
+        DateTime,
+        nullable=True
+    )
+
+    agent_signatures_confirmed_by = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    agent_signatures_confirmed_ip = Column(
+        String,
+        nullable=True
+    )
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow
@@ -203,7 +222,12 @@ class PropertyVisit(Base):
 
     # Relaciones
     property = relationship("Property", back_populates="visits")
-    creator = relationship("User")
+    # `foreign_keys` explícito: property_visits tiene dos FK a users.
+    creator = relationship("User", foreign_keys=[created_by])
+    agent_signatures_confirmer = relationship(
+        "User",
+        foreign_keys=[agent_signatures_confirmed_by]
+    )
     agent = relationship(
         "Agent",
         foreign_keys=[agent_id],
@@ -251,3 +275,32 @@ class PropertyVisit(Base):
             for agent_id in (self.agent_id, self.companion_agent_id)
             if agent_id is not None
         }
+
+    # ------------------------------------------------------------------
+    # Firmas de los agentes (PLAN_FIRMA_AGENTES_VISITA.md, modalidad A)
+    # ------------------------------------------------------------------
+
+    @builtins.property
+    def requires_agent_confirmation(self):
+        """Visita conjunta: los agentes confirman sus firmas registradas."""
+        return self.companion_agent_id is not None
+
+    @builtins.property
+    def agents_missing_signature(self):
+        """Agentes de la visita (principal y acompañante) sin firma registrada en disco."""
+        agents = [self.signing_agent]
+        if self.companion_agent_id is not None:
+            agents.append(self.companion_agent)
+        return [
+            agent for agent in agents
+            if agent is not None and not agent.has_signature_file
+        ]
+
+    @builtins.property
+    def agent_signatures_confirmed(self):
+        return self.agent_signatures_confirmed_at is not None
+
+    @builtins.property
+    def can_finalize_agents(self):
+        """Los agentes no bloquean el cierre: visita individual o firmas confirmadas."""
+        return not self.requires_agent_confirmation or self.agent_signatures_confirmed
