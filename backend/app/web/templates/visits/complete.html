@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "visits/_progress.html" import visit_progress %}
 
 {% block title %}
 Visita Completada
@@ -6,38 +7,7 @@ Visita Completada
 
 {% block content %}
 
-<!-- Indicador de progreso -->
-<div class="max-w-4xl mx-auto mb-8">
-    <div class="flex items-center justify-between">
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
-                ✓
-            </div>
-            <span class="text-xs mt-2 text-green-600 font-medium">Datos</span>
-        </div>
-        <div class="flex-1 h-1 bg-green-500"></div>
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
-                ✓
-            </div>
-            <span class="text-xs mt-2 text-green-600 font-medium">Vista Previa</span>
-        </div>
-        <div class="flex-1 h-1 bg-green-500"></div>
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
-                ✓
-            </div>
-            <span class="text-xs mt-2 text-green-600 font-medium">Firma</span>
-        </div>
-        <div class="flex-1 h-1 bg-green-500"></div>
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
-                ✓
-            </div>
-            <span class="text-xs mt-2 text-green-600 font-medium">Finalizado</span>
-        </div>
-    </div>
-</div>
+{{ visit_progress("complete", joint=visit.requires_agent_confirmation) }}
 
 <!-- Tarjeta de confirmación -->
 <div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-2xl p-8 text-center">
@@ -151,12 +121,19 @@ window.addEventListener('load', async function() {
     try {
         const response = await fetch(`/api/v1/visits/${visitId}/finalize`, {
             method: 'POST',
+            credentials: 'same-origin',
             headers: {
                 'Content-Type': 'application/json',
             }
         });
 
         const data = await response.json();
+
+        // Visita conjunta sin confirmar las firmas de los agentes: vuelve al paso
+        if (response.status === 409 && data.redirect_url) {
+            window.location.href = data.redirect_url;
+            return;
+        }
 
         if (response.ok && data.success) {
             // Ocultar loading y mostrar éxito

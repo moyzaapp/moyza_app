@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% import "components/ui_macros.html" as ui %}
+{% from "visits/_progress.html" import visit_progress %}
+
+{% block title %}
+Firmas de los agentes - Visita
+{% endblock %}
+
+{% block content %}
+
+{{ visit_progress("agents", joint=True) }}
+
+{% set principal = cards[0].agent if cards else None %}
+{% set companion = visit.companion_agent %}
+
+<div class="max-w-3xl mx-auto space-y-6">
+
+    {{ ui.page_header("Firmas de los agentes", "Visita de " ~ visit.visitor_name ~ " · " ~ (property.title if property else "")) }}
+
+    {% if visit.agent_signatures_confirmed %}
+
+    {% set confirmer = visit.agent_signatures_confirmer %}
+    {{ ui.banner(
+        "Firmas confirmadas",
+        tone="green",
+        text="Confirmado por " ~ ((confirmer.full_name or confirmer.email) if confirmer else "un usuario") ~ " el " ~ (visit.agent_signatures_confirmed_at | madrid_dt("%d/%m/%Y a las %H:%M"))
+    ) }}
+
+    {% elif missing_agents %}
+
+    {{ ui.banner(
+        "Falta la firma registrada de " ~ (missing_agents | map(attribute="name") | join(" y ")),
+        tone="amber",
+        text="La ficha se firma con la firma registrada de cada agente. Regístrala en Agentes o quita al acompañante para finalizar como visita individual."
+    ) }}
+
+    {% endif %}
+
+    {# Tarjetas de los dos agentes con su firma registrada #}
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {% for card in cards %}
+        {% set agent = card.agent %}
+        <section class="rounded-2xl border p-4 sm:p-6 {{ 'bg-white border-gray-200' if card.has_signature else 'bg-amber-50 border-amber-200' }}" aria-labelledby="agent-card-{{ agent.id }}">
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">{{ card.role_label }}</p>
+            <h2 id="agent-card-{{ agent.id }}" class="mt-1 text-base font-semibold text-gray-900">{{ agent.name }}</h2>
+            {% if card.companies %}<p class="text-xs text-gray-500">{{ card.companies }}</p>{% endif %}
+
+            {% if card.has_signature %}
+            <div class="mt-4 h-24 rounded-xl border border-gray-200 bg-gray-50 flex items-center justify-center p-2">
+                <img src="/{{ agent.signature_filepath }}" alt="Firma registrada de {{ agent.name }}" class="max-h-20 max-w-full object-contain">
+            </div>
+            <p class="mt-2 text-xs text-gray-500">
+                Registrada el {{ agent.signature_uploaded_at | madrid_dt("%d/%m/%Y %H:%M") if agent.signature_uploaded_at else "fecha no disponible" }}
+            </p>
+            {% else %}
+            <div class="mt-4">
+                {{ ui.badge("Sin firma registrada", "amber", dot=True) }}
+            </div>
+            {% if card.can_register %}
+            <p class="mt-3 text-sm text-amber-900">
+                {% if card.in_active_company %}
+                <a href="/agents" class="font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Registrar la firma en Agentes</a>
+                {% else %}
+                Regístrala en Agentes desde {{ card.companies }} (cambia de empresa en el menú).
+                {% endif %}
+            </p>
+            {% else %}
+            <p class="mt-3 text-sm text-amber-900">Pídele que la registre en Agentes.</p>
+            {% endif %}
+            {% endif %}
+        </section>
+        {% endfor %}
+    </div>
+
+    {% if visit.agent_signatures_confirmed %}
+
+    <div class="flex flex-col sm:flex-row sm:justify-end gap-3">
+        {{ ui.button("Continuar", "primary", href="/visits/complete/" ~ visit.id, full_mobile=True) }}
+    </div>
+
+    {% else %}
+
+    {# Confirmación #}
+    <section class="bg-white rounded-2xl border border-gray-200">
+        <div class="p-4 sm:p-6 space-y-4">
+            <div class="flex items-start gap-3">
+                <input type="checkbox" id="confirm-agent-signatures"
+                    class="mt-0.5 w-5 h-5 shrink-0 rounded border-gray-300 text-gray-900 focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50"
+                    {% if missing_agents %}disabled aria-describedby="confirm-agent-signatures-blocked"{% endif %}>
+                <label for="confirm-agent-signatures" class="text-sm text-gray-700 select-none">
+                    Confirmo que la ficha de visita se firma con las firmas registradas de
+                    <strong class="font-semibold text-gray-900">{{ principal.name if principal else "-" }}</strong>
+                    y <strong class="font-semibold text-gray-900">{{ companion.name if companion else "-" }}</strong>,
+                    tal y como constan en la sección Agentes.
+                </label>
+            </div>
+            {% if missing_agents %}
+            <p id="confirm-agent-signatures-blocked" class="text-xs text-gray-500">
+                No se puede confirmar mientras falte alguna firma registrada.
+            </p>
+            {% endif %}
+            <p id="confirm-agent-signatures-error" class="hidden text-sm text-red-600" role="alert"></p>
+        </div>
+        <footer class="flex flex-col-reverse sm:flex-row sm:justify-between gap-3 px-4 sm:px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl">
+            {{ ui.button("Quitar acompañante", "secondary", attrs='data-modal-open="removeCompanionModal"', full_mobile=True) }}
+            {{ ui.button("Confirmar y continuar", "primary", attrs='id="confirm-agent-signatures-btn" disabled', full_mobile=True) }}
+        </footer>
+    </section>
+
+    {{ ui.confirm_modal(
+        "removeCompanionModal",
+        "¿Quitar a " ~ (companion.name if companion else "el acompañante") ~ " de la visita?",
+        "La ficha se emitirá como visita individual de " ~ (principal.name if principal else "el agente principal") ~ ": " ~ (companion.name if companion else "el acompañante") ~ " dejará de figurar en el texto y en las firmas. No se puede deshacer.",
+        action="/visits/" ~ visit.id ~ "/remove-companion",
+        submit_label="Quitar acompañante"
+    ) }}
+
+    {% endif %}
+
+</div>
+
+{% if not visit.agent_signatures_confirmed %}
+<script>
+(function () {
+    var checkbox = document.getElementById('confirm-agent-signatures');
+    var button = document.getElementById('confirm-agent-signatures-btn');
+    var errorBox = document.getElementById('confirm-agent-signatures-error');
+    var blocked = {{ (missing_agents | length > 0) | tojson }};
+    var visitId = {{ visit.id | tojson }};
+    var label = button.textContent;
+
+    function sync() {
+        button.disabled = blocked || !checkbox.checked;
+    }
+
+    function showError(message) {
+        errorBox.textContent = message;
+        errorBox.classList.remove('hidden');
+    }
+
+    checkbox.addEventListener('change', sync);
+    sync();
+
+    button.addEventListener('click', async function () {
+        if (button.disabled) return;
+        button.disabled = true;
+        button.textContent = 'Confirmando…';
+        errorBox.classList.add('hidden');
+
+        try {
+            var response = await fetch('/api/v1/visits/' + visitId + '/confirm-agent-signatures', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirmed: true })
+            });
+            var data = {};
+            try { data = await response.json(); } catch (e) { data = {}; }
+
+            if (response.ok && data.redirect_url) {
+                window.location.href = data.redirect_url;
+                return;
+            }
+            if (response.status === 401) {
+                showError('Tu sesión ha caducado. Vuelve a iniciar sesión para continuar.');
+            } else {
+                showError(data.detail || 'No se pudo confirmar. Inténtalo de nuevo.');
+            }
+        } catch (e) {
+            showError('Error de conexión. Comprueba la conexión e inténtalo de nuevo.');
+        }
+        button.textContent = label;
+        sync();
+    });
+})();
+</script>
+{% endif %}
+
+{% endblock %}

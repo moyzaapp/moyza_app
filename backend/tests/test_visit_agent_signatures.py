@@ -127,6 +127,7 @@ API_ENDPOINTS = [
     ("accept-terms", {"accepted": True}),
     ("save-signature", {"signature_data": "x"}),
     ("finalize", None),
+    ("confirm-agent-signatures", {"confirmed": True}),
 ]
 
 
@@ -185,6 +186,132 @@ class TestApiProtection:
         response = _post(api_client, "accept-terms", {"accepted": True})
         assert response.status_code == 400
         assert "preview" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# confirm-agent-signatures (sin base de datos)
+# ---------------------------------------------------------------------------
+
+class _FakeDB:
+    def __init__(self):
+        self.commits = 0
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        pass
+
+
+def _fake_visit(**overrides):
+    principal = SimpleNamespace(id=1, name="Ana Principal", signature_uploaded_at=datetime(2026, 1, 2, 10, 0))
+    companion = SimpleNamespace(id=2, name="Luis Acompañante", signature_uploaded_at=datetime(2026, 3, 4, 11, 0))
+    values = dict(
+        id=10, visit_status="signed", requires_agent_confirmation=True,
+        agent_signatures_confirmed=False, agents_missing_signature=[],
+        signing_agent=principal, companion_agent=companion,
+        agent_signatures_confirmed_at=None, agent_signatures_confirmed_by=None,
+        agent_signatures_confirmed_ip=None,
+    )
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+@pytest.fixture
+def confirm_client(monkeypatch):
+    """Cliente de la API con sesión, empresa y visita sustituidas."""
+    state = {"visit": _fake_visit(), "db": _FakeDB(), "events": []}
+    app = FastAPI()
+    app.include_router(visits_api.router, prefix="/api/v1/visits")
+    app.dependency_overrides[get_db] = lambda: state["db"]
+    monkeypatch.setattr(visits_api, "get_api_user", lambda request, db: SimpleNamespace(id=5))
+    monkeypatch.setattr(visits_api, "resolve_company_for_api", lambda request, u, db: SimpleNamespace(id=1))
+    monkeypatch.setattr(visits_api, "get_visit_in_company", lambda db, visit_id, company_id: state["visit"])
+    monkeypatch.setattr(visits_api, "log_visit_event",
+                        lambda **kwargs: state["events"].append(kwargs))
+    state["client"] = TestClient(app)
+    return state
+
+
+def _confirm(state, confirmed=True):
+    return state["client"].post("/api/v1/visits/10/confirm-agent-signatures", json={"confirmed": confirmed})
+
+
+class TestConfirmAgentSignatures:
+
+    def test_confirma_y_registra_usuario_fecha_ip_y_auditoria(self, confirm_client):
+        response = _confirm(confirm_client)
+        assert response.status_code == 200
+        assert response.json()["redirect_url"] == "/visits/complete/10"
+
+        visit = confirm_client["visit"]
+        assert visit.agent_signatures_confirmed_at is not None
+        assert visit.agent_signatures_confirmed_by == 5
+        assert visit.agent_signatures_confirmed_ip
+        assert confirm_client["db"].commits == 1
+
+        [event] = confirm_client["events"]
+        assert event["event_type"] == "agent_signatures_confirmed"
+        assert event["user_id"] == 5
+        assert event["event_data"]["agent_id"] == 1
+        assert event["event_data"]["companion_agent_id"] == 2
+        assert event["event_data"]["agent_signature_uploaded_at"] == "2026-01-02T10:00:00"
+        assert event["event_data"]["companion_signature_uploaded_at"] == "2026-03-04T11:00:00"
+
+    def test_sin_marcar_la_casilla(self, confirm_client):
+        assert _confirm(confirm_client, confirmed=False).status_code == 400
+
+    @pytest.mark.parametrize("status", ["draft", "preview", "completed"])
+    def test_solo_tras_la_firma_del_cliente(self, confirm_client, status):
+        confirm_client["visit"].visit_status = status
+        assert _confirm(confirm_client).status_code == 400
+
+    def test_visita_individual(self, confirm_client):
+        confirm_client["visit"].requires_agent_confirmation = False
+        response = _confirm(confirm_client)
+        assert response.status_code == 400
+        assert "acompañante" in response.json()["detail"]
+
+    def test_confirmacion_repetida(self, confirm_client):
+        confirm_client["visit"].agent_signatures_confirmed = True
+        assert _confirm(confirm_client).status_code == 409
+        assert confirm_client["events"] == []
+
+    def test_falta_firma_registrada_con_el_nombre(self, confirm_client):
+        visit = confirm_client["visit"]
+        visit.agents_missing_signature = [visit.companion_agent]
+        response = _confirm(confirm_client)
+        assert response.status_code == 400
+        assert "Luis Acompañante no tiene firma registrada" in response.json()["detail"]
+        assert visit.agent_signatures_confirmed_at is None
+
+
+class TestFinalizeGuards:
+
+    def test_conjunta_sin_confirmar_409_con_el_paso(self, confirm_client):
+        confirm_client["visit"].signature_filepath = "firma.png"
+        confirm_client["visit"].property_id = 3
+        # finalize consulta la propiedad antes de las comprobaciones de estado
+        db = confirm_client["db"]
+        db.query = lambda model: SimpleNamespace(
+            filter=lambda *a: SimpleNamespace(first=lambda: SimpleNamespace(id=3, title="P"))
+        )
+        response = confirm_client["client"].post("/api/v1/visits/10/finalize")
+        assert response.status_code == 409
+        assert response.json()["redirect_url"] == "/visits/agent-signatures/10"
+
+    def test_conjunta_confirmada_sin_firma_registrada_400(self, confirm_client):
+        visit = confirm_client["visit"]
+        visit.signature_filepath = "firma.png"
+        visit.property_id = 3
+        visit.agent_signatures_confirmed = True
+        visit.agents_missing_signature = [visit.signing_agent]
+        confirm_client["db"].query = lambda model: SimpleNamespace(
+            filter=lambda *a: SimpleNamespace(first=lambda: SimpleNamespace(id=3, title="P"))
+        )
+        response = confirm_client["client"].post("/api/v1/visits/10/finalize")
+        assert response.status_code == 400
+        assert "Ana Principal" in response.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -415,3 +542,138 @@ def test_flujo_completo_de_una_visita_individual_con_sesion(data):
     assert visit.visit_status == "completed"
     assert visit.visit_sheet_filepath and os.path.exists(visit.visit_sheet_filepath)
     assert visit.agent_signatures_confirmed_at is None
+
+
+# ---------------------------------------------------------------------------
+# Integración: paso de confirmación (fase 2)
+# ---------------------------------------------------------------------------
+
+def _audit_events(visit_id, event_type):
+    from app.models.visit_audit_log import VisitAuditLog
+    db = _session()
+    try:
+        return (
+            db.query(VisitAuditLog)
+            .filter(VisitAuditLog.visit_id == visit_id, VisitAuditLog.event_type == event_type)
+            .all()
+        )
+    finally:
+        db.close()
+
+
+def _admin_id():
+    from app.models.user import User
+    db = _session()
+    try:
+        return db.query(User).filter(User.email == ADMIN_EMAIL).one().id
+    finally:
+        db.close()
+
+
+def test_visita_individual_no_pasa_por_el_paso(data):
+    visit_id = _new_visit(data["property_id"], data["principal"], name="INDIVIDUAL PASO")
+    admin = _Client(ADMIN_EMAIL, "MOYZA")
+    payload = _sign_as_client(admin, visit_id)
+    assert payload["redirect_url"] == f"/visits/complete/{visit_id}"
+
+    status, _, headers = admin.get(f"/visits/agent-signatures/{visit_id}")
+    assert status == 302 and headers.get("location") == f"/visits/complete/{visit_id}"
+    status, _, _ = admin.get(f"/visits/complete/{visit_id}")
+    assert status == 200
+
+    status, payload = admin.post_json(f"/api/v1/visits/{visit_id}/confirm-agent-signatures", {"confirmed": True})
+    assert status == 400
+
+
+def test_visita_conjunta_confirmada_y_finalizada(data):
+    visit_id = _new_visit(data["property_id"], data["principal"], data["acomp"], name="CONJUNTA")
+    admin = _Client(ADMIN_EMAIL, "MOYZA")
+
+    # Antes de la firma del cliente no se puede confirmar
+    status, _ = admin.post_json(f"/api/v1/visits/{visit_id}/confirm-agent-signatures", {"confirmed": True})
+    assert status == 400
+
+    payload = _sign_as_client(admin, visit_id)
+    assert payload["redirect_url"] == f"/visits/agent-signatures/{visit_id}"
+
+    # Sin confirmar no se finaliza ni se abre la página de finalizar
+    status, payload = admin.post_json(f"/api/v1/visits/{visit_id}/finalize")
+    assert status == 409 and payload["redirect_url"] == f"/visits/agent-signatures/{visit_id}"
+    status, _, headers = admin.get(f"/visits/complete/{visit_id}")
+    assert status == 302 and headers.get("location") == f"/visits/agent-signatures/{visit_id}"
+    assert _flash(headers).get("category") == "warning"
+
+    status, body, _ = admin.get(f"/visits/agent-signatures/{visit_id}")
+    assert status == 200
+    assert "Firmas de los agentes" in body
+    assert f"{TAG} PRINCIPAL" in body and f"{TAG} ACOMP" in body
+    assert "Confirmo que la ficha de visita se firma" in body
+    assert "Sin firma registrada" not in body
+
+    status, payload = admin.post_json(f"/api/v1/visits/{visit_id}/confirm-agent-signatures", {"confirmed": True})
+    assert status == 200 and payload["redirect_url"] == f"/visits/complete/{visit_id}"
+
+    visit = _load_visit(visit_id)
+    assert visit.agent_signatures_confirmed_at is not None
+    assert visit.agent_signatures_confirmed_by == _admin_id()
+    assert visit.agent_signatures_confirmed_ip
+
+    [event] = _audit_events(visit_id, "agent_signatures_confirmed")
+    assert event.user_id == _admin_id()
+    assert event.event_data["agent_id"] == data["principal"]
+    assert event.event_data["companion_agent_id"] == data["acomp"]
+    assert event.event_data["agent_signature_uploaded_at"]
+    assert event.event_data["companion_signature_uploaded_at"]
+
+    # Repetida: rechazada. Quitar acompañante después de confirmar: rechazado
+    status, _ = admin.post_json(f"/api/v1/visits/{visit_id}/confirm-agent-signatures", {"confirmed": True})
+    assert status == 409
+    status, _, headers = admin.post(f"/visits/{visit_id}/remove-companion", {})
+    assert status == 302 and _flash(headers).get("category") == "error"
+    assert _load_visit(visit_id).companion_agent_id == data["acomp"]
+
+    # La página muestra el resumen y deja continuar
+    status, body, _ = admin.get(f"/visits/agent-signatures/{visit_id}")
+    assert status == 200 and "Firmas confirmadas" in body and "Confirmado por" in body
+
+    status, _, _ = admin.get(f"/visits/complete/{visit_id}")
+    assert status == 200
+    status, payload = admin.post_json(f"/api/v1/visits/{visit_id}/finalize")
+    assert status == 200, payload
+    visit = _load_visit(visit_id)
+    assert visit.visit_status == "completed"
+    assert visit.companion_agent_id == data["acomp"]
+
+
+def test_acompanante_sin_firma_bloquea_y_se_puede_quitar(data):
+    visit_id = _new_visit(data["property_id"], data["principal"], data["sinfirma"], name="SIN FIRMA")
+    admin = _Client(ADMIN_EMAIL, "MOYZA")
+    _sign_as_client(admin, visit_id)
+
+    status, body, _ = admin.get(f"/visits/agent-signatures/{visit_id}")
+    assert status == 200
+    assert "Sin firma registrada" in body
+    assert f"Falta la firma registrada de {TAG} SINFIRMA" in body
+
+    status, payload = admin.post_json(f"/api/v1/visits/{visit_id}/confirm-agent-signatures", {"confirmed": True})
+    assert status == 400
+    assert f"{TAG} SINFIRMA no tiene firma registrada" in payload["detail"]
+    assert _load_visit(visit_id).agent_signatures_confirmed_at is None
+
+    status, _, headers = admin.post(f"/visits/{visit_id}/remove-companion", {})
+    assert status == 302 and headers.get("location") == f"/visits/complete/{visit_id}"
+    assert _flash(headers).get("category") == "success"
+
+    visit = _load_visit(visit_id)
+    assert visit.companion_agent_id is None
+    assert not visit.requires_agent_confirmation
+    [event] = _audit_events(visit_id, "companion_removed_before_confirmation")
+    assert event.event_data["companion_agent_id"] == data["sinfirma"]
+    assert event.event_data["agent_id"] == data["principal"]
+
+    # Ya es individual: se finaliza sin confirmación
+    status, _, _ = admin.get(f"/visits/complete/{visit_id}")
+    assert status == 200
+    status, payload = admin.post_json(f"/api/v1/visits/{visit_id}/finalize")
+    assert status == 200, payload
+    assert _load_visit(visit_id).visit_status == "completed"

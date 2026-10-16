@@ -20,6 +20,9 @@
                 Realizada por: <span class="font-medium">{{ visit.signing_agent.name if visit.signing_agent else '-' }}</span>{% if visit.companion_agent %} · con <span class="font-medium">{{ visit.companion_agent.name }}</span>{% endif %}
             </p>
             <p class="text-xs text-gray-500 mt-1">Fijado al firmar la ficha</p>
+            {% if visit.agent_signatures_confirmed %}
+            <p class="text-xs text-gray-500 mt-1">Firmas de los agentes confirmadas el {{ visit.agent_signatures_confirmed_at | madrid_dt("%d/%m/%Y %H:%M") }}</p>
+            {% endif %}
         </div>
     </div>
 

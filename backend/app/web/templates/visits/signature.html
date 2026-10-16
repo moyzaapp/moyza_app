@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "visits/_progress.html" import visit_progress %}
 
 {% block title %}
 Firma Digital - Visita
@@ -6,38 +7,7 @@ Firma Digital - Visita
 
 {% block content %}
 
-<!-- Indicador de progreso -->
-<div class="max-w-4xl mx-auto mb-8">
-    <div class="flex items-center justify-between">
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
-                ✓
-            </div>
-            <span class="text-xs mt-2 text-green-600 font-medium">Datos</span>
-        </div>
-        <div class="flex-1 h-1 bg-green-500"></div>
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
-                ✓
-            </div>
-            <span class="text-xs mt-2 text-green-600 font-medium">Vista Previa</span>
-        </div>
-        <div class="flex-1 h-1 bg-blue-500"></div>
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
-                3
-            </div>
-            <span class="text-xs mt-2 text-blue-600 font-medium">Firma</span>
-        </div>
-        <div class="flex-1 h-1 bg-gray-300"></div>
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-bold">
-                4
-            </div>
-            <span class="text-xs mt-2 text-gray-500">Finalizado</span>
-        </div>
-    </div>
-</div>
+{{ visit_progress("signature", joint=visit.requires_agent_confirmation) }}
 
 <!-- Tarjeta de firma -->
 <div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-2xl p-8">
@@ -55,8 +25,13 @@ Firma Digital - Visita
             <canvas id="signature-canvas" width="700" height="250"></canvas>
         </div>
         <p class="text-xs text-gray-500 mt-2">
-            💡 Consejo: Dibuje su firma de forma clara y legible
+            Consejo: dibuje su firma de forma clara y legible
         </p>
+    </div>
+
+    <!-- Error al guardar (validación o conexión) -->
+    <div id="signature-error" class="hidden mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-900" role="alert">
+        <p id="signature-error-text" class="text-sm font-semibold whitespace-pre-line"></p>
     </div>
 
     <!-- Vista previa de la firma -->
@@ -73,7 +48,7 @@ Firma Digital - Visita
             id="clear-signature"
             class="px-6 py-3 bg-white border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-100 transition-colors"
         >
-            🗑️ Limpiar Firma
+            Limpiar firma
         </button>
 
         <button
@@ -81,7 +56,7 @@ Firma Digital - Visita
             disabled
             class="px-8 py-3 bg-gray-400 text-white rounded-xl cursor-not-allowed transition-all"
         >
-            ✓ Confirmar Firma
+            Confirmar firma
         </button>
     </div>
 
@@ -200,12 +175,21 @@ clearBtn.addEventListener('click', function() {
     previewDiv.classList.add('hidden');
 });
 
+const errorBox = document.getElementById('signature-error');
+const errorText = document.getElementById('signature-error-text');
+
+function showSignatureError(message) {
+    errorText.textContent = message;
+    errorBox.classList.remove('hidden');
+}
+
 // Confirmar firma
 confirmBtn.addEventListener('click', async function() {
     if (!hasDrawn) {
-        alert('Por favor, firme antes de continuar');
+        showSignatureError('Por favor, firme antes de continuar');
         return;
     }
+    errorBox.classList.add('hidden');
 
     // Convertir canvas a base64
     const signatureData = canvas.toDataURL('image/png');
@@ -220,13 +204,14 @@ confirmBtn.addEventListener('click', async function() {
 
     // Deshabilitar botón y mostrar estado de carga
     confirmBtn.disabled = true;
-    confirmBtn.textContent = '⏳ Guardando firma...';
+    confirmBtn.textContent = 'Guardando firma…';
     confirmBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
     confirmBtn.classList.add('bg-gray-400');
 
     try {
         const response = await fetch('/api/v1/visits/{{ visit.id }}/save-signature', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: {
                 'Content-Type': 'application/json',
             },
@@ -239,13 +224,14 @@ confirmBtn.addEventListener('click', async function() {
             const data = await response.json();
 
             // Mostrar mensaje de éxito
-            confirmBtn.textContent = '✓ Firma guardada';
+            confirmBtn.textContent = 'Firma guardada';
             confirmBtn.classList.remove('bg-gray-400');
             confirmBtn.classList.add('bg-green-500');
 
-            // Esperar 1 segundo para que vea el mensaje
+            // Esperar 1 segundo para que vea el mensaje. Visita conjunta:
+            // el servidor manda a la confirmación de firmas de los agentes.
             setTimeout(() => {
-                window.location.href = `/visits/complete/{{ visit.id }}`;
+                window.location.href = data.redirect_url || `/visits/complete/{{ visit.id }}`;
             }, 1000);
         } else {
             const error = await response.json();
@@ -256,19 +242,19 @@ confirmBtn.addEventListener('click', async function() {
 
             // Si el error es de validación, dar más contexto
             if (errorMsg.includes('vacía') || errorMsg.includes('pequeña')) {
-                errorMsg += '\n\n💡 Intente:\n- Dibujar trazos más largos y definidos\n- Presionar más fuerte (si usa stylus)\n- Usar un trazo continuo en vez de puntos';
+                errorMsg += '\n\nIntente:\n- Dibujar trazos más largos y definidos\n- Presionar más fuerte (si usa stylus)\n- Usar un trazo continuo en vez de puntos';
             }
 
-            alert('❌ ' + errorMsg);
+            showSignatureError(errorMsg);
             confirmBtn.disabled = false;
-            confirmBtn.textContent = '✓ Confirmar Firma';
+            confirmBtn.textContent = 'Confirmar firma';
             enableConfirmButton();
         }
     } catch (error) {
         console.error('Network error:', error);
-        alert('❌ Error de conexión. Por favor, verifique su internet e inténtelo de nuevo.');
+        showSignatureError('Error de conexión. Por favor, verifique su internet e inténtelo de nuevo.');
         confirmBtn.disabled = false;
-        confirmBtn.textContent = '✓ Confirmar Firma';
+        confirmBtn.textContent = 'Confirmar firma';
         enableConfirmButton();
     }
 });

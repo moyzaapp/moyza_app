@@ -19,6 +19,7 @@ from fastapi import APIRouter
 from fastapi import Request
 from fastapi import Depends
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -65,6 +66,26 @@ class AcceptTermsRequest(BaseModel):
 
 class SaveSignatureRequest(BaseModel):
     signature_data: str
+
+
+class ConfirmAgentSignaturesRequest(BaseModel):
+    confirmed: bool
+
+
+def _agent_signatures_url(visit_id: int) -> str:
+    return f"/visits/agent-signatures/{visit_id}"
+
+
+def _missing_signature_detail(agents) -> str:
+    names = " y ".join(agent.name for agent in agents)
+    if len(agents) == 1:
+        lead, action = f"{names} no tiene firma registrada", "Regístrala"
+    else:
+        lead, action = f"{names} no tienen firma registrada", "Regístralas"
+    return (
+        f"{lead}. {action} en Agentes o quita al acompañante "
+        "para finalizar como visita individual."
+    )
 
 
 @router.post("/{visit_id}/accept-terms")
@@ -187,6 +208,87 @@ async def save_signature(
 
         logger.info(f"Signature saved for visit {visit_id}: {filepath}")
 
+        # Visita conjunta: antes de finalizar, los agentes confirman sus
+        # firmas registradas (PLAN_FIRMA_AGENTES_VISITA.md §3.2)
+        if visit.requires_agent_confirmation:
+            redirect_url = _agent_signatures_url(visit_id)
+        else:
+            redirect_url = f"/visits/complete/{visit_id}"
+
+        return {
+            "success": True,
+            "redirect_url": redirect_url
+        }
+
+    except Exception as e:
+        db.rollback()
+        logger.exception(f"Error saving signature for visit {visit_id}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{visit_id}/confirm-agent-signatures")
+async def confirm_agent_signatures(
+    visit_id: int,
+    data: ConfirmAgentSignaturesRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    El agente logueado confirma que la ficha de una visita conjunta se firma
+    con las firmas registradas de los dos agentes (modalidad A).
+    PLAN_FIRMA_AGENTES_VISITA.md §3.3. Se registra quién, cuándo y desde qué IP.
+    """
+    visit, user = _visit_for_api(request, db, visit_id)
+
+    if not data.confirmed:
+        raise HTTPException(status_code=400, detail="Marca la casilla de confirmación para continuar")
+
+    if visit.visit_status != 'signed':
+        raise HTTPException(
+            status_code=400,
+            detail=f"El cliente debe haber firmado la visita (estado actual: '{visit.visit_status}')"
+        )
+
+    if not visit.requires_agent_confirmation:
+        raise HTTPException(status_code=400, detail="La visita no tiene agente acompañante")
+
+    if visit.agent_signatures_confirmed:
+        raise HTTPException(status_code=409, detail="Las firmas de los agentes ya están confirmadas")
+
+    missing = visit.agents_missing_signature
+    if missing:
+        raise HTTPException(status_code=400, detail=_missing_signature_detail(missing))
+
+    principal = visit.signing_agent
+    companion = visit.companion_agent
+
+    try:
+        visit.agent_signatures_confirmed_at = datetime.utcnow()
+        visit.agent_signatures_confirmed_by = user.id
+        visit.agent_signatures_confirmed_ip = get_client_ip(request)
+        db.commit()
+
+        log_visit_event(
+            visit=visit,
+            event_type='agent_signatures_confirmed',
+            db=db,
+            request=request,
+            user_id=user.id,
+            event_data={
+                'agent_id': principal.id,
+                'companion_agent_id': companion.id,
+                'agent_signature_uploaded_at': (
+                    principal.signature_uploaded_at.isoformat() if principal.signature_uploaded_at else None
+                ),
+                'companion_signature_uploaded_at': (
+                    companion.signature_uploaded_at.isoformat() if companion.signature_uploaded_at else None
+                ),
+                'confirmed_at': visit.agent_signatures_confirmed_at.isoformat(),
+            }
+        )
+
+        logger.info(f"Agent signatures confirmed for visit {visit_id} by user {user.id}")
+
         return {
             "success": True,
             "redirect_url": f"/visits/complete/{visit_id}"
@@ -194,7 +296,7 @@ async def save_signature(
 
     except Exception as e:
         db.rollback()
-        logger.exception(f"Error saving signature for visit {visit_id}")
+        logger.exception(f"Error confirming agent signatures for visit {visit_id}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -234,6 +336,17 @@ async def finalize_visit(
     # Verificar que tiene firma
     if not visit.signature_filepath:
         raise HTTPException(status_code=400, detail="Falta la firma digital")
+
+    # Visita conjunta: firmas de los agentes confirmadas y registradas
+    if visit.requires_agent_confirmation:
+        if not visit.agent_signatures_confirmed:
+            return JSONResponse(status_code=409, content={
+                "detail": "Falta confirmar las firmas de los agentes",
+                "redirect_url": _agent_signatures_url(visit_id),
+            })
+        missing = visit.agents_missing_signature
+        if missing:
+            raise HTTPException(status_code=400, detail=_missing_signature_detail(missing))
 
     try:
         # Generar PDF con firma
