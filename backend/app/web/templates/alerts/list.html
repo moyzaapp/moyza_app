@@ -66,10 +66,10 @@
                 <div class="flex items-center justify-between">
                     <div>
                         <p class="text-sm text-gray-600">Pendientes</p>
-                        <p class="text-3xl font-bold text-yellow-600">{{ pending_count }}</p>
+                        <p class="text-3xl font-bold text-amber-600">{{ pending_count }}</p>
                     </div>
-                    <div class="bg-yellow-100 p-3 rounded-lg">
-                        <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div class="bg-amber-100 p-3 rounded-lg">
+                        <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                         </svg>
                     </div>
@@ -160,7 +160,7 @@
                 <label class="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" name="status_filter" value="PENDING"
                         {% if 'PENDING' in effective_statuses %}checked{% endif %}
-                        class="w-4 h-4 rounded text-yellow-500 border-gray-300 focus:ring-yellow-400">
+                        class="w-4 h-4 rounded text-amber-500 border-gray-300 focus:ring-amber-400">
                     <span class="text-sm text-gray-700">Pendiente</span>
                 </label>
                 <label class="flex items-center gap-1.5 cursor-pointer">
@@ -318,11 +318,19 @@
                                         {% else %}
                                         <span class="text-gray-400 text-xs">Sin iniciar</span>
                                         {% endif %}
+                                        {# Requiere atención: causa más grave en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md) #}
+                                        {% set attn = alert_attention.get(alert.id) %}
+                                        {% if attn %}
+                                        <div class="mt-2" title="Venció el {{ attn.due_label }}">
+                                            {{ ui.badge(attn.badge, "amber", dot=True, extra="whitespace-nowrap") }}
+                                            <span class="sr-only">, venció el {{ attn.due_label }}</span>
+                                        </div>
+                                        {% endif %}
                                     </td>
 
                                     <td class="px-6 py-4 text-center">
                                         {% if alert.status == AlertStatus.PENDING %}
-                                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
                                             Pendiente
                                         </span>
                                         {% elif alert.status == AlertStatus.IN_PROGRESS %}

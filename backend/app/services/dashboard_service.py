@@ -43,6 +43,10 @@ from app.models.property_visit import PropertyVisit
 from app.services.alert_view import assignment_start_expr
 from app.services.alert_view import get_locked_alert_ids
 from app.services.alert_view import real_follow_ups_clause
+from app.core.business_calendar import format_business_duration
+from app.services.buyer_attention_service import RULE_NO_ACTION
+from app.services.buyer_attention_service import RULE_STAGE_STALL
+from app.services.buyer_attention_service import first_stage_label
 from app.services.buyer_reminder_service import get_pending_buyers_by_agent
 from app.services.company_scope import scope_agents
 from app.services.performance_report_service import BREAKDOWN_KEYS
@@ -102,6 +106,18 @@ def madrid_now(now: Optional[datetime] = None) -> datetime:
 def long_date_es(value) -> str:
     """'miércoles 8 de octubre'."""
     return f"{WEEKDAYS[value.weekday()]} {value.day} de {MONTHS_LONG[value.month - 1]}"
+
+
+def attention_summary(buyers: list) -> str:
+    """'2 sin gestión · 1 sin pasar de Primera Llamada' (filas de `get_pending_buyers_by_agent`)."""
+    no_action = sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION)
+    stalled = sum(1 for b in buyers if b["rule"] == RULE_STAGE_STALL)
+    parts = []
+    if no_action:
+        parts.append(f"{no_action} sin gestión")
+    if stalled:
+        parts.append(f"{stalled} sin pasar de {first_stage_label()}")
+    return " · ".join(parts)
 
 
 def semaphore(pct: Optional[int]) -> str:
@@ -337,6 +353,7 @@ class DashboardService:
         }
 
         report = self.perf.get_report(agent.id, period.period_type, period.start)
+        pending_buyers = self.pending_buyers_for_agent(agent.id, now=now)
 
         return {
             "objective_kpis": self.build_kpis(
@@ -353,7 +370,8 @@ class DashboardService:
             "portfolio": self.portfolio(agent, now=now),
             "trend": self.agent_trend(agent, period, now=now),
             "admin_notes": (report.admin_notes or "").strip() if report else "",
-            "pending_buyers": self.pending_buyers_for_agent(agent.id, now=now),
+            "pending_buyers": pending_buyers,
+            "pending_summary": attention_summary(pending_buyers),
         }
 
     # ------------------------------------------------------------------
@@ -470,7 +488,12 @@ class DashboardService:
         }
 
     def pending_buyers_for_agent(self, agent_id: int, now: Optional[datetime] = None) -> list:
-        """Compradores con más de BUYER_REMINDER_HOURS sin gestión (regla del email de las 06:00)."""
+        """Compradores que requieren atención (misma regla que el email diario).
+
+        PLAN_ALERTAS_DIAS_HABILES.md: R1 "sin gestión" y R2 "sin pasar de
+        Primera llamada", en horas hábiles; una fila por alerta. Cada fila trae
+        `rule`, `text` ("2 d 5 h hábiles sin gestión"), `due_label`…
+        """
         pending = get_pending_buyers_by_agent(
             self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id, agent_id=agent_id,
         )
@@ -746,7 +769,11 @@ class DashboardService:
     # -- Requiere atención -------------------------------------------------
 
     def pending_buyers_by_agent(self, agents, now: Optional[datetime] = None) -> list:
-        """Compradores con más de BUYER_REMINDER_HOURS sin gestión, agrupados por agente."""
+        """Compradores que requieren atención agrupados por agente (horas hábiles).
+
+        Por grupo: total, cuántos "sin gestión" (R1) y cuántos "sin avance" (R2)
+        y el más antiguo en horas hábiles.
+        """
         pending = get_pending_buyers_by_agent(
             self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id,
         )
@@ -755,11 +782,16 @@ class DashboardService:
         for (agent_id, company_id), buyers in pending.items():
             if company_id != self.company_id:
                 continue
+            oldest = max(b["business_hours_elapsed"] for b in buyers)
             groups.append({
                 "agent_id": agent_id,
                 "agent_name": names.get(agent_id) or "Sin agente",
                 "count": len(buyers),
-                "oldest_hours": max(b["hours_elapsed"] for b in buyers),
+                "no_action": sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION),
+                "stage_stall": sum(1 for b in buyers if b["rule"] == RULE_STAGE_STALL),
+                "oldest_hours": int(oldest),
+                "oldest_label": format_business_duration(oldest),
+                "summary": attention_summary(buyers),
             })
         return sorted(groups, key=lambda g: (-g["count"], -g["oldest_hours"]))
 
@@ -826,11 +858,11 @@ class DashboardService:
 
         for group in pending:
             items.append({
-                "tone": "red",
+                "tone": "red" if group["no_action"] else "amber",
                 "icon": "user",
                 "title": f"{group['agent_name']} · {group['count']} "
-                         f"{'comprador' if group['count'] == 1 else 'compradores'} sin gestión",
-                "text": f"Más de {settings.BUYER_REMINDER_HOURS} h; el más antiguo, {group['oldest_hours']} h",
+                         f"{'comprador requiere' if group['count'] == 1 else 'compradores requieren'} atención",
+                "text": f"{group['summary']}; el más antiguo, {group['oldest_label']} hábiles",
                 "href": f"/alerts?agent_id={group['agent_id']}",
             })
 

@@ -49,6 +49,9 @@ class NotificationKind:
     FOLLOW_UP_DUE = "follow_up_due"
     ADMIN_NOTE_ADDED = "admin_note_added"
     ALERT_ASSIGNED = "alert_assigned"
+    # Compradores que requieren atención (PLAN_ALERTAS_DIAS_HABILES.md §2.3)
+    BUYER_NO_ACTION = "buyer_no_action"
+    BUYER_STAGE_STALL = "buyer_stage_stall"
 
     # Icono (dashboard/components/icons.html) y tono por tipo
     STYLES = {
@@ -59,6 +62,8 @@ class NotificationKind:
         FOLLOW_UP_DUE: ("clock", "amber"),
         ADMIN_NOTE_ADDED: ("chat", "gray"),
         ALERT_ASSIGNED: ("user", "blue"),
+        BUYER_NO_ACTION: ("inbox", "amber"),
+        BUYER_STAGE_STALL: ("user", "amber"),
     }
 
     @classmethod
@@ -371,6 +376,167 @@ def run_follow_up_due(db: Session, now: Optional[datetime] = None) -> int:
             logger.exception("Error notificando seguimiento de la alerta %s", alert.id)
     db.commit()
     return created
+
+
+# ---------------------------------------------------------------------------
+# Job diario: compradores que requieren atención (horas hábiles)
+# ---------------------------------------------------------------------------
+
+def buyer_kind(rule: str) -> str:
+    """Tipo de notificación de una regla de `buyer_attention_service`."""
+    from app.services.buyer_attention_service import RULE_NO_ACTION
+    return NotificationKind.BUYER_NO_ACTION if rule == RULE_NO_ACTION else NotificationKind.BUYER_STAGE_STALL
+
+
+BUYER_KINDS = (NotificationKind.BUYER_NO_ACTION, NotificationKind.BUYER_STAGE_STALL)
+
+
+def buyer_reminder_slot(due_at: datetime, now: datetime, repeat_business_days: int) -> datetime:
+    """Inicio del tramo de aviso en curso: `due_at`, `due_at` + N días hábiles, …
+
+    Cadencia de la campana (decisión 7): al cruzar el umbral y de nuevo cada
+    `repeat_business_days` días hábiles mientras siga igual.
+    """
+    from app.core.business_calendar import add_business_hours
+
+    slot = due_at
+    step = max(repeat_business_days, 1) * 24
+    while True:
+        following = add_business_hours(slot, step)
+        if following > now:
+            return slot
+        slot = following
+
+
+def run_buyer_attention(db: Session, items: Iterable, now: Optional[datetime] = None,
+                        repeat_business_days: Optional[int] = None) -> int:
+    """Una notificación por alerta vencida (`items` de `find_buyers_needing_attention`).
+
+    Deduplicación por alerta + regla + vencimiento: si el usuario ya tiene una
+    de esa regla y alerta creada en el tramo en curso (leída o no), no se
+    repite. Al abrir un tramo nuevo, la del tramo anterior que siga sin leer
+    se marca leída para que no se acumulen. Devuelve cuántas se crearon.
+    Solo in-app: sin email ni WhatsApp.
+    """
+    from app.core.config import settings
+
+    now = now or datetime.utcnow()
+    repeat = settings.BUYER_REMINDER_REPEAT_BUSINESS_DAYS if repeat_business_days is None else repeat_business_days
+    created = 0
+    for item in items:
+        alert = item.alert
+        kind = buyer_kind(item.rule)
+        slot = buyer_reminder_slot(item.due_at, now, repeat)
+        try:
+            users = []
+            for user in users_for_agent(db, alert.agent):
+                same_slot = db.query(Notification.id).filter(
+                    Notification.user_id == user.id,
+                    Notification.company_id == alert.company_id,
+                    Notification.kind == kind,
+                    Notification.entity_type == "alert",
+                    Notification.entity_id == alert.id,
+                    Notification.created_at >= slot,
+                ).first()
+                if same_slot is None:
+                    users.append(user)
+            if not users:
+                continue
+            # La del tramo anterior queda superada por la nueva
+            db.query(Notification).filter(
+                Notification.user_id.in_([u.id for u in users]),
+                Notification.company_id == alert.company_id,
+                Notification.kind == kind,
+                Notification.entity_type == "alert",
+                Notification.entity_id == alert.id,
+                Notification.read_at.is_(None),
+            ).update({Notification.read_at: now}, synchronize_session=False)
+            name = alert.lead_name or "Comprador"
+            if kind == NotificationKind.BUYER_NO_ACTION:
+                title = f"Comprador sin gestión · {name}"
+                body = f"{item.text} · venció el {item.due_label}. Registra un seguimiento."
+            else:
+                title = f"Comprador sin avanzar · {name}"
+                body = f"{item.text} · venció el {item.due_label}."
+            created += len(notify(
+                db,
+                users=users,
+                company_id=alert.company_id,
+                kind=kind,
+                title=title,
+                body=body,
+                url=f"/alerts/{alert.id}",
+                entity=("alert", alert.id),
+                now=now,
+            ))
+        except Exception:
+            logger.exception("Error notificando comprador sin atender de la alerta %s", alert.id)
+    db.commit()
+    return created
+
+
+def resolve_buyer_notifications(db: Session, items: Optional[Iterable] = None, alert_ids=None,
+                                now: Optional[datetime] = None) -> int:
+    """Marca leídas las notificaciones de compradores que ya no aplican.
+
+    Una notificación de `buyer_no_action` / `buyer_stage_stall` sin leer deja
+    de aplicar si la alerta ya no tiene esa regla vencida (se cerró, se
+    gestionó, avanzó de etapa, se reasignó o se borró) o si su reloj se
+    reinició después de crearla. No se borran: quedan en el historial como
+    leídas y dejan de contar en la campana.
+
+    - Con `items` (la pasada completa del job): revisa todas.
+    - Con `alert_ids` (tras gestionar una alerta): solo las de esas alertas,
+      y recalcula su estado.
+    Devuelve cuántas se marcaron.
+    """
+    from app.services.buyer_attention_service import find_buyers_needing_attention
+
+    now = now or datetime.utcnow()
+    query = db.query(Notification).filter(
+        Notification.kind.in_(BUYER_KINDS),
+        Notification.entity_type == "alert",
+        Notification.read_at.is_(None),
+    )
+    if alert_ids is not None:
+        alert_ids = [int(i) for i in alert_ids]
+        if not alert_ids:
+            return 0
+        query = query.filter(Notification.entity_id.in_(alert_ids))
+        if items is None:
+            items = find_buyers_needing_attention(db, now=now, alert_ids=alert_ids)
+    elif items is None:
+        items = find_buyers_needing_attention(db, now=now)
+
+    current = {(item.alert.id, buyer_kind(item.rule)): item for item in items}
+    recipients = {}
+    stale_ids = []
+    for notification in query.all():
+        item = current.get((notification.entity_id, notification.kind))
+        if item is not None and notification.created_at >= item.due_at:
+            agent_id = item.alert.agent_id
+            if agent_id not in recipients:
+                recipients[agent_id] = {u.id for u in users_for_agent(db, item.alert.agent)}
+            if notification.user_id in recipients[agent_id]:
+                continue
+        stale_ids.append(notification.id)
+
+    if stale_ids:
+        db.query(Notification).filter(Notification.id.in_(stale_ids)).update(
+            {Notification.read_at: now}, synchronize_session=False
+        )
+    db.commit()
+    return len(stale_ids)
+
+
+def safe_resolve_buyer_notifications(db: Session, alert_id: int, now: Optional[datetime] = None) -> int:
+    """`resolve_buyer_notifications` de una alerta tras gestionarla; nunca rompe el flujo."""
+    try:
+        return resolve_buyer_notifications(db, alert_ids=[alert_id], now=now)
+    except Exception:
+        db.rollback()
+        logger.exception("No se pudieron revisar los avisos de comprador de la alerta %s", alert_id)
+        return 0
 
 
 def cleanup_read(db: Session, now: Optional[datetime] = None, days: int = RETENTION_DAYS) -> int:

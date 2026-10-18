@@ -59,6 +59,8 @@ from app.services.alert_duplicate_service import (
 from app.services import buyer_matching
 from app.services import alert_assignment_service as assignment
 from app.services import alert_view
+from app.services import buyer_attention_service
+from app.services import notification_service
 from app.services.alert_assignment_service import AlertAssignmentError
 # Cola secuencial y ventana de asignación (PLAN_ALERTA_COMO_NUEVA.md): viven en
 # el servicio para que el Inicio las reutilice; se reexportan con su nombre de
@@ -567,6 +569,11 @@ async def alerts_page(
                 "color": FollowUpActionType.stage_badge_color(latest.action_type),
             }
 
+    # Compradores que requieren atención (PLAN_ALERTAS_DIAS_HABILES.md): badge
+    # ámbar con la causa más grave en horas hábiles. Se calcula sobre los
+    # seguimientos ya cargados de la página, sin consultas nuevas.
+    alert_attention = buyer_attention_service.evaluate_alerts(alerts)
+
     response = templates.TemplateResponse(
         request=request,
         name="alerts/list.html",
@@ -594,6 +601,7 @@ async def alerts_page(
             "other_company_alerts": other_company_alerts,
             "locked_alert_ids": locked_alert_ids,
             "alert_stages": alert_stages,
+            "alert_attention": alert_attention,
             # Columna "Fecha": creación (admin) o asignación (agente)
             "display_dates": {a.id: alert_view.display_date(a, admin_view) for a in alerts},
             "is_admin": is_admin(current_user),
@@ -1108,6 +1116,16 @@ async def alert_detail(
     search_ctx = _search_context(db, alert, current_user, admin_view, step, confirm_property,
                                  follow_ups, company_id)
 
+    # Plazos en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md): la causa vencida
+    # más grave (banner) y los plazos que aún no han vencido ("vence el …").
+    clocks = buyer_attention_service.alert_clocks(alert)
+    attention = next((c for c in clocks if c.overdue), None)
+    upcoming_clocks = []
+    for clock in clocks:
+        if clock.overdue or any(c.due_at == clock.due_at for c in upcoming_clocks):
+            continue
+        upcoming_clocks.append(clock)
+
     return templates.TemplateResponse(
         request=request,
         name="alerts/detail.html",
@@ -1128,6 +1146,9 @@ async def alert_detail(
             # reasignación y los del agente anterior no cuentan), para ambos roles
             "can_complete": alert_view.has_follow_up_since_assignment(all_follow_ups, alert),
             "can_reassign": can_reassign,
+            "attention": attention,
+            "upcoming_clocks": upcoming_clocks,
+            "RULE_NO_ACTION": buyer_attention_service.RULE_NO_ACTION,
             "assignable_groups": (
                 assignment.assignable_agents(db, get_active_company(request).id) if can_reassign else []
             ),
@@ -1628,6 +1649,9 @@ async def link_property_to_alert(
         set_flash(response, "error", "Ocurrió un error al asociar la propiedad")
         return response
 
+    # Asociar la propiedad es una gestión real: el aviso "sin gestión" ya no aplica
+    notification_service.safe_resolve_buyer_notifications(db, alert.id)
+
     response = RedirectResponse(url=detail_url, status_code=302)
     if previous is not None:
         set_flash(response, "success", f"Propiedad cambiada: {alert.lead_name} ahora tiene asociada {property_item.title}")
@@ -1695,6 +1719,9 @@ async def reassign_alert(
         response = RedirectResponse(url=back_url, status_code=302)
         set_flash(response, "error", "Ocurrió un error al reasignar la alerta")
         return response
+
+    # El reloj arranca de cero con el nuevo agente: los avisos del anterior ya no aplican
+    notification_service.safe_resolve_buyer_notifications(db, alert.id)
 
     previous_name = result.previous_agent.name if result.previous_agent is not None else "sin agente"
     message = f"Alerta de {alert.lead_name} reasignada de {previous_name} a {agent.name}"
@@ -1830,6 +1857,7 @@ async def add_follow_up(
             alert.status = AlertStatus.COMPLETED
             alert.completed_at = datetime.utcnow()
             db.commit()
+            notification_service.safe_resolve_buyer_notifications(db, alert_id)
             closing_labels = {
                 FollowUpActionType.CERRADO: "Alerta cerrada con éxito",
                 FollowUpActionType.SIN_INTERES: "Alerta cerrada: comprador sin interés",
@@ -1842,6 +1870,8 @@ async def add_follow_up(
             return response
 
         db.commit()
+        # Gestión registrada: los avisos de comprador que ya no apliquen se marcan leídos
+        notification_service.safe_resolve_buyer_notifications(db, alert_id)
 
         response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)
         set_flash(response, "success", "Seguimiento agregado correctamente")
@@ -1969,6 +1999,7 @@ async def complete_alert(
         alert.completed_at = datetime.utcnow()
 
         db.commit()
+        notification_service.safe_resolve_buyer_notifications(db, alert_id)
 
         response = RedirectResponse(url="/alerts", status_code=302)
         set_flash(response, "success", "Alerta completada correctamente")
@@ -2092,11 +2123,13 @@ async def delete_alert(
 
     try:
         # Los seguimientos se eliminan automáticamente por cascade
+        lead_name = alert.lead_name
         db.delete(alert)
         db.commit()
+        notification_service.safe_resolve_buyer_notifications(db, alert_id)
 
         response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "success", f"Alerta de {alert.lead_name} eliminada correctamente")
+        set_flash(response, "success", f"Alerta de {lead_name} eliminada correctamente")
         return response
 
     except Exception:

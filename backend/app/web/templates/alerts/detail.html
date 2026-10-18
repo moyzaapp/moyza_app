@@ -276,7 +276,7 @@
                         <div>
                             <label class="text-sm text-gray-600">Estado Actual</label>
                             {% if alert.status == AlertStatus.PENDING %}
-                            <p class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800 mt-1">
+                            <p class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800 mt-1">
                                 Pendiente
                             </p>
                             {% elif alert.status == AlertStatus.IN_PROGRESS %}
@@ -289,6 +289,22 @@
                             </p>
                             {% endif %}
                         </div>
+
+                        {# Plazos en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md): lo vencido en
+                           un aviso ámbar y lo que aún no ha vencido con su fecha #}
+                        {% if attention %}
+                        {{ ui.banner(attention.badge, "amber",
+                                     text="Venció el " ~ attention.due_label ~ ". "
+                                          ~ ("Registra un seguimiento; también vale «Sin respuesta» si no contesta." if attention.rule == RULE_NO_ACTION
+                                             else "Registra el avance de etapa cuando consigas hablar con el comprador.")) }}
+                        {% endif %}
+                        {% for clock in upcoming_clocks %}
+                        <div>
+                            <p class="text-sm text-gray-600">{{ "Plazo de gestión" if clock.rule == RULE_NO_ACTION else "Plazo para pasar de " ~ clock.stage_label }}</p>
+                            <p class="text-gray-800 text-sm">Vence el {{ clock.due_label }}</p>
+                            <p class="text-xs text-gray-500">{{ (clock.threshold_hours // 24) }} días hábiles; sin contar fines de semana ni festivos de Jaén</p>
+                        </div>
+                        {% endfor %}
 
                         <div>
                             <label class="text-sm text-gray-600">Prioridad</label>
