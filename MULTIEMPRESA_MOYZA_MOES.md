@@ -230,9 +230,10 @@ denegado") y todo su contenido es de la empresa activa:
   observaciones del admin.
 - Admin: KPIs del equipo, cumplimiento por agente, "Requiere atención",
   actividad reciente (visita cruzada marcada) y tendencia de 12 semanas.
-- Al entrar, ventana de compradores con más de `BUYER_REMINDER_HOURS`
-  (48 h) sin gestión: misma regla que el email de las 06:00, filtrada por
-  la empresa activa; una vez cerrada no vuelve ese día en ese navegador.
+- Al entrar, ventana de compradores que requieren atención: misma regla que
+  el email diario (desde la sección 12, en horas hábiles y con "sin avance"),
+  filtrada por la empresa activa; una vez cerrada no vuelve ese día en ese
+  navegador.
 - Notificaciones **solo in-app** (campana del navbar para agentes,
   `/notifications` y bloque "Novedades"): visita en tu inmueble, acompañante,
   ficha firmada, envío de ficha fallido, seguimiento de hoy o vencido
@@ -304,7 +305,173 @@ asignar no se deshacen: se quitan a mano desde la ficha del agente.
 docker exec moyza_backend python -m pytest tests/test_alert_assignment.py tests/test_alert_assignment_routes.py -q
 ```
 
-## 10. Pendientes conocidos
+## 10. Firma de los dos agentes en visitas conjuntas
+
+Detalle en `PLAN_FIRMA_AGENTES_VISITA.md`. En una visita **con acompañante**,
+tras la firma del cliente hay un paso nuevo, "Firmas de los agentes"
+(`/visits/agent-signatures/{id}`): el usuario logueado en la tablet confirma
+que la ficha se firma con las firmas **registradas** de los dos agentes (las
+ve en miniatura). Queda guardado quién, cuándo y desde qué IP, más el evento
+de auditoría `agent_signatures_confirmed`. Sin confirmar no se finaliza.
+
+- Si un agente no tiene firma registrada, no se puede confirmar: o la
+  registra (él mismo o el admin desde Agentes) o se pulsa "Quitar
+  acompañante" y la visita se finaliza como individual (auditoría
+  `companion_removed_before_confirmation`).
+- El PDF de una visita conjunta lleva tres firmas con nombre (comprador,
+  agente, acompañante) y "Firmas de agentes confirmadas el …" en los
+  metadatos. La vista previa muestra los recuadros de firma. Las visitas
+  individuales no cambian (mismo PDF de dos columnas, sin paso extra).
+- Una visita conjunta que esté en `signed` al desplegar pasará por la
+  confirmación al retomarla; las ya completadas no cambian. Si un agente
+  cambia su firma registrada, los PDFs ya generados no cambian; regenerar
+  uno usa la firma nueva.
+- **Cambio de seguridad**: los endpoints `/api/v1/visits/{id}/accept-terms`,
+  `save-signature`, `finalize` y el nuevo `confirm-agent-signatures` exigen
+  la sesión de la app (401 sin cookie) y que la visita sea de la empresa
+  activa (404). Antes no comprobaban nada; si alguna integración externa
+  los llamaba sin sesión, dejará de funcionar. Las pantallas de la app no
+  se ven afectadas (envían la cookie, mismo origen).
+
+Despliegue (migración `x7y8z9a0b1c2_add_agent_signature_confirmation_to_visits`:
+3 columnas nulas en `property_visits`, sin backfill; va después de
+`w6x7y8z9a0b1_add_alert_indexes`, que se aplica en el mismo `upgrade` si
+aún no estaba):
+
+```bash
+docker exec moyza_backend alembic upgrade head
+docker restart moyza_backend
+```
+
+Rollback: `docker exec moyza_backend alembic downgrade w6x7y8z9a0b1` con el
+código anterior desplegado (borra las confirmaciones guardadas; los PDFs ya
+generados no cambian).
+
+```bash
+# Tests (unitarios sin base de datos; integración contra la app levantada)
+docker exec moyza_backend python -m pytest tests/test_visit_agent_signatures.py -q
+```
+
+## 11. Teléfono del comprador con indicativo de país
+
+Detalle en `PLAN_TELEFONO_COMPRADOR.md`. Los cuatro formularios de comprador
+(nuevo comprador, comprador con criterios, comprador nuevo de "Nueva alerta" y
+edición de contacto) piden el país (por defecto +34) y el número por separado
+(macro `phone_field` de `components/phone_macros.html` + `static/js/phone-field.js`).
+Se guarda `código + dígitos` sin `+` ("34600112233"), igual que las visitas;
+si el agente repite el indicativo ("+34 600…", "0034…") se quita una vez y la
+interfaz lo avisa antes de guardar. La parte local debe tener entre 6 y 12
+dígitos; el teléfono sigue siendo opcional. Las rutas aceptan aún el campo
+antiguo de texto libre (`phone` / `buyer_phone`) si llega solo.
+
+- **Sin migración ni backfill.** Los teléfonos antiguos se siguen leyendo
+  (`split_phone`, `phone_display`, `whatsapp_url`) y se editan con el país
+  preseleccionado (los que no traen indicativo salen con +34 y el número
+  completo, para que el agente lo revise). Guardar la ficha sin tocar el
+  teléfono no lo reescribe.
+- Script opcional para normalizar `buyers.phone` y `property_alerts.lead_phone`.
+  Por defecto solo informa; con `--apply` reescribe solo los inequívocos
+  (indicativo explícito, o 9 dígitos que empiezan por 6-9) y lista el resto
+  para revisarlo a mano. Ejecutarlo es decisión del usuario tras ver el
+  dry-run:
+
+```bash
+docker exec moyza_backend python scripts/normalize_buyer_phones.py            # dry-run
+docker exec moyza_backend python scripts/normalize_buyer_phones.py --apply
+```
+
+- **Deuda (Visitas)**: `properties/visit_form.html` y `visits/edit_form.html`
+  tienen su propio select de país y su copia del JS de acortado, y
+  `routes/visits.py` compone el número a mano en `create_visit` y
+  `update_visit`. Cuando se cierre el trabajo en curso sobre visitas, pasar a
+  `phone.phone_field(...)`, cargar `phone-field.js` (y quitar el JS en línea)
+  y usar `app.core.phone.phone_from_form` / `compose_phone`.
+
+```bash
+# Tests (unitarios sin base de datos; rutas contra la app levantada)
+docker exec moyza_backend python -m pytest tests/test_phone.py tests/test_buyer_phone_routes.py -q
+```
+
+## 12. Avisos de compradores en horas hábiles (Jaén) y "sin avance"
+
+Detalle en `PLAN_ALERTAS_DIAS_HABILES.md` (decisiones en su §4). Los avisos de
+compradores pasan a contar **horas hábiles**: lunes a viernes, sin festivos
+nacionales, de Andalucía (con los traslados al lunes) ni locales de Jaén
+capital (11 de junio y 18 de octubre, `LocalHolidays` en `core/constants.py`,
+cargados para 2026-2028; para 2029 hay que añadirlos). 48 h hábiles = dos días
+hábiles completos a la misma hora: viernes 12:00 → martes 12:00 (miércoles si
+el lunes es festivo).
+
+- **R1 · Sin gestión**: 48 h hábiles desde la última gestión real (cualquier
+  seguimiento, también «Sin respuesta») o desde la asignación.
+- **R2 · Sin avance** (nuevo): 48 h hábiles sin pasar de **Primera llamada**
+  (o sin etapa); «Sin respuesta» no reinicia este reloj. Las etapas
+  siguientes no se vigilan.
+- Una sola fila por comprador/alerta, con la causa más grave (R1 antes que R2).
+- Canales: el email diario de siempre (ahora con dos secciones, "Sin gestión"
+  y "Sin avance de etapa"), el Inicio (modal y "Hoy y pendiente" del agente,
+  "Requiere atención" del admin), badge ámbar en `/alerts` con "Venció el …" y
+  plazos "Vence el …" en el detalle, y notificaciones in-app
+  `buyer_no_action` / `buyer_stage_stall`: una al cruzar el umbral y otra cada
+  2 días hábiles mientras siga igual. Cuando dejan de aplicar (seguimiento,
+  avance, cierre, reasignación o borrado) se **marcan leídas** (no se borran).
+  Ningún WhatsApp; ningún email para el admin.
+
+**Cambios que nota el equipo el día del despliegue (avisar antes):**
+
+1. **Los agentes van a recibir avisos de alertas `IN_PROGRESS` que hasta ahora
+   estaban en silencio.** Antes, con solo abrir la alerta (pasa a En proceso)
+   dejaba de avisar para siempre; ahora se vigilan las abiertas y hay que
+   registrar una gestión (R1) y avanzar de Primera llamada (R2). El primer
+   email y la primera tanda de la campana pueden traer compradores antiguos.
+2. El email diario cambia de hora y de calendario: de las 06:00 UTC todos los
+   días a las **08:00 de Madrid solo en días hábiles** (cron de lunes a
+   viernes con `timezone="Europe/Madrid"`; el servicio además se salta los
+   festivos de Jaén).
+
+Despliegue (sin migración de base de datos):
+
+```bash
+# Nueva dependencia `holidays` en requirements.txt: hay que reconstruir la imagen
+docker compose build backend   # o el comando de build habitual del servidor
+docker compose up -d backend
+docker exec moyza_backend python -c "import holidays; print(holidays.__version__)"
+```
+
+Variables (todas opcionales; valores por defecto entre paréntesis):
+
+- `BUYER_REMINDER_HOURS` (48): umbral de R1, ahora en **horas hábiles**.
+- `BUYER_STAGE_STALL_HOURS` (48, nueva): umbral de R2 en horas hábiles.
+- `BUYER_REMINDER_REPEAT_BUSINESS_DAYS` (2, nueva): cada cuántos días hábiles
+  se repite el aviso in-app.
+- `BUYER_REMINDER_HOUR` (8): **ahora es hora de Madrid** (antes 6 en UTC). Si
+  el `.env` de producción la fija a 6, quitarla o poner 8.
+- `BUYER_REMINDER_ENABLED` (true): apaga el email y los avisos in-app de este job.
+
+Rollback: desplegar el código anterior y reiniciar; no hay cambios de
+esquema. Las notificaciones `buyer_*` que queden se ven como un tipo
+desconocido (icono de campana) y se limpian a los 90 días una vez leídas.
+
+Prueba manual del job con fecha simulada y sin enviar correos (Gmail falso):
+
+```python
+# docker exec -it moyza_backend python
+import app.db.base
+from datetime import datetime
+from app.core.business_calendar import to_utc
+from app.jobs.scheduler import send_buyer_reminders
+class FakeGmail:
+    def send_email(self, to, subject, body): print(to, subject); return True
+send_buyer_reminders(now=to_utc(datetime(2026, 11, 3, 8, 0)), gmail_service=FakeGmail())
+# OJO: escribe alert_reminder_logs y notificaciones reales con esa fecha
+```
+
+```bash
+# Tests (calendario sin base de datos; servicio y canales con base de datos; ruta contra la app levantada)
+docker exec moyza_backend python -m pytest tests/test_business_calendar.py tests/test_buyer_attention_service.py tests/test_buyer_attention_channels.py -q
+```
+
+## 13. Pendientes conocidos
 
 - Datos legales y logo reales de MOES PREMIUM (sección 4).
 - Eliminar las columnas heredadas `users.company` y `agents.company` cuando ya

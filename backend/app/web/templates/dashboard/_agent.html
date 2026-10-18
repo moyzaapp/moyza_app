@@ -120,10 +120,12 @@
         </ul>
         {% endif %}
         {% if home.pending_buyers %}
+        {# Compradores que requieren atención en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md) #}
         <div class="px-4 sm:px-6 py-3 border-t border-gray-200">
             <button type="button" data-modal-open="pendingBuyersModal" class="text-sm font-medium text-red-700 hover:text-red-800 hover:underline underline-offset-2">
-                {{ home.pending_buyers | length }} {{ 'comprador lleva' if home.pending_buyers | length == 1 else 'compradores llevan' }} más de {{ buyer_reminder_hours }} h sin gestión
+                {{ home.pending_buyers | length }} {{ 'comprador requiere' if home.pending_buyers | length == 1 else 'compradores requieren' }} atención
             </button>
+            <p class="text-xs text-gray-500 mt-0.5">{{ home.pending_summary }} · horas hábiles</p>
         </div>
         {% endif %}
     </section>
@@ -192,8 +194,8 @@
 {# ---------------------------------------------------------------- Ventana de compradores sin atender (§3.4) #}
 {% if home.pending_buyers %}
 {% set n = home.pending_buyers | length %}
-{% call ui.modal("pendingBuyersModal", "Compradores sin atender", size="lg",
-                 subtitle=(n ~ (" comprador lleva" if n == 1 else " compradores llevan") ~ " más de " ~ buyer_reminder_hours ~ " h sin gestión")) %}
+{% call ui.modal("pendingBuyersModal", "Compradores que requieren atención", size="lg",
+                 subtitle=(home.pending_summary ~ " · horas hábiles, sin fines de semana ni festivos de Jaén")) %}
 <div data-dismiss-daily="pending_buyers_dismissed">
     <div class="p-6">
     <ul class="divide-y divide-gray-100 -my-2">
@@ -202,9 +204,10 @@
             <div class="min-w-0 flex-1">
                 <p class="text-sm font-medium text-gray-900 truncate">{{ b.buyer_name or 'Comprador sin nombre' }}</p>
                 <p class="text-xs text-gray-500">
-                    {% if b.buyer_phone and b.buyer_phone != '—' %}<a href="tel:{{ b.buyer_phone }}" class="hover:text-blue-600">{{ b.buyer_phone }}</a> · {% endif %}
-                    <span class="font-medium text-red-700">{{ b.hours_elapsed }} h sin gestión</span>
+                    {% if b.buyer_phone and b.buyer_phone != '—' %}<a href="{{ b.buyer_phone | tel_href }}" class="hover:text-blue-600">{{ b.buyer_phone | phone_display }}</a> · {% endif %}
+                    <span class="font-medium {{ 'text-red-700' if b.rule == 'no_action' else 'text-amber-700' }}">{{ b.text }}</span>
                 </p>
+                <p class="text-xs text-gray-500">Venció el {{ b.due_label }}</p>
             </div>
             {{ ui.button("Gestionar", "secondary", href="/alerts/" ~ b.alert_id, full_mobile=True) }}
         </li>

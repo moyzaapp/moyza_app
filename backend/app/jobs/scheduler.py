@@ -87,22 +87,32 @@ def check_automatic_reports():
         db.close()
 
 
-def send_buyer_reminders():
-    """Envía recordatorio por email a agentes con compradores sin gestión."""
+def send_buyer_reminders(now: datetime = None, gmail_service=None):
+    """Compradores que requieren atención (PLAN_ALERTAS_DIAS_HABILES.md §2.3).
+
+    08:00 de Madrid, lunes a viernes; el servicio además se salta los
+    festivos de Jaén. Un email por agente y empresa (secciones "Sin gestión" y
+    "Sin avance de etapa") y, en la misma pasada, los avisos in-app.
+
+    `now` (UTC) y `gmail_service` se inyectan en los tests y en las pruebas con
+    fecha simulada (un GmailService falso para no enviar correos reales).
+    Devuelve el resumen de `run_buyer_reminders`.
+    """
     if not settings.BUYER_REMINDER_ENABLED:
         logger.info("Recordatorio de compradores deshabilitado (BUYER_REMINDER_ENABLED=false)")
-        return
+        return None
 
     db = SessionLocal()
     try:
-        gmail = GmailService(
+        gmail = gmail_service or GmailService(
             credentials_path=settings.GMAIL_CREDENTIALS_PATH,
             token_path=settings.GMAIL_TOKEN_PATH,
         )
-        run_buyer_reminders(
+        return run_buyer_reminders(
             db=db,
             gmail_service=gmail,
             hours_threshold=settings.BUYER_REMINDER_HOURS,
+            now=now,
         )
     except Exception as e:
         logger.error(f"Error en send_buyer_reminders: {e}", exc_info=True)
@@ -285,13 +295,15 @@ def start_scheduler():
         replace_existing=True
     )
 
-    # Recordatorio de compradores sin gestión
+    # Compradores que requieren atención: email diario + avisos in-app, a las
+    # 08:00 de Madrid de lunes a viernes (los festivos los salta el servicio)
     scheduler.add_job(
         send_buyer_reminders,
         "cron",
+        day_of_week="mon-fri",
         hour=settings.BUYER_REMINDER_HOUR,
-        # hour=3,
-        minute=10,
+        minute=0,
+        timezone="Europe/Madrid",
         id="send_buyer_reminders",
         replace_existing=True
     )

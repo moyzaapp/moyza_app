@@ -18,10 +18,12 @@ from sqlalchemy.orm import Session, contains_eager, selectinload
 from sqlalchemy import func, case, or_
 
 from app.core.constants import AlertType, PropertyStatus
+from app.core.constants import AlertOrigin
 from app.core.constants import BusinessType
 from app.core.constants import AlertPriority
 from app.core.constants import AlertStatus
 from app.core.constants import FollowUpActionType
+from app.core.phone import PhoneValidationError, phone_display, phone_from_form, split_phone, valid_country_code
 from app.db.deps import get_db
 
 from app.models.property_alert import PropertyAlert
@@ -44,14 +46,28 @@ from app.services.company_scope import (
 from app.services.alert_duplicate_service import (
     find_duplicate_alerts,
     find_matching_buyers,
+    find_open_search_alerts,
     serialize_duplicates,
+    serialize_search_duplicates,
     serialize_buyer,
     duplicate_note,
+    linked_duplicate_note,
+    search_duplicate_note,
     new_contact_note,
     append_note,
 )
+from app.services import buyer_matching
 from app.services import alert_assignment_service as assignment
+from app.services import alert_view
+from app.services import buyer_attention_service
+from app.services import notification_service
 from app.services.alert_assignment_service import AlertAssignmentError
+# Cola secuencial y ventana de asignación (PLAN_ALERTA_COMO_NUEVA.md): viven en
+# el servicio para que el Inicio las reutilice; se reexportan con su nombre de
+# siempre.
+from app.services.alert_view import OPEN_ALERT_STATUSES
+from app.services.alert_view import agent_open_alerts_ordered as _get_agent_open_alerts_ordered  # noqa: F401
+from app.services.alert_view import get_locked_alert_ids
 from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, get_agent_from_user, require_admin_role
 from app.web.dependencies.company import get_active_company
@@ -61,8 +77,9 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-# Estados que se consideran "abiertos" para la cola secuencial del agente
-OPEN_ALERT_STATUSES = [AlertStatus.PENDING, AlertStatus.IN_PROGRESS]
+# Aviso al agente que intenta abrir una alerta bloqueada por la cola
+# (PLAN_ALERTA_COMO_NUEVA.md, decisión cerrada: texto exacto)
+ALERT_LOCKED_MESSAGE = "Esta alerta está en tu cola. Gestiona primero las anteriores para verla."
 
 # Máximo de sugerencias devueltas por el autocompletado de propiedades
 PROPERTY_SEARCH_LIMIT = 15
@@ -151,28 +168,27 @@ def _property_filter_values(db: Session, company_id: int) -> dict:
     }
 
 
-def _get_agent_open_alerts_ordered(agent_id: int, db: Session, company_id: int):
-    """Devuelve las alertas abiertas del agente en la empresa, ordenadas FIFO
-    por fecha de asignación.
+def _search_summaries(db: Session, alerts) -> dict:
+    """{alert.id: resumen del perfil} para las búsquedas sin propiedad de la lista.
 
-    La cola secuencial es por empresa: una alerta pendiente en MOYZA no
-    bloquea el trabajo del mismo agente en MOES (y viceversa).
+    El perfil es uno por comprador; se cargan todos los de la página en una
+    sola consulta (sin N+1). Las alertas cuyo comprador no tiene perfil no
+    aparecen en el diccionario.
     """
-    return (
-        scope_alerts(db.query(PropertyAlert), company_id)
-        .filter(
-            PropertyAlert.agent_id == agent_id,
-            PropertyAlert.status.in_(OPEN_ALERT_STATUSES),
-        )
-        # Una alerta reasignada entra en la cola del nuevo agente por la fecha
-        # de asignación (PLAN_ASIGNACION_ALERTAS.md §2.5); las no reasignadas
-        # tienen assigned_at = created_at, así que su orden no cambia.
-        .order_by(
-            func.coalesce(PropertyAlert.assigned_at, PropertyAlert.created_at).asc(),
-            PropertyAlert.id.asc(),
-        )
-        .all()
-    )
+    buyer_ids = {a.buyer_id for a in alerts if a.property_id is None and a.buyer_id}
+    if not buyer_ids:
+        return {}
+    criteria_by_buyer = {
+        c.buyer_id: c
+        for c in db.query(BuyerSearchCriteria).filter(BuyerSearchCriteria.buyer_id.in_(buyer_ids))
+    }
+    summaries = {}
+    for alert in alerts:
+        if alert.property_id is None and alert.buyer_id in criteria_by_buyer:
+            summary = buyer_matching.criteria_summary(criteria_by_buyer[alert.buyer_id])
+            if summary:
+                summaries[alert.id] = summary
+    return summaries
 
 
 def can_access_buyer(buyer: Buyer, current_user, db: Session) -> bool:
@@ -239,56 +255,25 @@ def visible_buyers_query(db: Session, current_user, company_id: int):
     return query.filter(or_(*conditions))
 
 
-def _real_follow_ups(db: Session, alert_id: int):
+def _real_follow_ups(db: Session, alert_id: int, since=None):
     """Seguimientos registrados por un agente o admin (sin las notas del sistema).
 
     La nota automática de reasignación no cuenta como gestión: no desbloquea
-    la cola ni permite cerrar la alerta.
+    la cola ni permite cerrar la alerta. Con `since` (normalmente
+    `alert_view.assignment_start(alert)`), solo los registrados desde entonces.
     """
     return db.query(AlertFollowUp).filter(
         AlertFollowUp.alert_id == alert_id,
-        AlertFollowUp.action_type.notin_(FollowUpActionType.SYSTEM_ACTIONS),
+        alert_view.real_follow_ups_clause(since),
     )
-
-
-def get_locked_alert_ids(agent_id: int, db: Session, company_id: int) -> set:
-    """Devuelve el conjunto de IDs de alertas bloqueadas para un agente en la empresa.
-
-    Una alerta en la cola está bloqueada si alguna alerta anterior (más antigua)
-    aún no tiene ningún seguimiento registrado. En cuanto el agente registra
-    cualquier seguimiento en la alerta actual, la siguiente se desbloquea.
-    """
-    open_alerts = _get_agent_open_alerts_ordered(agent_id, db, company_id)
-    if not open_alerts:
-        return set()
-
-    # Una sola consulta para saber qué alertas de la cola ya tienen seguimiento
-    # (antes era una consulta por alerta)
-    started_ids = {
-        row[0]
-        for row in db.query(AlertFollowUp.alert_id)
-        .filter(
-            AlertFollowUp.alert_id.in_([a.id for a in open_alerts]),
-            AlertFollowUp.action_type.notin_(FollowUpActionType.SYSTEM_ACTIONS),
-        )
-        .distinct()
-    }
-
-    locked = set()
-    all_preceding_started = True
-    for alert in open_alerts:
-        if not all_preceding_started:
-            locked.add(alert.id)
-        elif alert.id not in started_ids:
-            all_preceding_started = False
-    return locked
 
 
 def is_alert_locked_for_user(alert: PropertyAlert, current_user, db: Session) -> bool:
     """True si la alerta está bloqueada para este usuario.
 
     El admin nunca está bloqueado. Un agente está bloqueado si alguna alerta
-    anterior en su cola no tiene seguimientos. Las alertas cerradas no cuentan.
+    anterior en su cola no tiene seguimientos reales desde su asignación
+    (PLAN_ALERTA_COMO_NUEVA.md). Las alertas cerradas no cuentan.
     """
     if is_admin(current_user):
         return False
@@ -300,9 +285,31 @@ def is_alert_locked_for_user(alert: PropertyAlert, current_user, db: Session) ->
     if not agent:
         return False
 
-    # La cola se evalúa dentro de la empresa de la propia alerta. Misma regla
-    # que el listado: bloqueada si alguna anterior de la cola no tiene seguimiento.
-    return alert.id in get_locked_alert_ids(agent.id, db, alert.property.company_id)
+    # La cola se evalúa dentro de la empresa de la propia alerta (columna
+    # propia: una búsqueda general puede no tener propiedad). Misma regla que
+    # el listado: bloqueada si alguna anterior de la cola no tiene seguimiento
+    # desde su asignación.
+    return alert.id in get_locked_alert_ids(agent.id, db, alert.company_id)
+
+
+def _search_link_denied(alert: PropertyAlert, current_user, db: Session) -> Optional[str]:
+    """Motivo por el que el usuario NO puede trabajar la búsqueda (perfil y propiedad), o None.
+
+    PLAN_ALERTA_SIN_REFERENCIA.md: solo las alertas de origen 'search', solo
+    abiertas, solo el agente asignado o el admin, y nunca si la alerta está
+    bloqueada por la cola del agente.
+    """
+    if alert.origin != AlertOrigin.SEARCH:
+        return "Solo las alertas sin referencia pueden asociar o cambiar de propiedad"
+    if alert.status not in OPEN_ALERT_STATUSES:
+        return "La alerta está cerrada"
+    if not is_admin(current_user):
+        agent = get_agent_from_user(current_user, db)
+        if not agent or alert.agent_id != agent.id:
+            return "No tienes permisos para esta alerta"
+        if is_alert_locked_for_user(alert, current_user, db):
+            return ALERT_LOCKED_MESSAGE
+    return None
 
 
 @router.get("/alerts", response_class=HTMLResponse)
@@ -330,12 +337,14 @@ async def alerts_page(
     admin_view = is_admin(current_user)
     agent = None if admin_view else get_agent_from_user(current_user, db)
 
-    # Base query: solo alertas de propiedades de la empresa activa. El JOIN con
-    # agentes va por el agente de la ALERTA (no el captador de la propiedad):
+    # Base query: alertas de la empresa activa (empresa propia de la alerta).
+    # OUTER JOIN con la propiedad: una búsqueda general (PLAN_ALERTA_SIN_REFERENCIA.md)
+    # puede no tenerla todavía y debe seguir apareciendo. El JOIN con agentes
+    # va por el agente de la ALERTA (no el captador de la propiedad):
     # property_alerts tiene dos FK a agents y la propiedad puede no tener captador.
     base_query = scope_alerts(
         db.query(PropertyAlert)
-        .join(Property, Property.id == PropertyAlert.property_id)
+        .outerjoin(Property, Property.id == PropertyAlert.property_id)
         .join(Agent, Agent.id == PropertyAlert.agent_id),
         company.id,
     )
@@ -349,6 +358,7 @@ async def alerts_page(
             base_query = base_query.filter(PropertyAlert.id == -1)
 
     # Filtro por texto: nombre del comprador, teléfono o título de propiedad
+    # (sin propiedad, el título es NULL y el OR sigue funcionando con los otros)
     if q and q.strip():
         like = f"%{q.strip()}%"
         base_query = base_query.filter(
@@ -393,8 +403,8 @@ async def alerts_page(
         per_page if per_page_explicit else request.cookies.get(PER_PAGE_COOKIE)
     )
 
-    # Total filtrado. Los JOIN a Property y Agent son N:1 (una fila por alerta),
-    # así que contar PropertyAlert.id no se multiplica.
+    # Total filtrado. Los JOIN a Property (outer) y Agent son N:1 (una fila por
+    # alerta), así que contar PropertyAlert.id no se multiplica.
     total_alerts = filtered_query.with_entities(func.count(PropertyAlert.id)).scalar() or 0
     alert_pagination = paginate_params(page, per_page_value, total_alerts)
 
@@ -402,7 +412,10 @@ async def alerts_page(
     # paginación sea estable). Propiedad y agente se rellenan con el JOIN
     # que ya hace la consulta, y los seguimientos de la página se cargan en
     # una segunda consulta: sin esto se hacía una consulta por alerta al
-    # pintar la tabla (N+1).
+    # pintar la tabla (N+1). La fecha es la que ve cada rol
+    # (PLAN_ALERTA_COMO_NUEVA.md): creación para el admin, asignación para el
+    # agente, así una alerta reasignada se ordena como nueva para él.
+    date_order = PropertyAlert.created_at if admin_view else alert_view.assignment_start_expr()
     alerts = (
         filtered_query
         .options(
@@ -417,7 +430,7 @@ async def alerts_page(
                 (PropertyAlert.priority == AlertPriority.BAJA, 3),
                 else_=4
             ),
-            PropertyAlert.created_at.desc(),
+            date_order.desc(),
             PropertyAlert.id.desc(),
         )
         .offset(alert_pagination["offset"])
@@ -501,12 +514,9 @@ async def alerts_page(
             .all()
         )
 
-    # Valores para selectores del modal de criteria
-    filter_values = _property_filter_values(db, company.id)
-    zones = filter_values["zones"]
-    cities = filter_values["cities"]
-    property_types = filter_values["property_types"]
-    business_types = filter_values["business_types"]
+    # Búsquedas generales sin propiedad: resumen del perfil del comprador en la
+    # columna Propiedad ("Piso · Jaén · 2-3 dorm"). Una consulta para la página.
+    search_summaries = _search_summaries(db, alerts)
 
     # Alertas abiertas del agente en sus OTRAS empresas (PLAN_ASIGNACION_ALERTAS.md
     # §2.6): una alerta asignada en otra empresa no aparece aquí, así que se
@@ -534,12 +544,16 @@ async def alerts_page(
 
     # Etapa actual de cada alerta: último seguimiento de progresión (ignora
     # SIN_RESPUESTA para no retroceder la etapa visible; si solo hay sin-respuesta,
-    # lo muestra igualmente).
+    # lo muestra igualmente). Las notas del sistema (reasignación) no son una
+    # etapa. Para el agente solo cuenta lo registrado desde su asignación: una
+    # alerta reasignada sale "Sin iniciar" hasta que él registre un seguimiento
+    # (PLAN_ALERTA_COMO_NUEVA.md); el admin ve la etapa con todo el historial.
+    # `follow_ups` ya viene cargado con selectinload: se filtra en Python.
     alert_stages = {}
     labels = FollowUpActionType.labels()
     for alert in alerts:
-        # Las notas del sistema (reasignación) no son una etapa
-        real = [f for f in alert.follow_ups if f.action_type not in FollowUpActionType.SYSTEM_ACTIONS]
+        since = None if admin_view else alert_view.assignment_start(alert)
+        real = alert_view.real_follow_ups_since(alert.follow_ups, since)
         if real:
             progression = [
                 f for f in real
@@ -554,6 +568,11 @@ async def alerts_page(
                 "label": labels.get(latest.action_type, latest.action_type),
                 "color": FollowUpActionType.stage_badge_color(latest.action_type),
             }
+
+    # Compradores que requieren atención (PLAN_ALERTAS_DIAS_HABILES.md): badge
+    # ámbar con la causa más grave en horas hábiles. Se calcula sobre los
+    # seguimientos ya cargados de la página, sin consultas nuevas.
+    alert_attention = buyer_attention_service.evaluate_alerts(alerts)
 
     response = templates.TemplateResponse(
         request=request,
@@ -582,11 +601,11 @@ async def alerts_page(
             "other_company_alerts": other_company_alerts,
             "locked_alert_ids": locked_alert_ids,
             "alert_stages": alert_stages,
+            "alert_attention": alert_attention,
+            # Columna "Fecha": creación (admin) o asignación (agente)
+            "display_dates": {a.id: alert_view.display_date(a, admin_view) for a in alerts},
             "is_admin": is_admin(current_user),
-            "zones": zones,
-            "cities": cities,
-            "property_types": property_types,
-            "business_types": business_types,
+            "search_summaries": search_summaries,
             "AlertType": AlertType,
             "AlertPriority": AlertPriority,
             "AlertStatus": AlertStatus,
@@ -648,6 +667,7 @@ async def search_buyers(
             "id": b.id,
             "name": b.name,
             "phone": b.phone or "",
+            "phone_display": phone_display(b.phone),
             "email": b.email or "",
         }
         for b in buyers
@@ -660,6 +680,8 @@ async def search_buyers(
 async def create_buyer(
     request: Request,
     name: str = Form(...),
+    phone_country_code: str = Form(None),
+    phone_number: str = Form(None),
     phone: str = Form(None),
     email: str = Form(None),
     notes: str = Form(None),
@@ -668,7 +690,10 @@ async def create_buyer(
     """Crear nuevo comprador sin alerta asociada (admin y agentes).
 
     El comprador queda registrado a nombre del usuario (`created_by`), que es
-    lo que le da acceso al agente que lo creó."""
+    lo que le da acceso al agente que lo creó.
+
+    Teléfono: indicativo + número (PLAN_TELEFONO_COMPRADOR.md); `phone` es el
+    campo antiguo de texto libre, aceptado si llega solo."""
 
     current_user = request.state.user
 
@@ -679,9 +704,16 @@ async def create_buyer(
         return response
 
     try:
+        buyer_phone = phone_from_form(phone_country_code, phone_number, phone)
+    except PhoneValidationError as error:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", str(error))
+        return response
+
+    try:
         buyer = Buyer(
             name=name,
-            phone=(phone or "").strip() or None,
+            phone=buyer_phone,
             email=(email or "").strip() or None,
             notes=notes,
             created_by=current_user.id,
@@ -699,125 +731,6 @@ async def create_buyer(
         logger.exception("Error creando comprador")
         response = RedirectResponse(url="/alerts", status_code=302)
         set_flash(response, "error", "Ocurrió un error al crear el comprador")
-        return response
-
-
-@router.post("/buyers/create-with-criteria")
-async def create_buyer_with_criteria(
-    request: Request,
-    buyer_id: int = Form(None),
-    buyer_name: str = Form(None),
-    buyer_phone: str = Form(None),
-    buyer_email: str = Form(None),
-    agent_id: int = Form(None),
-    property_type: str = Form(None),
-    business_type: str = Form(None),
-    min_price: str = Form(None),
-    max_price: str = Form(None),
-    min_bedrooms: str = Form(None),
-    max_bedrooms: str = Form(None),
-    min_bathrooms: str = Form(None),
-    min_m2: str = Form(None),
-    max_m2: str = Form(None),
-    notes: str = Form(None),
-    db: Session = Depends(get_db)
-):
-    """Crea o selecciona un comprador, guarda sus criterios y va a los matches.
-
-    Admin y agentes. El agente queda siempre como agente responsable del
-    perfil (no puede asignárselo a otro) y solo puede elegir compradores a
-    los que ya tiene acceso."""
-
-    current_user = request.state.user
-    admin_view = is_admin(current_user)
-
-    if not admin_view:
-        own_agent = get_agent_from_user(current_user, db)
-        if not own_agent:
-            response = RedirectResponse(url="/alerts", status_code=302)
-            set_flash(response, "error", "Tu usuario no tiene ficha de agente asociada")
-            return response
-        agent_id = own_agent.id
-
-    # Operación obligatoria: solo Venta o Alquiler (no se guarda nada si falta)
-    business_type = (business_type or "").strip()
-    if not BusinessType.is_valid(business_type):
-        response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "error", "Selecciona la operación del comprador: Venta o Alquiler")
-        return response
-
-    form_data = await request.form()
-    zones = form_data.getlist("zones")
-    cities_sel = form_data.getlist("cities")
-
-    def to_int(v):
-        try:
-            return int(v) if v and str(v).strip() else None
-        except (ValueError, TypeError):
-            return None
-
-    def to_decimal(v):
-        try:
-            return float(v) if v and str(v).strip() else None
-        except (ValueError, TypeError):
-            return None
-
-    try:
-        # Resolver comprador
-        if buyer_id:
-            buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
-            if not buyer or not can_access_buyer(buyer, current_user, db):
-                response = RedirectResponse(url="/alerts", status_code=302)
-                set_flash(response, "error", "Comprador no encontrado")
-                return response
-        else:
-            buyer_name = (buyer_name or "").strip()
-            if not buyer_name:
-                response = RedirectResponse(url="/alerts", status_code=302)
-                set_flash(response, "error", "El nombre del comprador es obligatorio")
-                return response
-            buyer = Buyer(
-                name=buyer_name,
-                phone=(buyer_phone or "").strip() or None,
-                email=(buyer_email or "").strip() or None,
-                created_by=current_user.id,
-                company_id=get_active_company(request).id
-            )
-            db.add(buyer)
-            db.flush()
-
-        # Crear o actualizar criterios
-        criteria = buyer.search_criteria
-        if criteria is None:
-            criteria = BuyerSearchCriteria(buyer_id=buyer.id)
-            db.add(criteria)
-
-        criteria.agent_id = agent_id or None
-        criteria.zones = zones or None
-        criteria.cities = cities_sel or None
-        criteria.property_type = property_type or None
-        criteria.business_type = business_type or None
-        criteria.min_price = to_decimal(min_price)
-        criteria.max_price = to_decimal(max_price)
-        criteria.min_bedrooms = to_int(min_bedrooms)
-        criteria.max_bedrooms = to_int(max_bedrooms)
-        criteria.min_bathrooms = to_int(min_bathrooms)
-        criteria.min_m2 = to_decimal(min_m2)
-        criteria.max_m2 = to_decimal(max_m2)
-        criteria.notes = (notes or "").strip() or None
-        criteria.updated_at = datetime.utcnow()
-
-        db.commit()
-
-        response = RedirectResponse(url=f"/buyers/{buyer.id}?tab=matches", status_code=302)
-        set_flash(response, "success", f"Perfil de {buyer.name} guardado — propiedades compatibles:")
-        return response
-
-    except Exception:
-        db.rollback()
-        logger.exception("Error en create-with-criteria")
-        response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "error", "Ocurrió un error al guardar")
         return response
 
 
@@ -863,6 +776,7 @@ async def delete_buyer(
 async def search_properties(
     request: Request,
     q: str = "",
+    alert_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """Autocompletado de propiedades para el formulario de nueva alerta.
@@ -871,6 +785,11 @@ async def search_properties(
     dirección o ciudad. Admin y agentes: solo expone título, dirección,
     ciudad y agente (nombre e id, para preseleccionarlo en "Agente asignado"),
     nunca el propietario. Las propiedades sin captador solo las ve el admin.
+
+    Con `alert_id` de una búsqueda general abierta que el usuario puede
+    trabajar (paso "Propuesta", PLAN_ALERTA_SIN_REFERENCIA.md): todas las
+    disponibles de la empresa, de cualquier agente (decisión cerrada 3), para
+    asociarlas a esa búsqueda. En cualquier otro caso, la regla de siempre.
 
     NOTA: debe declararse antes de /alerts/{alert_id}, o FastAPI intentaría
     resolver "search-properties" como un id y devolvería 422.
@@ -882,8 +801,17 @@ async def search_properties(
         return JSONResponse(content={"results": []})
 
     like = f"%{term}%"
+    company_id = get_active_company(request).id
 
-    query = scope_properties(db.query(Property), get_active_company(request).id).filter(
+    # ¿Búsqueda para asociar a una alerta sin referencia?
+    link_alert = None
+    link_alert_id = assignment._to_int(alert_id)
+    if link_alert_id is not None:
+        candidate = get_alert_in_company(db, link_alert_id, company_id)
+        if candidate is not None and _search_link_denied(candidate, request.state.user, db) is None:
+            link_alert = candidate
+
+    query = scope_properties(db.query(Property), company_id).filter(
         Property.status != PropertyStatus.ARCHIVED,
         Property.available_clause(),
         or_(
@@ -892,9 +820,15 @@ async def search_properties(
             Property.city.ilike(like),
         ),
     )
-    # Propiedad sin captador: solo el admin, que puede elegir el agente (§4-7)
-    if not is_admin(request.state.user):
-        query = query.filter(Property.agent_id.isnot(None))
+    # El agente solo puede crear alertas sobre sus propiedades asignadas, así
+    # que el buscador solo le ofrece esas (esto también excluye las que no
+    # tienen captador, que son solo para el admin, §4-7). Asociar una
+    # propiedad ajena a su búsqueda sí está permitido (decisión cerrada 2).
+    if link_alert is None and not is_admin(request.state.user):
+        own_agent = get_agent_from_user(request.state.user, db)
+        if not own_agent:
+            return JSONResponse(content={"results": []})
+        query = query.filter(Property.agent_id == own_agent.id)
 
     properties = query.order_by(Property.title.asc()).limit(PROPERTY_SEARCH_LIMIT).all()
 
@@ -943,6 +877,33 @@ async def check_duplicate_alert(
     return JSONResponse(content=serialize_duplicates(db, duplicates))
 
 
+@router.get("/alerts/check-search-duplicate")
+async def check_search_duplicate(
+    request: Request,
+    buyer_id: int = Query(...),
+    business_type: str = Query(""),
+    db: Session = Depends(get_db)
+):
+    """Búsquedas generales abiertas del comprador con esa operación.
+
+    Lo consulta el modal de nueva alerta en modo "Sin referencia" en cuanto
+    conoce comprador y operación (PLAN_ALERTA_SIN_REFERENCIA.md). Mismo
+    formato que /alerts/check-duplicate. Admin, y agentes sobre compradores a
+    los que tienen acceso.
+
+    NOTA: debe declararse antes de /alerts/{alert_id}.
+    """
+    company_id = get_active_company(request).id
+    business_type = (business_type or "").strip()
+
+    buyer = get_buyer_in_company(db, buyer_id, company_id)
+    if not buyer or not can_access_buyer(buyer, request.state.user, db) or not BusinessType.is_valid(business_type):
+        return JSONResponse(content={"open": [], "recent_closed": []})
+
+    alerts = find_open_search_alerts(db, company_id, buyer_id, business_type)
+    return JSONResponse(content=serialize_search_duplicates(db, alerts))
+
+
 @router.get("/alerts/check-buyer")
 async def check_existing_buyer(
     request: Request,
@@ -970,15 +931,134 @@ async def check_existing_buyer(
     return JSONResponse(content={"results": [serialize_buyer(b) for b in buyers]})
 
 
+# Pasos del detalle de una alerta sin referencia (PLAN_ALERTA_SIN_REFERENCIA.md)
+SEARCH_STEPS = (
+    ("contact", "1. Contactar"),
+    ("profile", "2. Perfil"),
+    ("proposal", "3. Propuesta"),
+)
+SEARCH_STEP_KEYS = tuple(key for key, _ in SEARCH_STEPS)
+
+# Tarjetas de propiedades sugeridas en el paso "Propuesta"
+SEARCH_SUGGESTION_LIMIT = 30
+
+
+def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view: bool,
+                    step: Optional[str], confirm_property: Optional[str], follow_ups, company_id: int) -> dict:
+    """Contexto del detalle para una alerta sin referencia (búsqueda general).
+
+    Pasos Contactar → Perfil → Propuesta. Sin propiedad asociada se muestran
+    siempre; con propiedad, solo al pedir un paso (enlace "Cambiar
+    propiedad"). Paso por defecto: Contactar si aún no hay gestión desde la
+    asignación; Perfil si el comprador no tiene perfil; si no, Propuesta.
+    """
+    ctx = {
+        "is_search": alert.is_search,
+        "can_manage_search": False,
+        "show_steps": False,
+        "search_steps": SEARCH_STEPS,
+        "step": None,
+        "criteria": None,
+        "criteria_parts": [],
+        "suggestions": [],
+        "suggestions_total": 0,
+        "suggestion_limit": SEARCH_SUGGESTION_LIMIT,
+        "link_duplicate": None,
+        "own_agent_id": None,
+        "property_link_allowed": True,
+        "current_stage_label": None,
+    }
+
+    own_agent = None if admin_view else get_agent_from_user(current_user, db)
+    ctx["own_agent_id"] = own_agent.id if own_agent else None
+
+    # La ficha de una propiedad de otro agente no se enlaza al agente (tiene datos
+    # del propietario), igual que en la ficha del comprador. Solo afecta a las
+    # búsquedas, que pueden tener asociada una propiedad ajena (decisión 2).
+    prop = alert.property
+    if alert.is_search and prop is not None and not admin_view:
+        ctx["property_link_allowed"] = own_agent is not None and prop.agent_id == own_agent.id
+
+    if not alert.is_search:
+        return ctx
+
+    criteria = alert.buyer.search_criteria if alert.buyer is not None else None
+    ctx["criteria"] = criteria
+    ctx["criteria_parts"] = buyer_matching.criteria_parts(criteria)
+
+    # Etapa actual (último seguimiento real visible), para el paso Contactar
+    real = alert_view.real_follow_ups_since(follow_ups, None)
+    if real:
+        latest = max(real, key=lambda f: f.created_at or datetime.min)
+        ctx["current_stage_label"] = FollowUpActionType.labels().get(latest.action_type, latest.action_type)
+
+    can_manage = (
+        alert.status in OPEN_ALERT_STATUSES
+        and alert.buyer is not None
+        and (admin_view or (own_agent is not None and alert.agent_id == own_agent.id))
+    )
+    ctx["can_manage_search"] = can_manage
+    if not can_manage:
+        return ctx
+
+    if step not in SEARCH_STEP_KEYS:
+        if prop is not None:
+            return ctx  # vista normal de alerta con propiedad + "Cambiar propiedad"
+        if not alert_view.has_follow_up_since_assignment(follow_ups, alert):
+            step = "contact"
+        elif criteria is None:
+            step = "profile"
+        else:
+            step = "proposal"
+    ctx["show_steps"] = True
+    ctx["step"] = step
+
+    if step == "profile":
+        ctx.update(_property_filter_values(db, company_id))
+
+    if step == "proposal" and criteria is not None:
+        query = buyer_matching.matching_properties_query(db, criteria, company_id)
+        ctx["suggestions_total"] = query.order_by(None).count()
+        ctx["suggestions"] = query.limit(SEARCH_SUGGESTION_LIMIT).all()
+
+    # Aviso de duplicado al asociar: el comprador ya tiene otra alerta abierta
+    # sobre esa propiedad (lo pide /link-property antes de confirmar)
+    confirm_id = assignment._to_int(confirm_property)
+    if step == "proposal" and confirm_id is not None and alert.buyer_id:
+        target = get_property_in_company(db, confirm_id, company_id)
+        if target is not None:
+            others = [
+                a for a in find_duplicate_alerts(db, company_id, alert.buyer_id, target.id)["open"]
+                if a.id != alert.id
+            ]
+            if others:
+                ctx["link_duplicate"] = {"property": target, "alerts": others}
+
+    return ctx
+
+
 @router.get("/alerts/{alert_id}", response_class=HTMLResponse)
 async def alert_detail(
     alert_id: int,
     request: Request,
+    step: Optional[str] = Query(default=None),
+    confirm_property: Optional[str] = Query(default=None),
     db: Session = Depends(get_db)
 ):
-    """Detalle de una alerta con historial de seguimientos"""
+    """Detalle de una alerta con historial de seguimientos.
+
+    PLAN_ALERTA_COMO_NUEVA.md: para el agente una alerta reasignada es nueva
+    (solo ve lo ocurrido desde su asignación, sin el rastro de la
+    reasignación) y una alerta bloqueada por la cola no se puede abrir; el
+    admin lo ve todo.
+
+    PLAN_ALERTA_SIN_REFERENCIA.md: una alerta sin referencia (búsqueda
+    general) se trabaja en tres pasos (`step`): Contactar, Perfil y
+    Propuesta. `confirm_property` pinta el aviso de duplicado al asociar.
+    """
 
     current_user = request.state.user
+    admin_view = is_admin(current_user)
 
     alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
 
@@ -988,17 +1068,36 @@ async def alert_detail(
         return response
 
     # Verificar permisos: admin puede ver todo, agente solo sus alertas
-    if not is_admin(current_user):
+    if not admin_view:
         agent = get_agent_from_user(current_user, db)
         if not agent or alert.agent_id != agent.id:
             response = RedirectResponse(url="/alerts", status_code=302)
             set_flash(response, "error", "No tienes permisos para ver esta alerta")
             return response
 
-    # Obtener seguimientos ordenados por fecha
-    follow_ups = db.query(AlertFollowUp).filter(
+    # Cola secuencial: una alerta bloqueada no se abre por ningún camino
+    # (listado, notificación, Inicio, ficha del comprador). Se comprueba ANTES
+    # de cualquier escritura para no marcarla leída ni pasarla a En proceso.
+    if is_alert_locked_for_user(alert, current_user, db):
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "warning", ALERT_LOCKED_MESSAGE)
+        return response
+
+    # Auto-marcar como leída al abrir: solo el agente asignado, solo si está abierta
+    if not admin_view and not alert.read_at and alert.status in OPEN_ALERT_STATUSES:
+        agent = get_agent_from_user(current_user, db)
+        if agent and alert.agent_id == agent.id:
+            alert.read_at = datetime.utcnow()
+            if alert.status == AlertStatus.PENDING:
+                alert.status = AlertStatus.IN_PROGRESS
+            db.commit()
+
+    # Seguimientos ordenados por fecha (más reciente primero). El admin los ve
+    # todos; el agente, solo los reales desde su asignación.
+    all_follow_ups = db.query(AlertFollowUp).filter(
         AlertFollowUp.alert_id == alert_id
     ).order_by(AlertFollowUp.created_at.desc()).all()
+    follow_ups = alert_view.visible_follow_ups(all_follow_ups, alert, admin_view)
 
     # Cargar nombres de usuarios que registraron cada seguimiento
     user_ids = {f.created_by for f in follow_ups if f.created_by}
@@ -1007,36 +1106,49 @@ async def alert_detail(
         users = db.query(User).filter(User.id.in_(user_ids)).all()
         follow_up_users = {u.id: u.full_name for u in users}
 
-    # Auto-marcar como leída al abrir: solo el agente asignado, solo si está abierta
-    if not is_admin(current_user) and not alert.read_at and alert.status in OPEN_ALERT_STATUSES:
-        agent = get_agent_from_user(current_user, db)
-        if agent and alert.agent_id == agent.id:
-            alert.read_at = datetime.utcnow()
-            if alert.status == AlertStatus.PENDING:
-                alert.status = AlertStatus.IN_PROGRESS
-            db.commit()
+    # Ya no puede estar bloqueada para quien llega aquí (el agente bloqueado
+    # se redirige arriba); se mantiene por seguridad para la plantilla.
+    alert_locked = False
 
-    # Cola secuencial: si alguna alerta anterior no tiene seguimiento, bloquear acciones
-    alert_locked = is_alert_locked_for_user(alert, current_user, db)
-
-    admin_view = is_admin(current_user)
     can_reassign = admin_view and alert.status in assignment.REASSIGNABLE_STATUSES
+
+    company_id = get_active_company(request).id
+    search_ctx = _search_context(db, alert, current_user, admin_view, step, confirm_property,
+                                 follow_ups, company_id)
+
+    # Plazos en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md): la causa vencida
+    # más grave (banner) y los plazos que aún no han vencido ("vence el …").
+    clocks = buyer_attention_service.alert_clocks(alert)
+    attention = next((c for c in clocks if c.overdue), None)
+    upcoming_clocks = []
+    for clock in clocks:
+        if clock.overdue or any(c.due_at == clock.due_at for c in upcoming_clocks):
+            continue
+        upcoming_clocks.append(clock)
 
     return templates.TemplateResponse(
         request=request,
         name="alerts/detail.html",
         context={
+            **search_ctx,
             "request": request,
             "alert": alert,
             "follow_ups": follow_ups,
             "current_user": current_user,
             "alert_locked": alert_locked,
             "is_admin": admin_view,
-            # Cerrar exige un seguimiento real (la nota de reasignación no cuenta)
-            "can_complete": any(
-                f.action_type not in FollowUpActionType.SYSTEM_ACTIONS for f in follow_ups
-            ),
+            # Bloque "Agente asignado" (quién, antes, motivo, historial): solo admin
+            "show_assignment": admin_view,
+            # Fecha de la caja de estado: creación (admin) o asignación (agente)
+            "display_date": alert_view.display_date(alert, admin_view),
+            "assignment_start": alert_view.assignment_start(alert),
+            # Cerrar exige un seguimiento real desde la asignación (la nota de
+            # reasignación y los del agente anterior no cuentan), para ambos roles
+            "can_complete": alert_view.has_follow_up_since_assignment(all_follow_ups, alert),
             "can_reassign": can_reassign,
+            "attention": attention,
+            "upcoming_clocks": upcoming_clocks,
+            "RULE_NO_ACTION": buyer_attention_service.RULE_NO_ACTION,
             "assignable_groups": (
                 assignment.assignable_agents(db, get_active_company(request).id) if can_reassign else []
             ),
@@ -1058,9 +1170,11 @@ async def alert_detail(
 @router.post("/alerts/create")
 async def create_alert(
     request: Request,
-    property_id: int = Form(...),
+    property_id: Optional[int] = Form(None),
     buyer_id: int = Form(None),
     buyer_name: str = Form(None),
+    buyer_phone_country_code: str = Form(None),
+    buyer_phone_number: str = Form(None),
     buyer_phone: str = Form(None),
     buyer_email: str = Form(None),
     source: str = Form(None),
@@ -1081,7 +1195,8 @@ async def create_alert(
     empresa; si no pertenece a la de la propiedad se le da acceso) con un
     motivo opcional; también puede crearla sobre una propiedad sin captador si
     elige agente. Un agente que manda otro `agent_id` recibe un error. El
-    agente solo puede usar compradores a los que tiene acceso.
+    agente solo puede crear alertas sobre sus propiedades asignadas y solo
+    puede usar compradores a los que tiene acceso.
 
     Validación de duplicados:
     - Comprador existente: si ya hay una alerta abierta para ese comprador y
@@ -1090,11 +1205,19 @@ async def create_alert(
     - Comprador nuevo: si ya hay un comprador con el mismo teléfono o correo,
       no se crea salvo que llegue ``confirm_new_buyer``.
     El formulario avisa antes de enviar; esto es la red de seguridad.
+
+    Sin propiedad (PLAN_ALERTA_SIN_REFERENCIA.md): alerta "sin referencia"
+    (búsqueda general, `origin='search'`) en la empresa activa. El admin
+    elige el agente (obligatorio: no hay captador del que deducirlo) y el
+    agente queda asignado a sí mismo. No se comprueba propiedad ni
+    disponibilidad. Duplicado: otra búsqueda abierta del mismo comprador y
+    operación, con la misma confirmación ``confirm_duplicate``.
     """
 
     current_user = request.state.user
 
     company_id = get_active_company(request).id
+    is_search = property_id is None
 
     # Operación obligatoria: solo Venta o Alquiler (no se guarda nada si falta).
     # El formulario rápido de la ficha del comprador vuelve a esa ficha.
@@ -1121,16 +1244,25 @@ async def create_alert(
             set_flash(response, "error", "El nombre del comprador es obligatorio")
             return response
 
+        # Teléfono canónico con indicativo (PLAN_TELEFONO_COMPRADOR.md); `buyer_phone`
+        # es el campo antiguo de texto libre, aceptado si llega solo
+        try:
+            new_phone = phone_from_form(buyer_phone_country_code, buyer_phone_number, buyer_phone)
+        except PhoneValidationError as error:
+            response = RedirectResponse(url="/alerts", status_code=302)
+            set_flash(response, "error", str(error))
+            return response
+
         if not confirm_new_buyer:
             # Mismo criterio que /alerts/check-buyer: al agente solo se le
             # avisa de coincidencias con compradores a los que tiene acceso
             matches = [
-                b for b in find_matching_buyers(db, company_id, phone=buyer_phone, email=buyer_email)
+                b for b in find_matching_buyers(db, company_id, phone=new_phone, email=buyer_email)
                 if can_access_buyer(b, current_user, db)
             ]
             if matches:
                 existing = matches[0]
-                contact = existing.phone or existing.email or ""
+                contact = phone_display(existing.phone) or existing.email or ""
                 response = RedirectResponse(url="/alerts", status_code=302)
                 set_flash(
                     response,
@@ -1142,7 +1274,7 @@ async def create_alert(
 
         buyer = Buyer(
             name=buyer_name,
-            phone=(buyer_phone or "").strip() or None,
+            phone=new_phone,
             email=(buyer_email or "").strip() or None,
             created_by=current_user.id,
             company_id=company_id
@@ -1150,59 +1282,109 @@ async def create_alert(
         db.add(buyer)
         db.flush()  # obtener buyer.id antes del commit
 
-    # Obtener la propiedad y su agente (solo de la empresa activa)
-    property_item = get_property_in_company(db, property_id, company_id)
-
-    if not property_item:
-        db.rollback()
-        response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "error", "Propiedad no encontrada")
-        return response
-
-    if not property_item.is_available:
-        db.rollback()
-        response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "error", "La propiedad está marcada como No disponible")
-        return response
-
     admin_view = is_admin(current_user)
-    try:
-        assignee = assignment.resolve_assignee(
-            is_admin_user=admin_view,
-            requested_agent_id=agent_id,
-            owner_agent_id=property_item.agent_id,
-            lookup_any_agent=assignment.lookup_any_agent(db),
-        )
-    except AlertAssignmentError as error:
-        db.rollback()
-        back_url = f"/buyers/{buyer_id}" if buyer_id else "/alerts"
-        response = RedirectResponse(url=back_url, status_code=302)
-        set_flash(response, "error", str(error))
-        return response
 
-    # Duplicados: solo aplica a compradores existentes (uno nuevo no tiene alertas)
-    if buyer_id:
-        open_duplicates = find_duplicate_alerts(db, company_id, buyer.id, property_id)["open"]
-        if open_duplicates:
-            existing = open_duplicates[0]
-            if not confirm_duplicate:
+    if is_search:
+        # Alerta sin referencia: agente elegido por el admin o el propio agente
+        try:
+            assignee = assignment.resolve_search_assignee(
+                is_admin_user=admin_view,
+                requested_agent_id=agent_id,
+                own_agent=None if admin_view else get_agent_from_user(current_user, db),
+                lookup_any_agent=assignment.lookup_any_agent(db),
+            )
+        except AlertAssignmentError as error:
+            db.rollback()
+            response = RedirectResponse(url="/alerts", status_code=302)
+            set_flash(response, "error", str(error))
+            return response
+
+        property_item = None
+
+        # Duplicado: otra búsqueda abierta del mismo comprador y operación
+        if buyer_id:
+            open_searches = find_open_search_alerts(db, company_id, buyer.id, business_type)
+            if open_searches:
+                existing = open_searches[0]
+                if not confirm_duplicate:
+                    db.rollback()
+                    fecha = existing.created_at.strftime("%d/%m/%Y") if existing.created_at else ""
+                    response = RedirectResponse(url="/alerts", status_code=302)
+                    set_flash(
+                        response,
+                        "warning",
+                        f"{buyer.name} ya tiene una búsqueda de {business_type} abierta (#{existing.id}, {fecha}). "
+                        "No se ha creado otra. Si quieres repetirla, confírmalo en el formulario."
+                    )
+                    return response
+                message = append_note(message, search_duplicate_note(existing))
+    else:
+        # Obtener la propiedad y su agente (solo de la empresa activa)
+        property_item = get_property_in_company(db, property_id, company_id)
+
+        if not property_item:
+            db.rollback()
+            response = RedirectResponse(url="/alerts", status_code=302)
+            set_flash(response, "error", "Propiedad no encontrada")
+            return response
+
+        if not property_item.is_available:
+            db.rollback()
+            response = RedirectResponse(url="/alerts", status_code=302)
+            set_flash(response, "error", "La propiedad está marcada como No disponible")
+            return response
+
+        # El agente solo puede crear alertas sobre sus propiedades asignadas. El
+        # buscador y la ficha del comprador ya no le ofrecen otras; esto es la red
+        # de seguridad por si llega un property_id a mano.
+        if not admin_view:
+            own_agent = get_agent_from_user(current_user, db)
+            if not own_agent or property_item.agent_id != own_agent.id:
                 db.rollback()
-                fecha = existing.created_at.strftime("%d/%m/%Y") if existing.created_at else ""
-                response = RedirectResponse(url="/alerts", status_code=302)
-                set_flash(
-                    response,
-                    "warning",
-                    f"Ya existe una alerta abierta (#{existing.id}, {fecha}) para {buyer.name} "
-                    "en esta propiedad. No se ha creado otra. Si quieres repetirla, "
-                    "confírmalo en el formulario."
-                )
+                back_url = f"/buyers/{buyer_id}" if buyer_id else "/alerts"
+                response = RedirectResponse(url=back_url, status_code=302)
+                set_flash(response, "error", "Solo puedes crear alertas sobre las propiedades que tienes asignadas")
                 return response
-            message = append_note(message, duplicate_note(existing))
+
+        try:
+            assignee = assignment.resolve_assignee(
+                is_admin_user=admin_view,
+                requested_agent_id=agent_id,
+                owner_agent_id=property_item.agent_id,
+                lookup_any_agent=assignment.lookup_any_agent(db),
+            )
+        except AlertAssignmentError as error:
+            db.rollback()
+            back_url = f"/buyers/{buyer_id}" if buyer_id else "/alerts"
+            response = RedirectResponse(url=back_url, status_code=302)
+            set_flash(response, "error", str(error))
+            return response
+
+        # Duplicados: solo aplica a compradores existentes (uno nuevo no tiene alertas)
+        if buyer_id:
+            open_duplicates = find_duplicate_alerts(db, company_id, buyer.id, property_id)["open"]
+            if open_duplicates:
+                existing = open_duplicates[0]
+                if not confirm_duplicate:
+                    db.rollback()
+                    fecha = existing.created_at.strftime("%d/%m/%Y") if existing.created_at else ""
+                    response = RedirectResponse(url="/alerts", status_code=302)
+                    set_flash(
+                        response,
+                        "warning",
+                        f"Ya existe una alerta abierta (#{existing.id}, {fecha}) para {buyer.name} "
+                        "en esta propiedad. No se ha creado otra. Si quieres repetirla, "
+                        "confírmalo en el formulario."
+                    )
+                    return response
+                message = append_note(message, duplicate_note(existing))
 
     try:
         now = datetime.utcnow()
         alert = PropertyAlert(
             property=property_item,
+            company_id=company_id,
+            origin=AlertOrigin.SEARCH if is_search else AlertOrigin.PROPERTY,
             buyer_id=buyer.id,
             lead_name=buyer.name,
             lead_phone=buyer.phone,
@@ -1230,20 +1412,17 @@ async def create_alert(
         db.commit()
 
         response = RedirectResponse(url="/alerts", status_code=302)
-        own_agent = None if admin_view else get_agent_from_user(current_user, db)
-        if own_agent and assignee.id != own_agent.id:
-            # La alerta va al agente de la propiedad: no aparecerá en la lista de quien la creó
-            set_flash(
-                response,
-                "success",
-                f"Alerta creada para {buyer.name} y asignada a {assignee.name}, "
-                "agente de la propiedad"
-            )
-        elif admin_view:
-            message = f"Alerta creada para {buyer.name} y asignada a {assignee.name}"
+        # Un agente solo crea alertas sobre sus propiedades (o búsquedas a su
+        # nombre), así que la alerta siempre queda a su nombre y no hace falta
+        # avisarle de la asignación.
+        what = "Búsqueda general creada" if is_search else "Alerta creada"
+        if admin_view:
+            message = f"{what} para {buyer.name} y asignada a {assignee.name}"
             if result.granted_company is not None:
                 message += f". {assignee.name} ahora tiene acceso a {result.granted_company.name}"
             set_flash(response, "success", message)
+        elif is_search:
+            set_flash(response, "success", f"{what} para {buyer.name}. Ábrela para tomar su perfil de búsqueda")
         else:
             set_flash(response, "success", f"Alerta de comprador creada para {buyer.name}")
         return response
@@ -1254,6 +1433,231 @@ async def create_alert(
         response = RedirectResponse(url="/alerts", status_code=302)
         set_flash(response, "error", "Ocurrió un error al crear la alerta")
         return response
+
+
+def _search_denied_response(alert_id: int, reason: str) -> RedirectResponse:
+    """Redirección y flash cuando no se puede trabajar la búsqueda."""
+    if reason == ALERT_LOCKED_MESSAGE:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "warning", reason)
+    elif reason == "No tienes permisos para esta alerta":
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", reason)
+    else:
+        response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)
+        set_flash(response, "error", reason)
+    return response
+
+
+@router.post("/alerts/{alert_id}/search-profile")
+async def save_alert_search_profile(
+    alert_id: int,
+    request: Request,
+    property_type: str = Form(None),
+    min_price: str = Form(None),
+    max_price: str = Form(None),
+    min_bedrooms: str = Form(None),
+    max_bedrooms: str = Form(None),
+    min_bathrooms: str = Form(None),
+    notes: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    """Guarda el perfil de búsqueda del comprador desde su alerta sin referencia.
+
+    PLAN_ALERTA_SIN_REFERENCIA.md (decisión cerrada 4): upsert del perfil del
+    comprador (uno por comprador, sin m²) con la operación y el agente de la
+    alerta, y un seguimiento automático CALIFICADO con el resumen como nota:
+    cuenta como gestión (desbloquea la cola) y deja constancia de cuándo se
+    tomaron los datos. Vuelve al paso "Propuesta". Solo el agente asignado o
+    el admin, nunca con la alerta bloqueada.
+    """
+    current_user = request.state.user
+    company_id = get_active_company(request).id
+
+    alert = get_alert_in_company(db, alert_id, company_id)
+    if not alert:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Alerta no encontrada")
+        return response
+
+    denied = _search_link_denied(alert, current_user, db)
+    if denied:
+        return _search_denied_response(alert_id, denied)
+
+    buyer = alert.buyer
+    if buyer is None:
+        response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)
+        set_flash(response, "error", "La alerta no tiene comprador asociado")
+        return response
+
+    form_data = await request.form()
+
+    try:
+        now = datetime.utcnow()
+        criteria = buyer.search_criteria
+        if criteria is None:
+            criteria = BuyerSearchCriteria(buyer_id=buyer.id)
+            db.add(criteria)
+            buyer.search_criteria = criteria
+
+        buyer_matching.apply_profile(
+            criteria,
+            zones=form_data.getlist("zones"),
+            cities=form_data.getlist("cities"),
+            property_type=property_type,
+            # La operación es la de la alerta (fija en el formulario)
+            business_type=alert.business_type or criteria.business_type,
+            min_price=min_price,
+            max_price=max_price,
+            min_bedrooms=min_bedrooms,
+            max_bedrooms=max_bedrooms,
+            min_bathrooms=min_bathrooms,
+            notes=notes,
+            agent_id=alert.agent_id,
+            now=now,
+        )
+
+        db.add(AlertFollowUp(
+            alert_id=alert.id,
+            action_type=FollowUpActionType.CALIFICADO,
+            notes=buyer_matching.profile_note(criteria),
+            created_at=now,
+            created_by=current_user.id,
+        ))
+        if alert.status == AlertStatus.PENDING:
+            alert.status = AlertStatus.IN_PROGRESS
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error guardando el perfil desde la alerta: alert_id=%s", alert_id)
+        response = RedirectResponse(url=f"/alerts/{alert_id}?step=profile", status_code=302)
+        set_flash(response, "error", "Ocurrió un error al guardar el perfil")
+        return response
+
+    total = buyer_matching.matching_properties_query(db, criteria, company_id).order_by(None).count()
+    response = RedirectResponse(url=f"/alerts/{alert_id}?step=proposal", status_code=302)
+    set_flash(
+        response,
+        "success",
+        f"Perfil de {buyer.name} guardado: {total} "
+        + ("propiedad sugerida" if total == 1 else "propiedades sugeridas"),
+    )
+    return response
+
+
+@router.post("/alerts/{alert_id}/link-property")
+async def link_property_to_alert(
+    alert_id: int,
+    request: Request,
+    property_id: Optional[int] = Form(None),
+    confirm_duplicate: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    """Asocia (o cambia) la propiedad de una alerta sin referencia.
+
+    PLAN_ALERTA_SIN_REFERENCIA.md: una sola alerta (decisión 1); el agente
+    que atiende la conserva aunque la propiedad sea de otro agente (decisión
+    2: no se toca `agent_id`). La propiedad debe ser de la empresa y estar
+    disponible. Si el comprador ya tiene otra alerta abierta sobre esa
+    propiedad, se pide confirmación (``confirm_duplicate``) y se deja nota.
+    Registra un seguimiento PROPIEDAD_ASOCIADA ("Propiedad asociada: X" o
+    "Cambio de propiedad: de A a B"), que cuenta como gestión pero no avanza
+    la etapa.
+    """
+    current_user = request.state.user
+    company_id = get_active_company(request).id
+    detail_url = f"/alerts/{alert_id}"
+
+    alert = get_alert_in_company(db, alert_id, company_id)
+    if not alert:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Alerta no encontrada")
+        return response
+
+    denied = _search_link_denied(alert, current_user, db)
+    if denied:
+        return _search_denied_response(alert_id, denied)
+
+    property_item = get_property_in_company(db, property_id, company_id) if property_id else None
+    if property_item is None:
+        response = RedirectResponse(url=f"{detail_url}?step=proposal", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
+
+    if not property_item.is_available or property_item.status == PropertyStatus.ARCHIVED:
+        response = RedirectResponse(url=f"{detail_url}?step=proposal", status_code=302)
+        set_flash(response, "error", f"{property_item.title} no está disponible")
+        return response
+
+    if alert.property_id == property_item.id:
+        response = RedirectResponse(url=detail_url, status_code=302)
+        set_flash(response, "info", f"{property_item.title} ya está asociada a esta alerta")
+        return response
+
+    # Otra alerta abierta del mismo comprador sobre esa propiedad (de cualquier agente)
+    duplicate = None
+    if alert.buyer_id:
+        others = [
+            a for a in find_duplicate_alerts(db, company_id, alert.buyer_id, property_item.id)["open"]
+            if a.id != alert.id
+        ]
+        if others:
+            duplicate = others[0]
+            if not confirm_duplicate:
+                fecha = duplicate.created_at.strftime("%d/%m/%Y") if duplicate.created_at else ""
+                response = RedirectResponse(
+                    url=f"{detail_url}?step=proposal&confirm_property={property_item.id}#propuesta",
+                    status_code=302,
+                )
+                set_flash(
+                    response,
+                    "warning",
+                    f"{alert.lead_name} ya tiene una alerta abierta sobre {property_item.title} "
+                    f"(#{duplicate.id}, {fecha}). No se ha asociado: confírmalo si quieres asociarla igualmente."
+                )
+                return response
+
+    previous = alert.property
+    try:
+        now = datetime.utcnow()
+        if duplicate is not None:
+            alert.message = append_note(alert.message, linked_duplicate_note(duplicate))
+
+        alert.property = property_item
+        alert.property_linked_at = now
+
+        if previous is not None:
+            note = f"Cambio de propiedad: de {previous.title} a {property_item.title}"
+        else:
+            note = f"Propiedad asociada: {property_item.title}"
+        db.add(AlertFollowUp(
+            alert_id=alert.id,
+            action_type=FollowUpActionType.PROPIEDAD_ASOCIADA,
+            notes=note,
+            created_at=now,
+            created_by=current_user.id,
+        ))
+        if alert.status == AlertStatus.PENDING:
+            alert.status = AlertStatus.IN_PROGRESS
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error asociando propiedad: alert_id=%s property_id=%s", alert_id, property_id)
+        response = RedirectResponse(url=f"{detail_url}?step=proposal", status_code=302)
+        set_flash(response, "error", "Ocurrió un error al asociar la propiedad")
+        return response
+
+    # Asociar la propiedad es una gestión real: el aviso "sin gestión" ya no aplica
+    notification_service.safe_resolve_buyer_notifications(db, alert.id)
+
+    response = RedirectResponse(url=detail_url, status_code=302)
+    if previous is not None:
+        set_flash(response, "success", f"Propiedad cambiada: {alert.lead_name} ahora tiene asociada {property_item.title}")
+    else:
+        set_flash(response, "success", f"{property_item.title} asociada a la búsqueda de {alert.lead_name}")
+    return response
 
 
 def _safe_back_url(next_url: Optional[str], default: str) -> str:
@@ -1315,6 +1719,9 @@ async def reassign_alert(
         response = RedirectResponse(url=back_url, status_code=302)
         set_flash(response, "error", "Ocurrió un error al reasignar la alerta")
         return response
+
+    # El reloj arranca de cero con el nuevo agente: los avisos del anterior ya no aplican
+    notification_service.safe_resolve_buyer_notifications(db, alert.id)
 
     previous_name = result.previous_agent.name if result.previous_agent is not None else "sin agente"
     message = f"Alerta de {alert.lead_name} reasignada de {previous_name} a {agent.name}"
@@ -1450,6 +1857,7 @@ async def add_follow_up(
             alert.status = AlertStatus.COMPLETED
             alert.completed_at = datetime.utcnow()
             db.commit()
+            notification_service.safe_resolve_buyer_notifications(db, alert_id)
             closing_labels = {
                 FollowUpActionType.CERRADO: "Alerta cerrada con éxito",
                 FollowUpActionType.SIN_INTERES: "Alerta cerrada: comprador sin interés",
@@ -1462,6 +1870,8 @@ async def add_follow_up(
             return response
 
         db.commit()
+        # Gestión registrada: los avisos de comprador que ya no apliquen se marcan leídos
+        notification_service.safe_resolve_buyer_notifications(db, alert_id)
 
         response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)
         set_flash(response, "success", "Seguimiento agregado correctamente")
@@ -1569,8 +1979,11 @@ async def complete_alert(
         return response
 
     # No se puede cerrar una alerta sin al menos un seguimiento registrado
-    # (la nota automática de reasignación no cuenta)
-    follow_ups_count = _real_follow_ups(db, alert_id).count()
+    # desde su asignación (la nota automática de reasignación y los
+    # seguimientos del agente anterior no cuentan; PLAN_ALERTA_COMO_NUEVA.md)
+    follow_ups_count = _real_follow_ups(
+        db, alert_id, since=alert_view.assignment_start(alert)
+    ).count()
 
     if follow_ups_count == 0:
         response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)
@@ -1586,6 +1999,7 @@ async def complete_alert(
         alert.completed_at = datetime.utcnow()
 
         db.commit()
+        notification_service.safe_resolve_buyer_notifications(db, alert_id)
 
         response = RedirectResponse(url="/alerts", status_code=302)
         set_flash(response, "success", "Alerta completada correctamente")
@@ -1709,11 +2123,13 @@ async def delete_alert(
 
     try:
         # Los seguimientos se eliminan automáticamente por cascade
+        lead_name = alert.lead_name
         db.delete(alert)
         db.commit()
+        notification_service.safe_resolve_buyer_notifications(db, alert_id)
 
         response = RedirectResponse(url="/alerts", status_code=302)
-        set_flash(response, "success", f"Alerta de {alert.lead_name} eliminada correctamente")
+        set_flash(response, "success", f"Alerta de {lead_name} eliminada correctamente")
         return response
 
     except Exception:
@@ -1727,43 +2143,6 @@ async def delete_alert(
 # ---------------------------------------------------------------------------
 # Detalle del comprador y perfil de búsqueda
 # ---------------------------------------------------------------------------
-
-def _build_matching_properties(criteria: BuyerSearchCriteria, db: Session, company_id: int):
-    """Filtra propiedades activas y disponibles de la empresa que cumplen los criterios."""
-    query = scope_properties(
-        db.query(Property).filter(
-            Property.status == PropertyStatus.ACTIVE,
-            Property.available_clause(),
-            Property.agent_id.isnot(None),
-        ),
-        company_id
-    )
-
-    if criteria.zones:
-        query = query.filter(Property.zona.in_(criteria.zones))
-    if criteria.cities:
-        query = query.filter(Property.city.in_(criteria.cities))
-    if criteria.property_type:
-        query = query.filter(Property.property_type == criteria.property_type)
-    if criteria.business_type:
-        query = query.filter(Property.business_type == criteria.business_type)
-    if criteria.min_price is not None:
-        query = query.filter(Property.price >= criteria.min_price)
-    if criteria.max_price is not None:
-        query = query.filter(Property.price <= criteria.max_price)
-    if criteria.min_bedrooms is not None:
-        query = query.filter(Property.num_dormitorios >= criteria.min_bedrooms)
-    if criteria.max_bedrooms is not None:
-        query = query.filter(Property.num_dormitorios <= criteria.max_bedrooms)
-    if criteria.min_bathrooms is not None:
-        query = query.filter(Property.num_banos_aseos >= criteria.min_bathrooms)
-    if criteria.min_m2 is not None:
-        query = query.filter(Property.m2_utiles >= criteria.min_m2)
-    if criteria.max_m2 is not None:
-        query = query.filter(Property.m2_utiles <= criteria.max_m2)
-
-    return query.order_by(Property.price.asc()).all()
-
 
 @router.get("/buyers/{buyer_id}", response_class=HTMLResponse)
 async def buyer_detail(
@@ -1792,10 +2171,11 @@ async def buyer_detail(
 
     criteria = buyer.search_criteria
 
-    # Propiedades que hacen match (solo si hay criterios definidos)
+    # Propiedades compatibles (solo si hay perfil). Servicio compartido con el
+    # paso "Propuesta" de las alertas sin referencia; sin filtros de m².
     matching_properties = []
     if criteria:
-        matching_properties = _build_matching_properties(criteria, db, company.id)
+        matching_properties = buyer_matching.matching_properties(db, criteria, company.id)
 
     # Valores disponibles en la BD para los selectores
     filter_values = _property_filter_values(db, company.id)
@@ -1814,10 +2194,27 @@ async def buyer_detail(
     # datos del propietario).
     own_agent = None if is_admin(current_user) else get_agent_from_user(current_user, db)
 
+    # Pestaña Alertas (PLAN_ALERTA_COMO_NUEVA.md). El admin ve todas las del
+    # comprador con su fecha de creación. El agente solo las suyas (las de
+    # otros agentes no puede abrirlas), con la fecha de su asignación, y las
+    # bloqueadas por su cola salen como "En cola" sin datos ni enlace.
+    admin_view = is_admin(current_user)
+    buyer_alerts_query = db.query(PropertyAlert).filter(PropertyAlert.buyer_id == buyer_id)
+    locked_alert_ids = set()
+    if admin_view:
+        date_order = PropertyAlert.created_at
+    else:
+        buyer_alerts_query = buyer_alerts_query.filter(
+            PropertyAlert.agent_id == (own_agent.id if own_agent else -1)
+        )
+        date_order = alert_view.assignment_start_expr()
+        if own_agent:
+            locked_alert_ids = get_locked_alert_ids(own_agent.id, db, company.id)
     buyer_alerts = (
-        db.query(PropertyAlert)
-        .filter(PropertyAlert.buyer_id == buyer_id)
-        .order_by(PropertyAlert.created_at.desc())
+        buyer_alerts_query
+        # La propiedad se pinta en cada fila: en la misma consulta (puede faltar)
+        .options(selectinload(PropertyAlert.property))
+        .order_by(date_order.desc(), PropertyAlert.id.desc())
         .all()
     )
 
@@ -1831,8 +2228,13 @@ async def buyer_detail(
             "buyer": buyer,
             "criteria": criteria,
             "matching_properties": matching_properties,
+            # Resumen del perfil para las búsquedas sin propiedad de la pestaña Alertas
+            "criteria_summary": buyer_matching.criteria_summary(criteria),
+            "criteria_parts": buyer_matching.criteria_parts(criteria),
             "own_agent": own_agent,
             "buyer_alerts": buyer_alerts,
+            "locked_alert_ids": locked_alert_ids,
+            "display_dates": {a.id: alert_view.display_date(a, admin_view) for a in buyer_alerts},
             "agents": agents,
             "assignable_groups": assignable_groups,
             "zones": zones,
@@ -1851,11 +2253,18 @@ async def update_buyer_contact(
     buyer_id: int,
     request: Request,
     name: str = Form(...),
+    phone_country_code: str = Form(None),
+    phone_number: str = Form(None),
     phone: str = Form(None),
     email: str = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Actualiza nombre, teléfono y email del comprador. Accesible para admin y agentes asignados."""
+    """Actualiza nombre, teléfono y email del comprador. Accesible para admin y agentes asignados.
+
+    Teléfono: indicativo + número (PLAN_TELEFONO_COMPRADOR.md). Si llega igual
+    que lo que pintó el formulario (`split_phone` del guardado), se conserva el
+    valor guardado tal cual: editar solo el correo no reescribe un teléfono
+    antiguo. `phone` es el campo antiguo, aceptado si llega solo."""
     current_user = request.state.user
 
     buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
@@ -1869,8 +2278,21 @@ async def update_buyer_contact(
         set_flash(response, "error", "No tienes acceso a este comprador")
         return response
 
+    unchanged = (
+        buyer.phone
+        and phone_number is not None
+        and (valid_country_code(phone_country_code), phone_number.strip()) == split_phone(buyer.phone)
+    )
+    if not unchanged:
+        try:
+            new_phone = phone_from_form(phone_country_code, phone_number, phone)
+        except PhoneValidationError as error:
+            response = RedirectResponse(url=f"/buyers/{buyer_id}", status_code=303)
+            set_flash(response, "error", str(error))
+            return response
+        buyer.phone = new_phone
+
     buyer.name = name.strip()
-    buyer.phone = phone.strip() if phone and phone.strip() else None
     buyer.email = email.strip() if email and email.strip() else None
     db.commit()
 
@@ -1891,15 +2313,15 @@ async def save_search_criteria(
     min_bedrooms: str = Form(None),
     max_bedrooms: str = Form(None),
     min_bathrooms: str = Form(None),
-    min_m2: str = Form(None),
-    max_m2: str = Form(None),
     notes: str = Form(None),
     db: Session = Depends(get_db)
 ):
     """Crear o actualizar el perfil de búsqueda de un comprador.
 
     Admin y agentes con acceso al comprador. Para el agente, el agente
-    responsable del perfil es siempre su propia ficha."""
+    responsable del perfil es siempre su propia ficha. Sin m²
+    (PLAN_ALERTA_SIN_REFERENCIA.md, decisión cerrada 5): los valores antiguos
+    se conservan en la base de datos, pero ya no se editan ni filtran."""
 
     current_user = request.state.user
 
@@ -1931,20 +2353,6 @@ async def save_search_criteria(
 
     # Zonas y ciudades vienen como lista de checkboxes
     form_data = await request.form()
-    zones = form_data.getlist("zones")
-    cities_sel = form_data.getlist("cities")
-
-    def to_int(v):
-        try:
-            return int(v) if v and str(v).strip() else None
-        except (ValueError, TypeError):
-            return None
-
-    def to_decimal(v):
-        try:
-            return float(v) if v and str(v).strip() else None
-        except (ValueError, TypeError):
-            return None
 
     try:
         criteria = buyer.search_criteria
@@ -1952,20 +2360,20 @@ async def save_search_criteria(
             criteria = BuyerSearchCriteria(buyer_id=buyer_id)
             db.add(criteria)
 
-        criteria.agent_id = agent_id or None
-        criteria.zones = zones or None
-        criteria.cities = cities_sel or None
-        criteria.property_type = property_type or None
-        criteria.business_type = business_type or None
-        criteria.min_price = to_decimal(min_price)
-        criteria.max_price = to_decimal(max_price)
-        criteria.min_bedrooms = to_int(min_bedrooms)
-        criteria.max_bedrooms = to_int(max_bedrooms)
-        criteria.min_bathrooms = to_int(min_bathrooms)
-        criteria.min_m2 = to_decimal(min_m2)
-        criteria.max_m2 = to_decimal(max_m2)
-        criteria.notes = (notes or "").strip() or None
-        criteria.updated_at = datetime.utcnow()
+        buyer_matching.apply_profile(
+            criteria,
+            zones=form_data.getlist("zones"),
+            cities=form_data.getlist("cities"),
+            property_type=property_type,
+            business_type=business_type,
+            min_price=min_price,
+            max_price=max_price,
+            min_bedrooms=min_bedrooms,
+            max_bedrooms=max_bedrooms,
+            min_bathrooms=min_bathrooms,
+            notes=notes,
+            agent_id=agent_id,
+        )
 
         db.commit()
 

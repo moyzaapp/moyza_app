@@ -40,6 +40,13 @@ from app.models.alert_follow_up import AlertFollowUp
 from app.models.property import Property
 from app.models.property_alert import PropertyAlert
 from app.models.property_visit import PropertyVisit
+from app.services.alert_view import assignment_start_expr
+from app.services.alert_view import get_locked_alert_ids
+from app.services.alert_view import real_follow_ups_clause
+from app.core.business_calendar import format_business_duration
+from app.services.buyer_attention_service import RULE_NO_ACTION
+from app.services.buyer_attention_service import RULE_STAGE_STALL
+from app.services.buyer_attention_service import first_stage_label
 from app.services.buyer_reminder_service import get_pending_buyers_by_agent
 from app.services.company_scope import scope_agents
 from app.services.performance_report_service import BREAKDOWN_KEYS
@@ -99,6 +106,18 @@ def madrid_now(now: Optional[datetime] = None) -> datetime:
 def long_date_es(value) -> str:
     """'miércoles 8 de octubre'."""
     return f"{WEEKDAYS[value.weekday()]} {value.day} de {MONTHS_LONG[value.month - 1]}"
+
+
+def attention_summary(buyers: list) -> str:
+    """'2 sin gestión · 1 sin pasar de Primera Llamada' (filas de `get_pending_buyers_by_agent`)."""
+    no_action = sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION)
+    stalled = sum(1 for b in buyers if b["rule"] == RULE_STAGE_STALL)
+    parts = []
+    if no_action:
+        parts.append(f"{no_action} sin gestión")
+    if stalled:
+        parts.append(f"{stalled} sin pasar de {first_stage_label()}")
+    return " · ".join(parts)
 
 
 def semaphore(pct: Optional[int]) -> str:
@@ -334,6 +353,7 @@ class DashboardService:
         }
 
         report = self.perf.get_report(agent.id, period.period_type, period.start)
+        pending_buyers = self.pending_buyers_for_agent(agent.id, now=now)
 
         return {
             "objective_kpis": self.build_kpis(
@@ -350,7 +370,8 @@ class DashboardService:
             "portfolio": self.portfolio(agent, now=now),
             "trend": self.agent_trend(agent, period, now=now),
             "admin_notes": (report.admin_notes or "").strip() if report else "",
-            "pending_buyers": self.pending_buyers_for_agent(agent.id),
+            "pending_buyers": pending_buyers,
+            "pending_summary": attention_summary(pending_buyers),
         }
 
     # ------------------------------------------------------------------
@@ -358,28 +379,39 @@ class DashboardService:
     # ------------------------------------------------------------------
 
     def _latest_follow_up_subquery(self):
-        """Último seguimiento (por id) de cada alerta, sin las notas del sistema
-        (la de reasignación no tiene próxima acción y ocultaría la pendiente)."""
+        """Último seguimiento (por id) de cada alerta desde su asignación, sin
+        las notas del sistema (la de reasignación no tiene próxima acción y
+        ocultaría la pendiente).
+
+        Para el agente una alerta reasignada es nueva (PLAN_ALERTA_COMO_NUEVA.md):
+        un seguimiento del agente anterior con próxima acción no entra en la
+        agenda del nuevo.
+        """
         return (
             self.db.query(
                 AlertFollowUp.alert_id.label("alert_id"),
                 func.max(AlertFollowUp.id).label("follow_up_id"),
             )
-            .filter(AlertFollowUp.action_type.notin_(FollowUpActionType.SYSTEM_ACTIONS))
+            .join(PropertyAlert, PropertyAlert.id == AlertFollowUp.alert_id)
+            .filter(real_follow_ups_clause(assignment_start_expr()))
             .group_by(AlertFollowUp.alert_id)
             .subquery()
         )
 
-    def _agent_open_alerts(self, agent_id: int):
-        return (
+    def _agent_open_alerts(self, agent_id: int, exclude_ids=()):
+        # Empresa de la propia alerta: incluye las búsquedas sin propiedad
+        # (PLAN_ALERTA_SIN_REFERENCIA.md)
+        query = (
             self.db.query(PropertyAlert)
-            .join(Property, Property.id == PropertyAlert.property_id)
             .filter(
-                Property.company_id == self.company_id,
+                PropertyAlert.company_id == self.company_id,
                 PropertyAlert.agent_id == agent_id,
                 PropertyAlert.status.in_([AlertStatus.PENDING, AlertStatus.IN_PROGRESS]),
             )
         )
+        if exclude_ids:
+            query = query.filter(PropertyAlert.id.notin_(list(exclude_ids)))
+        return query
 
     def agenda(self, agent: Agent, now: Optional[datetime] = None) -> dict:
         """Hoy y pendiente: próximas acciones vencidas o de hoy, sin leer y sin respuesta.
@@ -387,15 +419,22 @@ class DashboardService:
         `next_action_date` se guarda como la hora local que el agente escribe
         (input datetime-local), así que se compara con el final del día de
         hoy en Madrid.
+
+        Próximas acciones y "sin respuesta" solo cuentan seguimientos desde la
+        asignación de cada alerta y solo de alertas que el agente puede abrir:
+        las bloqueadas por su cola no salen (PLAN_ALERTA_COMO_NUEVA.md). "Sin
+        leer" es un contador que lleva al listado, donde las bloqueadas ya se
+        muestran sin datos, así que sigue contando toda la cola.
         """
         local_now = madrid_now(now)
         end_of_today = datetime.combine(local_now.date(), time(23, 59, 59))
         start_of_today = datetime.combine(local_now.date(), time.min)
         latest = self._latest_follow_up_subquery()
         labels = FollowUpActionType.labels()
+        locked = get_locked_alert_ids(agent.id, self.db, self.company_id)
 
         due_query = (
-            self._agent_open_alerts(agent.id)
+            self._agent_open_alerts(agent.id, exclude_ids=locked)
             .join(latest, latest.c.alert_id == PropertyAlert.id)
             .join(AlertFollowUp, AlertFollowUp.id == latest.c.follow_up_id)
             .filter(
@@ -429,7 +468,7 @@ class DashboardService:
 
         no_response_cutoff = (now or datetime.utcnow()) - timedelta(days=DashboardThresholds.NO_RESPONSE_DAYS)
         no_response = (
-            self._agent_open_alerts(agent.id)
+            self._agent_open_alerts(agent.id, exclude_ids=locked)
             .join(latest, latest.c.alert_id == PropertyAlert.id)
             .join(AlertFollowUp, AlertFollowUp.id == latest.c.follow_up_id)
             .filter(
@@ -448,9 +487,16 @@ class DashboardService:
             "is_empty": not due_total and not unread and not no_response,
         }
 
-    def pending_buyers_for_agent(self, agent_id: int) -> list:
-        """Compradores con más de BUYER_REMINDER_HOURS sin gestión (regla del email de las 06:00)."""
-        pending = get_pending_buyers_by_agent(self.db, settings.BUYER_REMINDER_HOURS)
+    def pending_buyers_for_agent(self, agent_id: int, now: Optional[datetime] = None) -> list:
+        """Compradores que requieren atención (misma regla que el email diario).
+
+        PLAN_ALERTAS_DIAS_HABILES.md: R1 "sin gestión" y R2 "sin pasar de
+        Primera llamada", en horas hábiles; una fila por alerta. Cada fila trae
+        `rule`, `text` ("2 d 5 h hábiles sin gestión"), `due_label`…
+        """
+        pending = get_pending_buyers_by_agent(
+            self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id, agent_id=agent_id,
+        )
         buyers = pending.get((agent_id, self.company_id), [])
         return sorted(buyers, key=lambda b: b["hours_elapsed"], reverse=True)
 
@@ -525,9 +571,9 @@ class DashboardService:
         kind = business_kind(PropertyAlert.business_type)
         rows = (
             self.db.query(PropertyAlert.agent_id, week.label("week"), func.count(PropertyAlert.id))
-            .join(Property, Property.id == PropertyAlert.property_id)
             .filter(
-                Property.company_id == self.company_id,
+                # Por agente: cuentan también las búsquedas sin propiedad
+                PropertyAlert.company_id == self.company_id,
                 PropertyAlert.agent_id.in_(list(agent_ids)),
                 PropertyAlert.created_at >= start,
                 PropertyAlert.created_at <= end,
@@ -597,7 +643,7 @@ class DashboardService:
             for a in agents
         }
 
-        pending = self.pending_buyers_by_agent(agents)
+        pending = self.pending_buyers_by_agent(agents, now=now)
 
         return {
             "kpis": self.team_kpis(agent_ids, metrics_now, metrics_prev, period, previous_period),
@@ -645,11 +691,8 @@ class DashboardService:
         return kpis
 
     def _company_alerts(self):
-        return (
-            self.db.query(PropertyAlert)
-            .join(Property, Property.id == PropertyAlert.property_id)
-            .filter(Property.company_id == self.company_id)
-        )
+        # Empresa de la propia alerta (las búsquedas pueden no tener propiedad)
+        return self.db.query(PropertyAlert).filter(PropertyAlert.company_id == self.company_id)
 
     def abandoned_buyers_count(self, now: datetime) -> int:
         """Compradores PENDING con más de 7 días (misma regla que Resultados Comerciales).
@@ -725,19 +768,30 @@ class DashboardService:
 
     # -- Requiere atención -------------------------------------------------
 
-    def pending_buyers_by_agent(self, agents) -> list:
-        """Compradores con más de BUYER_REMINDER_HOURS sin gestión, agrupados por agente."""
-        pending = get_pending_buyers_by_agent(self.db, settings.BUYER_REMINDER_HOURS)
+    def pending_buyers_by_agent(self, agents, now: Optional[datetime] = None) -> list:
+        """Compradores que requieren atención agrupados por agente (horas hábiles).
+
+        Por grupo: total, cuántos "sin gestión" (R1) y cuántos "sin avance" (R2)
+        y el más antiguo en horas hábiles.
+        """
+        pending = get_pending_buyers_by_agent(
+            self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id,
+        )
         names = {a.id: a.name for a in agents}
         groups = []
         for (agent_id, company_id), buyers in pending.items():
             if company_id != self.company_id:
                 continue
+            oldest = max(b["business_hours_elapsed"] for b in buyers)
             groups.append({
                 "agent_id": agent_id,
                 "agent_name": names.get(agent_id) or "Sin agente",
                 "count": len(buyers),
-                "oldest_hours": max(b["hours_elapsed"] for b in buyers),
+                "no_action": sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION),
+                "stage_stall": sum(1 for b in buyers if b["rule"] == RULE_STAGE_STALL),
+                "oldest_hours": int(oldest),
+                "oldest_label": format_business_duration(oldest),
+                "summary": attention_summary(buyers),
             })
         return sorted(groups, key=lambda g: (-g["count"], -g["oldest_hours"]))
 
@@ -763,9 +817,8 @@ class DashboardService:
         for agent_id, when in (
             self.db.query(PropertyAlert.agent_id, func.max(AlertFollowUp.created_at))
             .join(AlertFollowUp, AlertFollowUp.alert_id == PropertyAlert.id)
-            .join(Property, Property.id == PropertyAlert.property_id)
             .filter(
-                Property.company_id == self.company_id,
+                PropertyAlert.company_id == self.company_id,
                 PropertyAlert.agent_id.in_(agent_ids),
                 # La nota de reasignación la escribe el admin y los seguimientos
                 # anteriores a la asignación son del agente previo: no son
@@ -778,8 +831,7 @@ class DashboardService:
             keep(agent_id, when)
         for agent_id, when in (
             self.db.query(PropertyAlert.agent_id, func.max(PropertyAlert.read_at))
-            .join(Property, Property.id == PropertyAlert.property_id)
-            .filter(Property.company_id == self.company_id, PropertyAlert.agent_id.in_(agent_ids))
+            .filter(PropertyAlert.company_id == self.company_id, PropertyAlert.agent_id.in_(agent_ids))
             .group_by(PropertyAlert.agent_id)
         ):
             keep(agent_id, when)
@@ -806,11 +858,11 @@ class DashboardService:
 
         for group in pending:
             items.append({
-                "tone": "red",
+                "tone": "red" if group["no_action"] else "amber",
                 "icon": "user",
                 "title": f"{group['agent_name']} · {group['count']} "
-                         f"{'comprador' if group['count'] == 1 else 'compradores'} sin gestión",
-                "text": f"Más de {settings.BUYER_REMINDER_HOURS} h; el más antiguo, {group['oldest_hours']} h",
+                         f"{'comprador requiere' if group['count'] == 1 else 'compradores requieren'} atención",
+                "text": f"{group['summary']}; el más antiguo, {group['oldest_label']} hábiles",
                 "href": f"/alerts?agent_id={group['agent_id']}",
             })
 
@@ -957,10 +1009,9 @@ class DashboardService:
         closings = (
             self.db.query(AlertFollowUp, PropertyAlert)
             .join(PropertyAlert, PropertyAlert.id == AlertFollowUp.alert_id)
-            .join(Property, Property.id == PropertyAlert.property_id)
             .options(joinedload(PropertyAlert.agent))
             .filter(
-                Property.company_id == self.company_id,
+                PropertyAlert.company_id == self.company_id,
                 AlertFollowUp.action_type == FollowUpActionType.CERRADO,
                 AlertFollowUp.created_at >= since,
             )

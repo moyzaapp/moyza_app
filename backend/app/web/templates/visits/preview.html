@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "visits/_progress.html" import visit_progress %}
 
 {% block title %}
 Vista Previa del Documento - Visita
@@ -6,38 +7,7 @@ Vista Previa del Documento - Visita
 
 {% block content %}
 
-<!-- Indicador de progreso -->
-<div class="max-w-4xl mx-auto mb-8">
-    <div class="flex items-center justify-between">
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-white font-bold">
-                ✓
-            </div>
-            <span class="text-xs mt-2 text-green-600 font-medium">Datos</span>
-        </div>
-        <div class="flex-1 h-1 bg-blue-500"></div>
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
-                2
-            </div>
-            <span class="text-xs mt-2 text-blue-600 font-medium">Vista Previa</span>
-        </div>
-        <div class="flex-1 h-1 bg-gray-300"></div>
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-bold">
-                3
-            </div>
-            <span class="text-xs mt-2 text-gray-500">Firma</span>
-        </div>
-        <div class="flex-1 h-1 bg-gray-300"></div>
-        <div class="flex flex-col items-center flex-1">
-            <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-bold">
-                4
-            </div>
-            <span class="text-xs mt-2 text-gray-500">Finalizado</span>
-        </div>
-    </div>
-</div>
+{{ visit_progress("preview", joint=visit.requires_agent_confirmation) }}
 
 <!-- Documento simulado (estilo papel) -->
 <div class="max-w-4xl mx-auto bg-white rounded-2xl shadow-2xl p-8 mb-8" id="document-preview">
@@ -189,6 +159,25 @@ Vista Previa del Documento - Visita
 
     <hr class="my-6 border-gray-300">
 
+    <!-- FIRMAS: mismos firmantes y orden que el PDF (tres con acompañante) -->
+    {% set signers = [("COMPRADOR", visit.visitor_name), ("AGENTE INMOBILIARIO", agent_name)] %}
+    {% if companion_agent_name %}{% set signers = signers + [("AGENTE ACOMPAÑANTE", companion_agent_name)] %}{% endif %}
+    <div class="mb-6" id="preview-signatures">
+        <h2 class="text-base font-bold text-gray-800 mb-4">FIRMAS</h2>
+        <div class="grid grid-cols-1 {{ 'sm:grid-cols-3' if companion_agent_name else 'sm:grid-cols-2' }} gap-6">
+            {% for label, name in signers %}
+            <div class="text-center">
+                <p class="text-xs font-bold text-gray-800">{{ label }}</p>
+                <p class="text-xs text-gray-600 mt-0.5">{{ name }}</p>
+                <div class="h-16 border-b border-gray-400" aria-hidden="true"></div>
+                <p class="text-xs text-gray-500 mt-1">{{ "Firma del cliente en el siguiente paso" if loop.first else "Firma registrada del agente" }}</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <hr class="my-6 border-gray-300">
+
     <!-- AUTORIZACIÓN RGPD -->
     <div class="mb-6 text-xs leading-relaxed">
         <h2 class="text-base font-bold text-gray-800 mb-3">AUTORIZACIÓN DE USO DE DATOS PERSONALES CONFORME AL REGLAMENTO GENERAL DE PROTECCIÓN DE DATOS (RGPD)</h2>
@@ -278,6 +267,7 @@ continueBtn.addEventListener('click', async function() {
     try {
         const response = await fetch('/api/v1/visits/{{ visit.id }}/accept-terms', {
             method: 'POST',
+            credentials: 'same-origin',
             headers: {
                 'Content-Type': 'application/json',
             },

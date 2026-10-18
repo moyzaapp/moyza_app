@@ -7,12 +7,17 @@
  *   assign.setOwner(12, 'Laura');                   // al elegir la propiedad (alta)
  *   assign.setCurrent(12, 'Laura');                 // al abrir la reasignación
  *   assign.clear();                                 // al quitar la propiedad
+ *   assign.setSearch();                             // alta "Sin referencia" (búsqueda general)
  *
  * Modo "create" (alta): el select parte del captador de la propiedad; si se
  * elige otro, aviso ámbar "La alerta irá a X y no a Y" y campo Motivo
  * (opcional). Modo "reassign": el agente actual no se puede elegir y el
  * motivo está siempre visible. En los dos, si el agente elegido no pertenece
  * a la empresa activa, se avisa de que se le dará acceso (decisión §4-1 B).
+ *
+ * Modo búsqueda (alta sin referencia, PLAN_ALERTA_SIN_REFERENCIA.md): no hay
+ * captador; el admin debe elegir el agente (select obligatorio, sin motivo).
+ * Para el agente el bloque no se muestra: la plantilla avisa "Se te asignará a ti".
  *
  * Para el agente (sin select) solo se muestra "Se asignará a {captador}".
  * Todo el texto se escribe con textContent: sin innerHTML.
@@ -40,6 +45,7 @@ window.AlertAssign = (function () {
 
         var ownerId = '';
         var ownerName = '';
+        var searchMode = false;
 
         function show(el, on) { if (el) el.classList.toggle('hidden', !on); }
 
@@ -60,7 +66,14 @@ window.AlertAssign = (function () {
             var differs = !!option && String(select.value) !== String(ownerId);
             var noAccess = !!option && !belongs(option);
 
-            if (mode === 'reassign') {
+            if (searchMode) {
+                hint.textContent = 'Sin propiedad, elige quién atiende al comprador.';
+                show(hint, true);
+                warnText.textContent = '';
+                show(warnText, false);
+                show(reasonWrap, false);
+                if (reason) reason.value = '';
+            } else if (mode === 'reassign') {
                 hint.textContent = ownerName ? 'Ahora la atiende ' + ownerName + '.' : '';
                 show(hint, !!ownerName);
                 warnText.textContent = '';
@@ -85,7 +98,7 @@ window.AlertAssign = (function () {
                 ? name + ' no pertenece a ' + companyName + '; al asignarle se le dará acceso a ' + companyName + '.'
                 : '';
             show(warnCompany, noAccess);
-            show(warn, (mode !== 'reassign' && differs && !!ownerId) || noAccess);
+            show(warn, (!searchMode && mode !== 'reassign' && differs && !!ownerId) || noAccess);
         }
 
         function reset() {
@@ -101,6 +114,7 @@ window.AlertAssign = (function () {
             // Alta: preselecciona el captador de la propiedad
             setOwner: function (id, name) {
                 reset();
+                searchMode = false;
                 ownerId = id ? String(id) : '';
                 ownerName = name || '';
                 if (select) {
@@ -126,8 +140,24 @@ window.AlertAssign = (function () {
                 show(root, true);
                 sync();
             },
+            // Alta sin referencia: el admin elige agente (obligatorio); el agente no ve el bloque
+            setSearch: function () {
+                reset();
+                searchMode = true;
+                ownerId = '';
+                ownerName = '';
+                if (select) {
+                    select.required = true;
+                    select.value = '';
+                    show(root, true);
+                } else {
+                    show(root, false);
+                }
+                sync();
+            },
             clear: function () {
                 reset();
+                searchMode = false;
                 ownerId = '';
                 ownerName = '';
                 if (select) {

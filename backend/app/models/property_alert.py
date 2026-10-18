@@ -1,3 +1,4 @@
+import builtins
 from datetime import datetime
 
 from sqlalchemy import Column
@@ -7,9 +8,13 @@ from sqlalchemy import Text
 from sqlalchemy import DateTime
 from sqlalchemy import ForeignKey
 from sqlalchemy import Index
+from sqlalchemy import event
+from sqlalchemy import text
 
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm import validates
 
+from app.core.constants import AlertOrigin
 from app.db.base import Base
 
 
@@ -24,14 +29,44 @@ class PropertyAlert(Base):
         Index("ix_property_alerts_buyer_id", "buyer_id"),
         Index("ix_property_alerts_status", "status"),
         Index("ix_property_alerts_agent_id_status", "agent_id", "status"),
+        # Alcance por empresa (migración y8z9a0b1c2d3_alert_without_property)
+        Index("ix_property_alerts_company_id", "company_id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
 
+    # Opcional desde PLAN_ALERTA_SIN_REFERENCIA.md: una alerta creada sin
+    # referencia (búsqueda general, `origin = 'search'`) no tiene propiedad
+    # hasta que el agente asocia la que elige el comprador.
     property_id = Column(
         Integer,
         ForeignKey("properties.id"),
+        nullable=True
+    )
+
+    # Empresa de la alerta. Antes se heredaba de la propiedad; ahora es propia
+    # porque la propiedad puede faltar. En las alertas con propiedad coincide
+    # con `property.company_id` (backfill de la migración y relleno automático
+    # al crear, ver `_fill_company_id`).
+    company_id = Column(
+        Integer,
+        ForeignKey("companies.id"),
         nullable=False
+    )
+
+    # 'property' (creada con referencia) o 'search' (sin referencia). Solo las
+    # de origen 'search' pueden asociar o cambiar de propiedad.
+    origin = Column(
+        String,
+        nullable=False,
+        default=AlertOrigin.PROPERTY,
+        server_default=AlertOrigin.PROPERTY
+    )
+
+    # Cuándo se asoció (o cambió) la propiedad de una búsqueda
+    property_linked_at = Column(
+        DateTime,
+        nullable=True
     )
 
     agent_id = Column(
@@ -142,11 +177,14 @@ class PropertyAlert(Base):
         nullable=True
     )
 
-    # Relaciones
+    # Relaciones. `property` puede ser None (búsqueda sin propiedad asociada):
+    # todo acceso a `alert.property.<algo>` debe protegerse.
     property = relationship(
         "Property",
         backref="alerts"
     )
+
+    company = relationship("Company")
 
     # `foreign_keys` explícito: property_alerts tiene dos FK a agents
     agent = relationship(
@@ -183,3 +221,37 @@ class PropertyAlert(Base):
         back_populates="alert",
         cascade="all, delete-orphan"
     )
+
+    # ------------------------------------------------------------------
+    # Búsqueda general (PLAN_ALERTA_SIN_REFERENCIA.md)
+    # ------------------------------------------------------------------
+
+    # `builtins.property`: dentro de la clase, `property` es la relación
+    @builtins.property
+    def is_search(self) -> bool:
+        """Alerta creada sin referencia (búsqueda general)."""
+        return self.origin == AlertOrigin.SEARCH
+
+    @validates("property")
+    def _sync_company_from_property(self, key, property_item):
+        # Una alerta con propiedad nace en la empresa de la propiedad. No se
+        # sobrescribe una empresa ya fijada: asociar una propiedad a una
+        # búsqueda no cambia la empresa de la alerta (la ruta ya exige que
+        # sea de la misma).
+        if property_item is not None and self.company_id is None:
+            self.company_id = property_item.company_id
+        return property_item
+
+
+@event.listens_for(PropertyAlert, "before_insert")
+def _fill_company_id(mapper, connection, target):
+    """Red de seguridad: alerta creada solo con `property_id` y sin empresa.
+
+    Rellena `company_id` con la empresa de la propiedad (mismo criterio que el
+    backfill de la migración), para que ningún alta antigua falle por el NOT NULL.
+    """
+    if target.company_id is None and target.property_id is not None:
+        target.company_id = connection.execute(
+            text("SELECT company_id FROM properties WHERE id = :id"),
+            {"id": target.property_id},
+        ).scalar()

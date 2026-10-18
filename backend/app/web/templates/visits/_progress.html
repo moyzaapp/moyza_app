@@ -1,0 +1,44 @@
+{#
+  Progreso del flujo legal de una visita (vista previa, firma, firmas de
+  agentes y finalizado). Uso:
+      {% from "visits/_progress.html" import visit_progress %}
+      {{ visit_progress("signature", joint=visit.requires_agent_confirmation) }}
+
+  `step`: "preview" | "signature" | "agents" | "complete" ("complete" marca
+  todos los pasos como hechos). `joint`: visita con acompañante; añade el
+  paso "Firmas agentes" (PLAN_FIRMA_AGENTES_VISITA.md §3.2).
+#}
+{% macro visit_progress(step, joint=False) -%}
+{% if joint %}
+{% set steps = [("data", "Datos"), ("preview", "Vista previa"), ("signature", "Firma cliente"), ("agents", "Firmas agentes"), ("complete", "Finalizado")] %}
+{% else %}
+{% set steps = [("data", "Datos"), ("preview", "Vista previa"), ("signature", "Firma"), ("complete", "Finalizado")] %}
+{% endif %}
+{% set keys = steps | map(attribute=0) | list %}
+{% set current = (keys.index(step) + 1) if step in keys else 1 %}
+{% set all_done = step == "complete" %}
+<nav aria-label="Progreso de la visita" class="max-w-4xl mx-auto mb-6 sm:mb-8">
+    <ol class="flex items-start">
+        {% for key, label in steps %}
+        {% set n = loop.index %}
+        {% set done = all_done or n < current %}
+        {% set active = not all_done and n == current %}
+        <li class="relative flex-1 flex flex-col items-center text-center" {% if active %}aria-current="step"{% endif %}>
+            {% if not loop.first %}
+            <span class="absolute top-4 sm:top-5 right-1/2 w-full h-0.5 {{ 'bg-green-600' if done or active else 'bg-gray-200' }}" aria-hidden="true"></span>
+            {% endif %}
+            <span class="relative z-10 w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-sm font-semibold
+                         {% if done %}text-white bg-green-600{% elif active %}text-white bg-blue-600{% else %}text-gray-600 bg-gray-200{% endif %}">
+                {% if done %}
+                <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
+                <span class="sr-only">Hecho:</span>
+                {% else %}
+                {{ n }}
+                {% endif %}
+            </span>
+            <span class="mt-2 px-1 text-xs leading-tight {% if done %}text-green-700{% elif active %}text-blue-700 font-medium{% else %}text-gray-500{% endif %}">{{ label }}</span>
+        </li>
+        {% endfor %}
+    </ol>
+</nav>
+{%- endmacro %}

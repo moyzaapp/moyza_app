@@ -127,7 +127,11 @@ def business_kind(column):
 
 
 def closing_business_type():
-    """Tipo de un cierre: el de la alerta y, si falta (NULL o vacío), el de la propiedad."""
+    """Tipo de un cierre: el de la alerta y, si falta (NULL o vacío), el de la propiedad.
+
+    La consulta une la propiedad con OUTER JOIN: una búsqueda sin propiedad y
+    sin tipo cuenta como 'otros'.
+    """
     return func.coalesce(
         func.nullif(func.trim(PropertyAlert.business_type), ""),
         Property.business_type,
@@ -366,19 +370,23 @@ class PerformanceReportService:
     # ------------------------------------------------------------------
 
     def _indicator_spec(self, indicator: str):
-        """(columna agente, columna fecha, columna tipo, función que monta FROM/JOIN/WHERE)."""
+        """(columna agente, columna fecha, columna tipo, columna empresa, función que monta FROM/JOIN/WHERE).
+
+        Contactos y cierres son métricas **por agente** de la alerta: cuentan
+        también las búsquedas sin propiedad (PLAN_ALERTA_SIN_REFERENCIA.md),
+        así que la empresa es la de la propia alerta. Captaciones y bajadas
+        son de la propiedad.
+        """
         if indicator == "contactos":
             def build(query):
-                return (
-                    query.select_from(PropertyAlert)
-                    .join(Property, Property.id == PropertyAlert.property_id)
-                )
-            return PropertyAlert.agent_id, PropertyAlert.created_at, PropertyAlert.business_type, build
+                return query.select_from(PropertyAlert)
+            return (PropertyAlert.agent_id, PropertyAlert.created_at, PropertyAlert.business_type,
+                    PropertyAlert.company_id, build)
 
         if indicator == "captaciones_crm":
             def build(query):
                 return query.select_from(Property)
-            return Property.agent_id, Property.market_entry_date, Property.business_type, build
+            return Property.agent_id, Property.market_entry_date, Property.business_type, Property.company_id, build
 
         if indicator == "bajadas":
             def build(query):
@@ -387,17 +395,21 @@ class PerformanceReportService:
                     .join(Property, Property.id == PropertyPriceHistory.property_id)
                     .filter(PropertyPriceHistory.new_price < PropertyPriceHistory.old_price)
                 )
-            return Property.agent_id, PropertyPriceHistory.created_at, Property.business_type, build
+            return (Property.agent_id, PropertyPriceHistory.created_at, Property.business_type,
+                    Property.company_id, build)
 
         if indicator == "cierres":
             def build(query):
+                # OUTER JOIN: la propiedad solo aporta el tipo de respaldo
+                # (closing_business_type); una búsqueda sin propiedad también cuenta
                 return (
                     query.select_from(AlertFollowUp)
                     .join(PropertyAlert, PropertyAlert.id == AlertFollowUp.alert_id)
-                    .join(Property, Property.id == PropertyAlert.property_id)
+                    .outerjoin(Property, Property.id == PropertyAlert.property_id)
                     .filter(AlertFollowUp.action_type == FollowUpActionType.CERRADO)
                 )
-            return PropertyAlert.agent_id, AlertFollowUp.created_at, closing_business_type(), build
+            return (PropertyAlert.agent_id, AlertFollowUp.created_at, closing_business_type(),
+                    PropertyAlert.company_id, build)
 
         raise ValueError(f"Indicador desconocido: {indicator}")
 
@@ -412,14 +424,15 @@ class PerformanceReportService:
         """Conteo por agente (y mes) y tipo: {(agent_id, mes|None): {'venta', 'alquiler', 'otros'}}.
 
         Una sola consulta agrupada, filtrada por la empresa del servicio
-        (la de la propiedad); `mes` es 1..12 si `by_month`.
+        (la de la alerta o la de la propiedad, según el indicador); `mes` es
+        1..12 si `by_month`.
         """
         company_id = self._require_company()
         agent_ids = list(agent_ids)
         if not agent_ids:
             return {}
 
-        agent_col, date_col, type_col, build = self._indicator_spec(indicator)
+        agent_col, date_col, type_col, company_col, build = self._indicator_spec(indicator)
 
         group_cols = [agent_col.label("agent_id")]
         if by_month:
@@ -429,7 +442,7 @@ class PerformanceReportService:
         query = (
             build(self.db.query(*group_cols, func.count().label("total")))
             .filter(
-                Property.company_id == company_id,
+                company_col == company_id,
                 agent_col.in_(agent_ids),
                 date_col >= period_start,
                 date_col <= period_end,

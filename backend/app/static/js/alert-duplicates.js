@@ -28,6 +28,15 @@ window.AlertDuplicates = (function () {
             .catch(function () { return { open: [], recent_closed: [] }; });
     }
 
+    // Búsquedas generales abiertas del comprador con esa operación (alta "Sin referencia")
+    function checkSearch(buyerId, businessType) {
+        var url = '/alerts/check-search-duplicate?buyer_id=' + encodeURIComponent(buyerId)
+            + '&business_type=' + encodeURIComponent(businessType || '');
+        return fetch(url)
+            .then(function (r) { return r.ok ? r.json() : { open: [], recent_closed: [] }; })
+            .catch(function () { return { open: [], recent_closed: [] }; });
+    }
+
     function checkBuyer(phone, email) {
         var url = '/alerts/check-buyer?phone=' + encodeURIComponent(phone || '')
             + '&email=' + encodeURIComponent(email || '');
@@ -55,9 +64,9 @@ window.AlertDuplicates = (function () {
     }
 
     function renderOpen(alerts, opts) {
-        var title = alerts.length === 1
+        var title = typeof opts.openTitle === 'function' ? opts.openTitle(alerts) : (alerts.length === 1
             ? 'Ya existe una alerta abierta para este comprador en esta propiedad'
-            : 'Ya existen ' + alerts.length + ' alertas abiertas para este comprador en esta propiedad';
+            : 'Ya existen ' + alerts.length + ' alertas abiertas para este comprador en esta propiedad');
 
         var items = alerts.map(function (a) {
             var actions = '<a href="' + escapeHtml(a.url) + '" target="_blank" rel="noopener" '
@@ -111,6 +120,7 @@ window.AlertDuplicates = (function () {
      *   forceLabel            texto del botón de envío cuando hay duplicado abierto
      *   allowRegisterContact  false para ocultar "Registrar como nuevo contacto"
      *   getContactPayload()   devuelve {source, notes, priority} para ese registro
+     *   openTitle(alerts)     título del aviso de abiertas (p. ej. búsqueda ya abierta)
      *
      * Devuelve true si hay duplicados abiertos.
      */
@@ -156,7 +166,7 @@ window.AlertDuplicates = (function () {
         }
 
         var items = buyers.map(function (b, i) {
-            var meta = [b.phone, b.email].filter(Boolean).join(' · ');
+            var meta = [b.phone_display || b.phone, b.email].filter(Boolean).join(' · ');
             return '<li class="flex flex-wrap items-center justify-between gap-2 pt-2">'
                 + '<div class="min-w-0"><p class="text-sm font-medium">' + escapeHtml(b.name) + '</p>'
                 + (meta ? '<p class="text-xs text-amber-800">' + escapeHtml(meta) + '</p>' : '') + '</div>'
@@ -233,6 +243,7 @@ window.AlertDuplicates = (function () {
 
     return {
         checkAlerts: checkAlerts,
+        checkSearch: checkSearch,
         checkBuyer: checkBuyer,
         renderAlertBanner: renderAlertBanner,
         renderBuyerBanner: renderBuyerBanner,

@@ -9,7 +9,7 @@ Fecha: 2026-10-13 · Rama `63-agregar-moes`
 | Punto | Comportamiento actual | Archivo |
 |---|---|---|
 | Crear alerta (modal "Nueva alerta" en Compradores y formulario rápido en la ficha del comprador) | `agent_id = property_item.agent_id`, **siempre** el agente captador de la propiedad. Si la propiedad no tiene agente, se rechaza ("La propiedad no tiene agente asignado"). | `routes/alerts.py::create_alert` (~línea 919 y 947) |
-| Quien la crea | Admin o agente. Si un agente la crea sobre una propiedad ajena, el flash avisa "asignada a X, agente de la propiedad" y la alerta **no aparece en su lista**. | `routes/alerts.py` ~966 |
+| Quien la crea | Admin sobre cualquier propiedad. **Agente solo sobre sus propiedades asignadas** (cambio del 2026-10-16): el buscador del modal y la ficha del comprador solo le ofrecen las suyas, y `create_alert` rechaza cualquier otra con "Solo puedes crear alertas sobre las propiedades que tienes asignadas". Así la alerta siempre queda a su nombre. | `routes/alerts.py::search_properties`, `::create_alert`; `buyers/detail.html` |
 | Reasignar después | **No existe.** No hay ninguna acción para cambiar el agente de una alerta ya creada. | |
 | Modelo | `property_alerts.agent_id` (FK `agents`, NOT NULL). No guarda quién asignó ni cuándo. | `models/property_alert.py:27` |
 
@@ -95,6 +95,7 @@ El detalle de la alerta muestra "Asignada a {agente} · por {usuario} el {fecha}
 
 - Notificación in-app `alert_assigned` al agente nuevo (ya estaba en el catálogo del Inicio, sin implementar):
   título "Te han asignado un comprador: {nombre}", cuerpo "{propiedad} · {motivo}", enlace al detalle.
+  (2026-10-16, decisión §4-10: el cuerpo es solo "{propiedad}"; el motivo no se envía al agente.)
   Se emite en el alta solo cuando el agente **no** es el captador, y siempre en la reasignación.
 - Al agente anterior: nada (decisión §4-5).
 - Ningún email ni WhatsApp.
@@ -189,6 +190,8 @@ Un commit por fase: `feat(alertas): fase N - …`. Usar el skill `moyza-ui-ux-pr
 | 7 | Propiedad sin agente captador | **Sí**, se puede crear la alerta si se elige agente explícitamente. |
 | 8 | Motivo | **Texto libre corto y OPCIONAL** (un solo input, placeholder "Motivo (opcional)"). Sin lista fija. Se guarda en `assignment_reason` y, si hay texto, en la nota automática de seguimiento. |
 | 9 | Estado al reasignar | **Correcto**: Pendiente y sin leer, conservando seguimientos. |
+| 10 | Qué ve el agente de una alerta reasignada y cola (2026-10-16, `PLAN_ALERTA_COMO_NUEVA.md`) | **El agente ve la alerta reasignada como nueva; el admin conserva la trazabilidad; bloqueo real de la cola.** Para el agente todo se calcula desde `assigned_at` (o `created_at`): sin bloque "Agente asignado", sin notas `REASIGNADA` ni seguimientos/etapa del agente anterior, fecha = la de su asignación, y en la cola cuenta como sin gestionar hasta que él registre un seguimiento (cerrar también lo exige, para ambos roles). Una alerta bloqueada no se abre por ningún camino: `/alerts/{id}` vuelve a `/alerts` con el aviso "Esta alerta está en tu cola. Gestiona primero las anteriores para verla." sin tocar estado ni `read_at`. El admin lo ve todo (creación y asignación por separado). El aviso `alert_assigned` ya no lleva el motivo. No cambia nada de lo que se guarda (historial, nota, agente anterior y motivo siguen en BD). Lógica en `services/alert_view.py`. |
+| 11 | Alerta sin referencia (búsqueda general) (2026-10-16, `PLAN_ALERTA_SIN_REFERENCIA.md`, decisiones en `docs/DECISIONES_ALERTAS_BUSQUEDA.md`) | **La propiedad es opcional.** Alerta `origin='search'` con empresa propia (`property_alerts.company_id`); el admin elige el agente (obligatorio, no hay captador) y el agente queda asignado a sí mismo. Una sola alerta: la propiedad elegida se asocia a esa misma alerta y se puede cambiar; **el agente que atiende la conserva** aunque la propiedad sea de otro agente (no hay reasignación al asociar ni aviso al captador). `scope_alerts` y la cola pasan a filtrar por `PropertyAlert.company_id`. El aviso `alert_assigned` de una búsqueda dice "Búsqueda general · {operación}". |
 
 Ajustes derivados: en §2.1 y §2.2 el motivo deja de ser obligatorio (la validación solo exige agente válido);
 el aviso ámbar "La alerta irá a X y no a Y" se mantiene. Las alertas con motivo vacío no muestran la línea

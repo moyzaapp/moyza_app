@@ -1,6 +1,7 @@
 """
-Operación obligatoria (Venta / Alquiler) al dar de alta un comprador con
-criterios y al editar sus criterios.
+Operación obligatoria (Venta / Alquiler) al crear una alerta (con o sin
+referencia) y al editar el perfil de búsqueda del comprador. El alta "con
+filtro" (/buyers/create-with-criteria) se eliminó en PLAN_ALERTA_SIN_REFERENCIA.md.
 
 - Unitario: `BusinessType` (constante única para plantillas y validación).
 - Integración contra la app levantada (patrón de test_company_isolation.py,
@@ -109,37 +110,54 @@ def _buyers(db, name):
     return db.query(Buyer).filter(Buyer.name == name).all()
 
 
-def test_alta_con_criterios_exige_operacion(db):
+def _any_agent_id(db, company_code: str) -> int:
+    from app.models.agent import Agent
+    from app.models.company import Company
+
+    company = db.query(Company).filter(Company.code == company_code).first()
+    agent = db.query(Agent).filter(Agent.companies.any(Company.id == company.id)).first()
+    if agent is None:
+        pytest.skip(f"No hay agentes en {company_code} para asignar la búsqueda")
+    return agent.id
+
+
+def test_alerta_sin_referencia_exige_operacion(db):
+    """Sustituye al alta "con filtro" (eliminada en PLAN_ALERTA_SIN_REFERENCIA.md):
+    la alerta sin referencia (búsqueda general) también exige Venta o Alquiler."""
     client = _Client("MOES")
+    agent_id = _any_agent_id(db, "MOES")
 
     for business_type in (None, "", "Traspaso"):
         name = f"{TAG} SIN OPERACION"
-        data = {"buyer_name": name, "buyer_phone": "600000002"}
+        data = {"buyer_name": name, "buyer_phone": "600000002", "confirm_new_buyer": "1", "agent_id": agent_id}
         if business_type is not None:
             data["business_type"] = business_type
-        status, headers = client.post("/buyers/create-with-criteria", data)
+        status, headers = client.post("/alerts/create", data)
         assert status == 302
         assert headers.get("location") == "/alerts"
         assert "Venta o Alquiler" in _flash(headers)
         assert _buyers(db, name) == []
 
     name = f"{TAG} VENTA"
-    status, headers = client.post("/buyers/create-with-criteria", {
-        "buyer_name": name, "buyer_phone": "600000003", "business_type": "Venta",
+    status, headers = client.post("/alerts/create", {
+        "buyer_name": name, "buyer_phone": "600000003", "confirm_new_buyer": "1",
+        "business_type": "Venta", "agent_id": agent_id,
     })
     assert status == 302
     buyers = _buyers(db, name)
     assert len(buyers) == 1
-    assert headers.get("location") == f"/buyers/{buyers[0].id}?tab=matches"
-    assert buyers[0].search_criteria.business_type == "Venta"
+    assert [(a.origin, a.property_id, a.business_type) for a in buyers[0].alerts] == [("search", None, "Venta")]
 
 
 def test_edicion_de_criterios_exige_operacion(db):
     client = _Client("MOES")
 
     name = f"{TAG} EDICION"
-    client.post("/buyers/create-with-criteria", {"buyer_name": name, "business_type": "Venta"})
+    client.post("/buyers/create", {"name": name})
     buyer = _buyers(db, name)[0]
+    client.post(f"/buyers/{buyer.id}/search-criteria", {"business_type": "Venta"})
+    db.expire_all()
+    assert buyer.search_criteria.business_type == "Venta"
 
     status, headers = client.post(f"/buyers/{buyer.id}/search-criteria", {"business_type": ""})
     assert status == 302

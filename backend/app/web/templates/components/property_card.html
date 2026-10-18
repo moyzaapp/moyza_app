@@ -1,0 +1,62 @@
+{#
+  Tarjeta de propiedad compatible / sugerida (PLAN_ALERTA_SIN_REFERENCIA.md).
+
+  La usan la pestaña "Propiedades compatibles" de la ficha del comprador y el
+  paso "Propuesta" del detalle de una alerta sin referencia. Muestra título,
+  operación, dirección, dormitorios, baños, precio y agente de la propiedad.
+
+  Uso:
+    {% from "components/property_card.html" import property_card %}
+    {% call property_card(prop, show_link=True, current=False) %}
+        …acción de la tarjeta (botón "Asociar a esta alerta", "Crear alerta")…
+    {% endcall %}
+
+  - show_link: enlace "Ver" a la ficha de la propiedad. El agente solo enlaza a
+    las suyas (la ficha incluye datos del propietario).
+  - current: la propiedad ya asociada a la alerta ("Asociada ahora").
+#}
+{% import "components/ui_macros.html" as ui %}
+
+{% macro property_card(prop, show_link=False, current=False) -%}
+<article class="bg-white rounded-2xl border {{ 'border-blue-300 ring-2 ring-blue-500/30' if current else 'border-gray-200' }} flex flex-col overflow-hidden">
+    <div class="p-4 flex-1 space-y-3">
+        <div class="flex items-start justify-between gap-2">
+            <h3 class="text-sm font-semibold text-gray-900 leading-tight">{{ prop.title }}</h3>
+            {% if prop.business_type %}<span class="shrink-0">{{ ui.status_badge("business", prop.business_type, dot=False) }}</span>{% endif %}
+        </div>
+
+        {% if current %}{{ ui.badge("Asociada ahora", "blue", dot=True) }}{% endif %}
+
+        {% set place = [prop.address, prop.city, prop.zona] | select | join(" · ") %}
+        {% if place %}
+        <p class="text-xs text-gray-500 flex items-start gap-1">
+            <svg class="w-4 h-4 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z"/></svg>
+            <span>{{ place }}</span>
+        </p>
+        {% endif %}
+
+        {% if prop.num_dormitorios is not none or prop.num_banos_aseos is not none %}
+        <p class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-700">
+            {% if prop.num_dormitorios is not none %}<span>{{ prop.num_dormitorios }} {{ 'dormitorio' if prop.num_dormitorios == 1 else 'dormitorios' }}</span>{% endif %}
+            {% if prop.num_banos_aseos is not none %}<span>{{ prop.num_banos_aseos }} {{ 'baño' if prop.num_banos_aseos == 1 else 'baños' }}</span>{% endif %}
+        </p>
+        {% endif %}
+
+        <div class="flex items-center justify-between gap-2">
+            <span class="text-lg font-bold text-gray-900 tabular-nums">{{ prop.price | eur }}</span>
+            {% if show_link %}
+            <a href="/properties/{{ prop.id }}" class="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Ver</a>
+            {% endif %}
+        </div>
+
+        {% if caller %}<div>{{ caller() }}</div>{% endif %}
+    </div>
+
+    {% if prop.agent %}
+    <p class="border-t border-gray-100 bg-gray-50 px-4 py-2 text-xs text-gray-500 flex items-center gap-1.5">
+        <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
+        Agente de la propiedad: {{ prop.agent.name }}
+    </p>
+    {% endif %}
+</article>
+{%- endmacro %}

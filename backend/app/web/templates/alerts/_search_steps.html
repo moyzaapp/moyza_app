@@ -1,0 +1,319 @@
+{#
+  Alerta sin referencia (búsqueda general): flujo guiado Contactar → Perfil → Propuesta
+  (PLAN_ALERTA_SIN_REFERENCIA.md). Se incluye desde alerts/detail.html con su contexto
+  (`_search_context` en routes/alerts.py). Una sola acción primaria por paso.
+#}
+{% import "components/ui_macros.html" as ui %}
+{% from "components/search_profile_form.html" import search_profile_fields %}
+{% from "components/property_card.html" import property_card %}
+{% set step_items = [] %}
+{% for key, label in search_steps %}{% set _ = step_items.append((key, label, "/alerts/" ~ alert.id ~ "?step=" ~ key ~ "#propuesta", none)) %}{% endfor %}
+
+<section id="propuesta" class="bg-white rounded-2xl border border-gray-200 scroll-mt-4" aria-labelledby="searchStepsTitle">
+    <div class="px-4 sm:px-6 pt-4">
+        <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+                <h2 id="searchStepsTitle" class="text-lg font-bold text-gray-900">
+                    {{ "Cambiar propiedad" if alert.property else "Búsqueda del comprador" }}
+                </h2>
+                <p class="text-sm text-gray-500 mt-1">
+                    {% if alert.property %}Asociada ahora: {{ alert.property.title }}{% else %}Llámale, toma su perfil y propónle una propiedad{% endif %}
+                </p>
+            </div>
+            {% if alert.property %}
+            <a href="/alerts/{{ alert.id }}" class="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Cancelar</a>
+            {% endif %}
+        </div>
+    </div>
+    <div class="px-4 sm:px-6 mt-2">
+        {{ ui.tabs(step_items, step, label="Pasos de la búsqueda") }}
+    </div>
+
+    <div class="p-4 sm:p-6">
+        {# ------------------------------------------------------------ 1. Contactar #}
+        {% if step == "contact" %}
+        <div class="space-y-4">
+            <p class="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+                <span class="text-gray-500">Estado</span>
+                {{ ui.status_badge("alert", alert.status) }}
+                {% if current_stage_label %}
+                <span class="text-gray-500">· Última gestión:</span>
+                <span class="font-medium text-gray-900">{{ current_stage_label }}</span>
+                {% else %}
+                <span class="text-gray-500">· Aún sin contactar</span>
+                {% endif %}
+            </p>
+
+            {% if alert.lead_phone %}
+            {% set lead_whatsapp_url = alert.lead_phone | whatsapp_url %}
+            <div class="flex flex-col sm:flex-row gap-3">
+                {% call ui.button("Llamar al " ~ (alert.lead_phone | phone_display), "secondary", href=(alert.lead_phone | tel_href), full_mobile=True) %}
+                <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z"/></svg>
+                {% endcall %}
+                {% if lead_whatsapp_url %}
+                {% set wa_attrs %}target="_blank" rel="noopener noreferrer" aria-label="Abrir chat de WhatsApp con {{ alert.lead_name }}"{% endset %}
+                {% call ui.button("WhatsApp", "secondary", href=lead_whatsapp_url, attrs=wa_attrs, full_mobile=True) %}
+                <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z"/></svg>
+                {% endcall %}
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-500">El comprador no tiene teléfono registrado.</p>
+            {% endif %}
+
+            <div class="flex flex-col sm:flex-row sm:items-center gap-3 pt-4 border-t border-gray-100">
+                {{ ui.button("Registrar seguimiento", "primary", attrs='onclick="openFollowUpModal()"', full_mobile=True) }}
+                {{ ui.button("Siguiente: perfil de búsqueda", "text", href="/alerts/" ~ alert.id ~ "?step=profile#propuesta") }}
+            </div>
+        </div>
+
+        {# ------------------------------------------------------------ 2. Perfil #}
+        {% elif step == "profile" %}
+        <form method="POST" action="/alerts/{{ alert.id }}/search-profile" data-once data-loading-text="Guardando…">
+            <p class="text-sm text-gray-500 mb-5">
+                Pregúntale qué busca{% if criteria %}; sale su perfil guardado, cámbialo si hace falta{% endif %}.
+                Al guardar queda registrado un seguimiento «Calificado» con estos datos.
+            </p>
+            {{ search_profile_fields(criteria, zones, cities, property_types,
+                                     business_type_fixed=(alert.business_type or "Sin operación"), prefix="sp") }}
+            <div class="mt-6 flex justify-end">
+                {{ ui.button("Guardar perfil y ver propiedades", "primary", type="submit", full_mobile=True) }}
+            </div>
+        </form>
+
+        {# ------------------------------------------------------------ 3. Propuesta #}
+        {% else %}
+        <div class="space-y-5">
+            {% if link_duplicate %}
+            {% set dup = link_duplicate.alerts[0] %}
+            {% set dup_text = "Alerta #" ~ dup.id ~ " del " ~ (dup.created_at | madrid_dt('%d/%m/%Y')) ~ ((" · " ~ dup.agent.name) if dup.agent else "") ~ ". Si la asocias igualmente, quedará anotado en esta alerta." %}
+            {% call ui.banner(alert.lead_name ~ " ya tiene una alerta abierta sobre " ~ link_duplicate.property.title, tone="amber", text=dup_text) %}
+                {% if is_admin or dup.agent_id == own_agent_id %}
+                {{ ui.button("Ver alerta #" ~ dup.id, "secondary", href="/alerts/" ~ dup.id, extra="px-3 py-2 text-xs border-amber-300 text-amber-800") }}
+                {% endif %}
+                <form method="POST" action="/alerts/{{ alert.id }}/link-property" data-once>
+                    <input type="hidden" name="property_id" value="{{ link_duplicate.property.id }}">
+                    <input type="hidden" name="confirm_duplicate" value="1">
+                    {{ ui.button("Asociar de todas formas", "warning", type="submit", extra="px-3 py-2 text-xs") }}
+                </form>
+            {% endcall %}
+            {% endif %}
+
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Perfil</span>
+                {% for part in criteria_parts %}
+                <span class="rounded-lg bg-gray-100 px-2.5 py-1 text-xs text-gray-700">{{ part }}</span>
+                {% else %}
+                {% if criteria %}<span class="text-xs text-gray-500">Sin filtros: se proponen todas las disponibles</span>{% endif %}
+                {% endfor %}
+                {% if criteria %}
+                <a href="/alerts/{{ alert.id }}?step=profile#propuesta" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Editar perfil</a>
+                {% endif %}
+            </div>
+
+            {% if not criteria %}
+            <div class="rounded-2xl border border-gray-200">
+                {% call ui.empty_state("Aún no hay perfil de búsqueda", "Toma su perfil para ver las propiedades sugeridas.") %}
+                {{ ui.button("Ir al perfil", "primary", href="/alerts/" ~ alert.id ~ "?step=profile#propuesta") }}
+                {% endcall %}
+            </div>
+            {% elif suggestions %}
+            <p class="text-sm text-gray-500">
+                {{ suggestions_total }} {{ "propiedad sugerida" if suggestions_total == 1 else "propiedades sugeridas" }} de la empresa, de cualquier agente
+                {% if suggestions_total > suggestions | length %} · se muestran las {{ suggestions | length }} más baratas; afina el perfil para ver otras{% endif %}
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {% for prop in suggestions %}
+                {% set is_current = alert.property_id == prop.id %}
+                {# Sin enlace "Ver" a la ficha de una propiedad de otro agente (datos del propietario) #}
+                {% call property_card(prop, show_link=(is_admin or prop.agent_id == own_agent_id), current=is_current) %}
+                    {% if not is_current %}
+                    <form method="POST" action="/alerts/{{ alert.id }}/link-property" data-once data-loading-text="Asociando…">
+                        <input type="hidden" name="property_id" value="{{ prop.id }}">
+                        {{ ui.button("Asociar a esta alerta", "primary", type="submit", extra="w-full") }}
+                    </form>
+                    {% endif %}
+                {% endcall %}
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="rounded-2xl border border-gray-200">
+                {% call ui.empty_state("No hay propiedades que encajen con su perfil", "Prueba a ampliar el precio o las zonas.") %}
+                {{ ui.button("Ajustar perfil", "secondary", href="/alerts/" ~ alert.id ~ "?step=profile#propuesta") }}
+                {% endcall %}
+            </div>
+            {% endif %}
+
+            <!-- ¿No está en la lista? Todas las disponibles de la empresa -->
+            <div class="pt-5 border-t border-gray-200">
+                <h3 class="text-sm font-semibold text-gray-900">¿No está en la lista?</h3>
+                <p class="text-xs text-gray-500 mt-1">Busca por título o dirección entre todas las propiedades disponibles de la empresa.</p>
+                <div class="relative mt-3">
+                    <label for="linkPropertySearch" class="sr-only">Buscar propiedad para asociar</label>
+                    <input type="search" id="linkPropertySearch" autocomplete="off"
+                        role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="linkPropertyResults"
+                        placeholder="Buscar propiedad…" class="{{ ui.input_class }}">
+                    <ul id="linkPropertyResults" role="listbox" aria-label="Propiedades encontradas"
+                        class="hidden absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-72 overflow-y-auto"></ul>
+                </div>
+
+                <!-- Propiedad elegida en el buscador: confirmación explícita antes de asociar -->
+                <form id="linkPropertyForm" method="POST" action="/alerts/{{ alert.id }}/link-property" data-once data-loading-text="Asociando…"
+                      class="hidden mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                    <input type="hidden" name="property_id" id="linkPropertyId">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0 text-sm">
+                            <p class="font-medium text-gray-900" id="linkPropertyTitle"></p>
+                            <p class="text-xs text-gray-600" id="linkPropertyMeta"></p>
+                        </div>
+                        <button type="button" id="linkPropertyClear" aria-label="Quitar"
+                            class="w-9 h-9 -mr-2 -my-1 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-blue-100 flex items-center justify-center shrink-0">
+                            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                    <div class="mt-3">
+                        {{ ui.button("Asociar a esta alerta", "primary", type="submit", full_mobile=True) }}
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <script>
+        // Buscador "¿No está en la lista?": /alerts/search-properties con alert_id
+        // devuelve todas las disponibles de la empresa para esta búsqueda.
+        (function () {
+            var input = document.getElementById('linkPropertySearch');
+            if (!input) return;
+            var list = document.getElementById('linkPropertyResults');
+            var form = document.getElementById('linkPropertyForm');
+            var hidden = document.getElementById('linkPropertyId');
+            var title = document.getElementById('linkPropertyTitle');
+            var meta = document.getElementById('linkPropertyMeta');
+            var alertId = {{ alert.id | tojson }};
+            var timer = null;
+            var items = [];
+            var activeIndex = -1;
+
+            function hide() {
+                list.classList.add('hidden');
+                list.textContent = '';
+                items = [];
+                activeIndex = -1;
+                input.setAttribute('aria-expanded', 'false');
+                input.removeAttribute('aria-activedescendant');
+            }
+
+            function message(text) {
+                list.textContent = '';
+                var li = document.createElement('li');
+                li.className = 'px-4 py-3 text-sm text-gray-500';
+                li.setAttribute('role', 'presentation');
+                li.textContent = text;
+                list.appendChild(li);
+                list.classList.remove('hidden');
+                items = [];
+                input.setAttribute('aria-expanded', 'true');
+            }
+
+            function render(results) {
+                items = results;
+                activeIndex = -1;
+                if (!results.length) { message('Sin coincidencias'); return; }
+                list.textContent = '';
+                results.forEach(function (p, i) {
+                    var li = document.createElement('li');
+                    li.id = 'linkPropertyOption' + i;
+                    li.setAttribute('role', 'option');
+                    li.setAttribute('aria-selected', 'false');
+                    li.dataset.index = i;
+                    li.className = 'link-property-option px-4 py-2 cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0';
+                    var t = document.createElement('p');
+                    t.className = 'text-sm font-medium text-gray-900';
+                    t.textContent = p.title;
+                    li.appendChild(t);
+                    var m = [p.address, p.city].filter(Boolean).join(' · ');
+                    if (m) {
+                        var pm = document.createElement('p');
+                        pm.className = 'text-xs text-gray-500';
+                        pm.textContent = m;
+                        li.appendChild(pm);
+                    }
+                    var a = document.createElement('p');
+                    a.className = 'text-xs text-gray-500';
+                    a.textContent = p.agent ? 'Agente: ' + p.agent : 'Sin agente captador';
+                    li.appendChild(a);
+                    list.appendChild(li);
+                });
+                list.classList.remove('hidden');
+                input.setAttribute('aria-expanded', 'true');
+            }
+
+            function highlight(index) {
+                var options = list.querySelectorAll('.link-property-option');
+                options.forEach(function (el, i) {
+                    el.classList.toggle('bg-blue-50', i === index);
+                    el.setAttribute('aria-selected', i === index ? 'true' : 'false');
+                });
+                if (options[index]) {
+                    options[index].scrollIntoView({ block: 'nearest' });
+                    input.setAttribute('aria-activedescendant', options[index].id);
+                }
+            }
+
+            function choose(p) {
+                hidden.value = p.id;
+                title.textContent = p.title;
+                meta.textContent = [p.address, p.city, p.agent ? 'Agente: ' + p.agent : ''].filter(Boolean).join(' · ');
+                form.classList.remove('hidden');
+                input.value = '';
+                hide();
+            }
+
+            document.getElementById('linkPropertyClear').addEventListener('click', function () {
+                hidden.value = '';
+                form.classList.add('hidden');
+                input.focus();
+            });
+
+            input.addEventListener('input', function () {
+                var term = input.value.trim();
+                clearTimeout(timer);
+                if (term.length < 2) { hide(); return; }
+                timer = setTimeout(function () {
+                    fetch('/alerts/search-properties?q=' + encodeURIComponent(term) + '&alert_id=' + encodeURIComponent(alertId))
+                        .then(function (r) { return r.ok ? r.json() : { results: [] }; })
+                        .then(function (data) { render(data.results || []); })
+                        .catch(function () { message('No se pudo buscar. Inténtalo de nuevo.'); });
+                }, 250);
+            });
+
+            input.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') { e.stopPropagation(); hide(); return; }
+                if (list.classList.contains('hidden') || !items.length) return;
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    activeIndex = (activeIndex + 1) % items.length;
+                    highlight(activeIndex);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    activeIndex = activeIndex <= 0 ? items.length - 1 : activeIndex - 1;
+                    highlight(activeIndex);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (activeIndex >= 0) choose(items[activeIndex]);
+                }
+            });
+
+            list.addEventListener('click', function (e) {
+                var option = e.target.closest('.link-property-option');
+                if (option) choose(items[Number(option.dataset.index)]);
+            });
+
+            document.addEventListener('click', function (e) {
+                if (!list.contains(e.target) && e.target !== input) hide();
+            });
+        })();
+        </script>
+        {% endif %}
+    </div>
+</section>

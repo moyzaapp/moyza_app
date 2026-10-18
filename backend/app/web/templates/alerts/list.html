@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "components/ui_macros.html" as ui %}
+{% import "components/phone_macros.html" as phone %}
 {% from "alerts/assign_fields.html" import assign_fields with context %}
 
 {% block title %}Compradores - {{ brand_name }}{% endblock %}
@@ -39,16 +40,6 @@
                     </svg>
                     Agregar alerta comprador
                 </button>
-                <button
-                    type="button"
-                    onclick="openFilterAlertModal()"
-                    class="bg-white text-gray-700 px-4 py-2.5 rounded-xl hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium border border-gray-300"
-                >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"></path>
-                    </svg>
-                    Agregar alerta con filtro
-                </button>
             </div>
         </div>
 
@@ -75,10 +66,10 @@
                 <div class="flex items-center justify-between">
                     <div>
                         <p class="text-sm text-gray-600">Pendientes</p>
-                        <p class="text-3xl font-bold text-yellow-600">{{ pending_count }}</p>
+                        <p class="text-3xl font-bold text-amber-600">{{ pending_count }}</p>
                     </div>
-                    <div class="bg-yellow-100 p-3 rounded-lg">
-                        <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div class="bg-amber-100 p-3 rounded-lg">
+                        <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                         </svg>
                     </div>
@@ -169,7 +160,7 @@
                 <label class="flex items-center gap-1.5 cursor-pointer">
                     <input type="checkbox" name="status_filter" value="PENDING"
                         {% if 'PENDING' in effective_statuses %}checked{% endif %}
-                        class="w-4 h-4 rounded text-yellow-500 border-gray-300 focus:ring-yellow-400">
+                        class="w-4 h-4 rounded text-amber-500 border-gray-300 focus:ring-amber-400">
                     <span class="text-sm text-gray-700">Pendiente</span>
                 </label>
                 <label class="flex items-center gap-1.5 cursor-pointer">
@@ -272,17 +263,27 @@
                                     </td>
                                     {% else %}
                                     <td class="px-6 py-4 text-sm text-gray-700">
+                                        {% if alert.property %}
                                         <div class="flex flex-col">
                                             <span class="font-medium">{{ alert.property.title }}</span>
                                             <span class="text-xs text-gray-500">{{ (alert.property.address or '').split(',')[0] }}</span>
                                         </div>
+                                        {% else %}
+                                        {# Alerta sin referencia (búsqueda general) aún sin propiedad (PLAN_ALERTA_SIN_REFERENCIA.md) #}
+                                        <div class="flex flex-col items-start gap-1">
+                                            {{ ui.badge("Búsqueda general", "gray") }}
+                                            {% if search_summaries.get(alert.id) %}
+                                            <span class="text-xs text-gray-500">{{ search_summaries[alert.id] }}</span>
+                                            {% endif %}
+                                        </div>
+                                        {% endif %}
                                     </td>
 
                                     <td class="px-6 py-4 text-sm text-gray-700">
                                         <div class="flex flex-col">
                                             <span class="font-medium">{{ alert.lead_name }}</span>
                                             {% if alert.lead_phone %}
-                                            <span class="text-xs text-gray-500">{{ alert.lead_phone }}</span>
+                                            <span class="text-xs text-gray-500">{{ alert.lead_phone | phone_display }}</span>
                                             {% endif %}
                                         </div>
                                     </td>
@@ -317,11 +318,19 @@
                                         {% else %}
                                         <span class="text-gray-400 text-xs">Sin iniciar</span>
                                         {% endif %}
+                                        {# Requiere atención: causa más grave en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md) #}
+                                        {% set attn = alert_attention.get(alert.id) %}
+                                        {% if attn %}
+                                        <div class="mt-2" title="Venció el {{ attn.due_label }}">
+                                            {{ ui.badge(attn.badge, "amber", dot=True, extra="whitespace-nowrap") }}
+                                            <span class="sr-only">, venció el {{ attn.due_label }}</span>
+                                        </div>
+                                        {% endif %}
                                     </td>
 
                                     <td class="px-6 py-4 text-center">
                                         {% if alert.status == AlertStatus.PENDING %}
-                                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
                                             Pendiente
                                         </span>
                                         {% elif alert.status == AlertStatus.IN_PROGRESS %}
@@ -339,8 +348,10 @@
                                         {% endif %}
                                     </td>
 
+                                    {# Creación para el admin; asignación para el agente (PLAN_ALERTA_COMO_NUEVA.md) #}
+                                    {% set shown_date = display_dates.get(alert.id) %}
                                     <td class="px-6 py-4 text-sm text-gray-600">
-                                        {{ alert.created_at | madrid_dt('%d/%m/%Y %H:%M') if alert.created_at else '-' }}
+                                        {{ shown_date | madrid_dt('%d/%m/%Y %H:%M') if shown_date else '-' }}
                                     </td>
 
                                     <td class="px-6 py-4 text-center">
@@ -358,7 +369,7 @@
                                                 data-alert-id="{{ alert.id }}"
                                                 data-agent-id="{{ alert.agent_id }}"
                                                 data-agent-name="{{ alert.agent.name if alert.agent else '' }}"
-                                                data-lead="{{ alert.lead_name }} · {{ alert.property.title }}"
+                                                data-lead="{{ alert.lead_name }} · {{ alert.property.title if alert.property else 'Búsqueda general' }}"
                                                 title="Reasignar" aria-label="Reasignar la alerta de {{ alert.lead_name }}">
                                                 <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
                                                 <span class="hidden sm:inline">Reasignar</span>
@@ -560,7 +571,7 @@
     <div class="p-6 space-y-4">
         {{ ui.field("name", "Nombre", required=True, id="cbName") }}
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {{ ui.field("phone", "Teléfono", type="tel", id="cbPhone", attrs='inputmode="tel"') }}
+            {{ phone.phone_field("phone_", id="cbPhone") }}
             {{ ui.field("email", "Email", type="email", id="cbEmail") }}
         </div>
         {{ ui.field("notes", "Notas", type="textarea", id="cbNotes") }}
@@ -641,14 +652,10 @@
                             <input type="text" name="buyer_name" id="buyerNameInput"
                                 class="{{ ui.input_class }} text-sm">
                         </div>
-                        <div class="grid grid-cols-2 gap-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {{ phone.phone_field("buyer_phone_", id="buyerPhoneInput") }}
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
-                                <input type="tel" name="buyer_phone" id="buyerPhoneInput"
-                                    class="{{ ui.input_class }} text-sm">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                                <label for="buyerEmailInput" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
                                 <input type="email" name="buyer_email" id="buyerEmailInput"
                                     class="{{ ui.input_class }} text-sm">
                             </div>
@@ -660,17 +667,52 @@
                     </div>
                 </div>
 
-                <!-- Propiedad -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        Propiedad <span class="text-red-500">*</span>
-                    </label>
-                    <div class="relative">
+                <!-- Propiedad: con referencia (un inmueble concreto) o sin referencia
+                     (búsqueda general; PLAN_ALERTA_SIN_REFERENCIA.md) -->
+                <fieldset class="space-y-3">
+                    <legend class="block text-sm font-medium text-gray-700 mb-2">Propiedad</legend>
+                    <div class="flex gap-3" role="group" aria-label="¿Llama por una propiedad concreta?">
+                        <button
+                            type="button"
+                            id="btnRefWith"
+                            aria-pressed="true"
+                            onclick="setReferenceMode('with')"
+                            class="flex-1 py-2 px-3 rounded-lg border-2 border-gray-900 bg-gray-900 text-white text-sm font-medium transition-colors"
+                        >
+                            Con referencia
+                        </button>
+                        <button
+                            type="button"
+                            id="btnRefWithout"
+                            aria-pressed="false"
+                            onclick="setReferenceMode('without')"
+                            class="flex-1 py-2 px-3 rounded-lg border-2 border-gray-200 bg-white text-gray-600 text-sm font-medium transition-colors hover:border-gray-300"
+                        >
+                            Sin referencia
+                        </button>
+                    </div>
+
+                    <!-- Sin referencia: búsqueda general -->
+                    <div id="panelRefWithout" class="hidden space-y-2">
+                        <p class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
+                            Búsqueda general: al llamarle tomarás su perfil (zona, tipo, habitaciones, precio) y le propondrás propiedades de toda la empresa.
+                        </p>
+                        {% if not is_admin %}
+                        <p class="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
+                            <svg class="w-5 h-5 shrink-0 text-gray-500" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
+                            <span>Se te asignará a ti</span>
+                        </p>
+                        {% endif %}
+                    </div>
+
+                    <!-- Con referencia: buscador de propiedad -->
+                    <div id="panelRefWith" class="relative">
+                        <label for="propertySearch" class="sr-only">Buscar propiedad</label>
                         <input
                             type="text"
                             id="propertySearch"
                             autocomplete="off"
-                            placeholder="Escribe el nombre, dirección o ciudad..."
+                            placeholder="{{ 'Escribe el nombre, dirección o ciudad...' if is_admin else 'Busca entre tus propiedades asignadas...' }}"
                             class="{{ ui.input_class }}"
                         >
                         <input type="hidden" name="property_id" id="propertyId" required>
@@ -692,12 +734,14 @@
                             class="hidden absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                         </ul>
                     </div>
-                </div>
+                </fieldset>
 
-                <!-- Agente asignado: aparece al elegir la propiedad (el admin puede cambiarlo) -->
+                <!-- Agente asignado: aparece al elegir la propiedad (el admin puede cambiarlo)
+                     o, sin referencia, para que el admin elija quién atiende al comprador -->
                 {{ assign_fields("ca", groups=assignable_groups, is_admin=is_admin) }}
 
-                <!-- Aviso: ya existe una alerta para este comprador y esta propiedad -->
+                <!-- Aviso: ya existe una alerta para este comprador y esta propiedad
+                     (o, sin referencia, una búsqueda abierta con la misma operación) -->
                 <div id="dupBanner" class="hidden"></div>
                 <input type="hidden" name="confirm_duplicate" id="confirmDuplicate">
 
@@ -753,6 +797,7 @@
 
 <script src="/static/js/alert-duplicates.js"></script>
 <script src="/static/js/alert-assign.js"></script>
+<script src="/static/js/phone-field.js"></script>
 {% if is_admin %}
 <script>
 // ---- Reasignar desde el listado (un modal para todas las filas, solo admin) ----
@@ -789,45 +834,41 @@ function openCreateAlertModal() {
 function closeCreateAlertModal() {
     UI.closeModal('createAlertModal');
 }
-function openFilterAlertModal() {
-    setFcBuyerMode('existing');
-    UI.openModal('filterAlertModal');
-}
-function closeFilterAlertModal() {
-    UI.closeModal('filterAlertModal');
-}
-// Modo comprador del modal "Agregar alerta con filtro" (existente / nuevo)
-var fcBuyerMode = 'existing';
+// ---- Propiedad: con referencia / sin referencia (búsqueda general) ----
+var referenceMode = 'with';
 
-function setFcBuyerMode(mode) {
-    fcBuyerMode = mode;
-    var panelExisting = document.getElementById('fcPanelExisting');
-    var panelNew = document.getElementById('fcPanelNew');
-    var btnExisting = document.getElementById('fcBtnExisting');
-    var btnNew = document.getElementById('fcBtnNew');
-    // El buyer_id lo rellena el autocompletado; en modo "nuevo" no se envía
-    var hiddenEl = document.getElementById('fcBuyerIdHidden');
-    var nameEl = document.getElementById('fcBuyerName');
-    if (mode === 'existing') {
-        panelExisting.classList.remove('hidden');
-        panelNew.classList.add('hidden');
-        btnExisting.classList.add('border-gray-900', 'bg-gray-900', 'text-white');
-        btnExisting.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
-        btnNew.classList.remove('border-gray-900', 'bg-gray-900', 'text-white');
-        btnNew.classList.add('border-gray-200', 'bg-white', 'text-gray-600');
-        if (hiddenEl) hiddenEl.setAttribute('name', 'buyer_id');
-        if (nameEl) nameEl.removeAttribute('required');
+function setReferenceMode(mode) {
+    referenceMode = mode;
+    var btnWith = document.getElementById('btnRefWith');
+    var btnWithout = document.getElementById('btnRefWithout');
+    var panelWith = document.getElementById('panelRefWith');
+    var panelWithout = document.getElementById('panelRefWithout');
+    var hidden = document.getElementById('propertyId');
+    var on = ['border-gray-900', 'bg-gray-900', 'text-white'];
+    var off = ['border-gray-200', 'bg-white', 'text-gray-600'];
+    var active = mode === 'with' ? btnWith : btnWithout;
+    var inactive = mode === 'with' ? btnWithout : btnWith;
+
+    on.forEach(function (c) { active.classList.add(c); inactive.classList.remove(c); });
+    off.forEach(function (c) { inactive.classList.add(c); active.classList.remove(c); });
+    active.setAttribute('aria-pressed', 'true');
+    inactive.setAttribute('aria-pressed', 'false');
+    panelWith.classList.toggle('hidden', mode !== 'with');
+    panelWithout.classList.toggle('hidden', mode === 'with');
+
+    if (mode === 'without') {
+        // Sin propiedad: no se envía property_id y el admin elige el agente
+        if (window.clearPropertySelection) window.clearPropertySelection(true);
+        hidden.removeAttribute('name');
+        hidden.removeAttribute('required');
+        if (window.caAssign) window.caAssign.setSearch();
     } else {
-        panelExisting.classList.add('hidden');
-        panelNew.classList.remove('hidden');
-        btnNew.classList.add('border-gray-900', 'bg-gray-900', 'text-white');
-        btnNew.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
-        btnExisting.classList.remove('border-gray-900', 'bg-gray-900', 'text-white');
-        btnExisting.classList.add('border-gray-200', 'bg-white', 'text-gray-600');
-        if (hiddenEl) hiddenEl.removeAttribute('name');
-        if (window.clearFcBuyerSelection) window.clearFcBuyerSelection();
-        if (nameEl) nameEl.setAttribute('required', 'required');
+        hidden.setAttribute('name', 'property_id');
+        hidden.setAttribute('required', 'required');
+        if (window.caAssign) window.caAssign.clear();
     }
+
+    if (window.alertDupRefresh) window.alertDupRefresh();
 }
 
 // ---- Modo comprador (existente / nuevo) ----
@@ -907,7 +948,7 @@ function setBuyerMode(mode) {
         }
 
         list.innerHTML = results.map(function (b, i) {
-            const meta = [b.phone, b.email].filter(Boolean).join(' · ');
+            const meta = [b.phone_display || b.phone, b.email].filter(Boolean).join(' · ');
             return '<li data-index="' + i + '" class="buyer-option px-4 py-2 cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0">'
                 + '<p class="text-sm font-medium text-gray-800">' + escapeHtml(b.name) + '</p>'
                 + (meta ? '<p class="text-xs text-gray-500">' + escapeHtml(meta) + '</p>' : '')
@@ -929,7 +970,7 @@ function setBuyerMode(mode) {
         input.classList.add('hidden');
 
         selectedName.textContent = buyer.name;
-        selectedMeta.textContent = [buyer.phone, buyer.email].filter(Boolean).join(' · ');
+        selectedMeta.textContent = [buyer.phone_display || buyer.phone, buyer.email].filter(Boolean).join(' · ');
         selected.classList.remove('hidden');
 
         hideResults();
@@ -999,6 +1040,8 @@ function setBuyerMode(mode) {
     const selectedMeta = document.getElementById('propertySelectedMeta');
     const form = document.getElementById('createAlertForm');
     const assign = window.AlertAssign ? AlertAssign.init('ca') : null;
+    // Lo usa setReferenceMode (modo "Sin referencia")
+    window.caAssign = assign;
 
     let timer = null;
     let items = [];
@@ -1058,12 +1101,15 @@ function setBuyerMode(mode) {
         if (window.alertDupRefresh) window.alertDupRefresh();
     }
 
-    window.clearPropertySelection = function () {
+    // silent: al pasar a "Sin referencia" (sin foco ni refresco: lo hace setReferenceMode)
+    window.clearPropertySelection = function (silent) {
         hidden.value = '';
-        if (assign) assign.clear();
         selected.classList.add('hidden');
         input.classList.remove('hidden');
         input.value = '';
+        hideResults();
+        if (silent === true) return;
+        if (assign) assign.clear();
         input.focus();
         if (window.alertDupRefresh) window.alertDupRefresh();
     };
@@ -1107,9 +1153,9 @@ function setBuyerMode(mode) {
         if (!list.contains(e.target) && e.target !== input) hideResults();
     });
 
-    // Validar que se seleccionó una propiedad y un comprador antes de enviar
+    // Validar que se seleccionó una propiedad (con referencia) y un comprador antes de enviar
     form.addEventListener('submit', function (e) {
-        if (!hidden.value) {
+        if (referenceMode === 'with' && !hidden.value) {
             e.preventDefault();
             input.classList.remove('hidden');
             input.focus();
@@ -1142,7 +1188,10 @@ function setBuyerMode(mode) {
     const confirmNewBuyer = document.getElementById('confirmNewBuyer');
     const submitBtn = document.getElementById('createAlertSubmit');
     const phoneInput = document.getElementById('buyerPhoneInput');
+    const phoneCountry = document.getElementById('buyerPhoneInput_country');
+    const phoneField = phoneInput.closest('[data-phone-field]');
     const emailInput = document.getElementById('buyerEmailInput');
+    const businessTypeSelect = document.getElementById('alertBusinessType');
 
     let alertRequest = 0;   // descarta respuestas de consultas antiguas
     let buyerRequest = 0;
@@ -1171,11 +1220,37 @@ function setBuyerMode(mode) {
         }
     }
 
-    // Comprador existente + propiedad: ¿ya hay alerta?
+    // Comprador existente + propiedad: ¿ya hay alerta? Sin referencia: ¿ya tiene
+    // una búsqueda abierta con esa operación?
     window.alertDupRefresh = function () {
         const requestId = ++alertRequest;
         const buyerId = buyerHidden.value;
         const propertyId = propertyHidden.value;
+        const businessType = businessTypeSelect.value;
+
+        if (referenceMode === 'without') {
+            if (currentBuyerMode !== 'existing' || !buyerId || !businessType) {
+                hasOpenDuplicate = false;
+                AlertDuplicates.renderAlertBanner(dupBanner, null);
+                refreshBuyerMatch();
+                return;
+            }
+            AlertDuplicates.checkSearch(buyerId, businessType).then(function (data) {
+                if (requestId !== alertRequest) return;
+                hasOpenDuplicate = AlertDuplicates.renderAlertBanner(dupBanner, data, {
+                    forceLabel: 'Crear de todas formas',
+                    allowRegisterContact: {{ is_admin | tojson }},
+                    getContactPayload: contactPayload,
+                    openTitle: function (alerts) {
+                        var first = alerts[0];
+                        var day = (first.created_at || '').slice(0, 5);
+                        return 'Ya tiene una búsqueda de ' + businessType + ' abierta: #' + first.id + (day ? ', ' + day : '');
+                    }
+                });
+                updateSubmit();
+            });
+            return;
+        }
 
         if (currentBuyerMode !== 'existing' || !buyerId || !propertyId) {
             hasOpenDuplicate = false;
@@ -1198,7 +1273,8 @@ function setBuyerMode(mode) {
     // Comprador nuevo: ¿ya existe alguien con ese teléfono o correo?
     function refreshBuyerMatch() {
         const requestId = ++buyerRequest;
-        const phone = (phoneInput.value || '').trim();
+        // Indicativo + dígitos (PLAN_TELEFONO_COMPRADOR.md §2.3): el servidor compara por sufijo
+        const phone = window.PhoneField ? PhoneField.compose(phoneField) : (phoneInput.value || '').trim();
         const email = (emailInput.value || '').trim();
 
         if (currentBuyerMode !== 'new' || (!phone && !email)) {
@@ -1229,218 +1305,11 @@ function setBuyerMode(mode) {
         });
         el.addEventListener('blur', refreshBuyerMatch);
     });
+    phoneCountry.addEventListener('change', refreshBuyerMatch);
+    // La operación cuenta para el aviso de búsqueda ya abierta
+    businessTypeSelect.addEventListener('change', function () { window.alertDupRefresh(); });
 })();
 </script>
-<!-- Modal: Agregar alerta con filtro (comprador + criterios de búsqueda) -->
-{% call ui.modal("filterAlertModal", "Agregar alerta con filtro", size="3xl", subtitle="Registra el comprador y sus criterios de búsqueda. Al guardar verás las propiedades compatibles.") %}
-        <form method="POST" action="/buyers/create-with-criteria" id="filterAlertForm" data-once>
-            <div class="p-6 space-y-6">
-
-                <!-- Sección comprador -->
-                <div class="bg-gray-50 rounded-xl p-4 space-y-4">
-                    <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide">Comprador</h3>
-                    <div class="flex gap-3">
-                        <button type="button" id="fcBtnExisting" onclick="setFcBuyerMode('existing')"
-                            class="flex-1 py-2 px-3 rounded-lg border-2 border-gray-900 bg-gray-900 text-white text-sm font-medium transition-colors">
-                            Comprador existente
-                        </button>
-                        <button type="button" id="fcBtnNew" onclick="setFcBuyerMode('new')"
-                            class="flex-1 py-2 px-3 rounded-lg border-2 border-gray-200 bg-white text-gray-600 text-sm font-medium transition-colors hover:border-gray-300">
-                            Nuevo comprador
-                        </button>
-                    </div>
-
-                    <!-- Comprador existente: autocompletado contra /alerts/search-buyers
-                         (mismo patrón que "Agregar alerta comprador"; no se precargan todos) -->
-                    <div id="fcPanelExisting">
-                        <div class="relative">
-                            <input
-                                type="text"
-                                id="fcBuyerSearch"
-                                autocomplete="off"
-                                role="combobox"
-                                aria-autocomplete="list"
-                                aria-expanded="false"
-                                aria-controls="fcBuyerResults"
-                                aria-label="Buscar comprador"
-                                placeholder="Buscar por nombre, teléfono o email..."
-                                class="{{ ui.input_class }} text-sm"
-                            >
-                            <input type="hidden" name="buyer_id" id="fcBuyerIdHidden">
-
-                            <!-- Comprador seleccionado -->
-                            <div id="fcBuyerSelected" class="hidden mt-2 flex items-start justify-between gap-3 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                                <div class="text-sm">
-                                    <p class="font-medium text-gray-800" id="fcBuyerSelectedName"></p>
-                                    <p class="text-xs text-gray-600" id="fcBuyerSelectedMeta"></p>
-                                </div>
-                                <button type="button" onclick="clearFcBuyerSelection()" aria-label="Quitar comprador"
-                                    class="w-9 h-9 -mr-2 -my-1 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-blue-100 flex items-center justify-center shrink-0">
-                                    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
-                                </button>
-                            </div>
-
-                            <ul id="fcBuyerResults" role="listbox" aria-label="Compradores encontrados"
-                                class="hidden absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                            </ul>
-                        </div>
-                    </div>
-
-                    <div id="fcPanelNew" class="hidden space-y-3">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Nombre <span class="text-red-500">*</span></label>
-                            <input type="text" name="buyer_name" id="fcBuyerName"
-                                class="{{ ui.input_class }} text-sm">
-                        </div>
-                        <div class="grid grid-cols-2 gap-3">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
-                                <input type="tel" name="buyer_phone"
-                                    class="{{ ui.input_class }} text-sm">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                                <input type="email" name="buyer_email"
-                                    class="{{ ui.input_class }} text-sm">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Criterios de búsqueda -->
-                <div>
-                    <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Criterios de búsqueda</h3>
-
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
-
-                        <!-- Ubicación -->
-                        <div class="space-y-4">
-                            {% if zones %}
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Zonas</label>
-                                <div class="border border-gray-200 rounded-lg p-3 max-h-36 overflow-y-auto space-y-1.5 bg-white">
-                                    {% for zone in zones %}
-                                    <label class="flex items-center gap-2 cursor-pointer">
-                                        <input type="checkbox" name="zones" value="{{ zone }}"
-                                            class="w-4 h-4 text-gray-900 border-gray-300 rounded focus:ring-gray-900/30">
-                                        <span class="text-sm text-gray-700">{{ zone }}</span>
-                                    </label>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                            {% endif %}
-                            {% if cities %}
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Ciudades</label>
-                                <div class="border border-gray-200 rounded-lg p-3 max-h-36 overflow-y-auto space-y-1.5 bg-white">
-                                    {% for city in cities %}
-                                    <label class="flex items-center gap-2 cursor-pointer">
-                                        <input type="checkbox" name="cities" value="{{ city }}"
-                                            class="w-4 h-4 text-gray-900 border-gray-300 rounded focus:ring-gray-900/30">
-                                        <span class="text-sm text-gray-700">{{ city }}</span>
-                                    </label>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                            {% endif %}
-                        </div>
-
-                        <!-- Tipo + habitaciones -->
-                        <div class="space-y-3">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Tipo de inmueble</label>
-                                <select name="property_type"
-                                    class="{{ ui.input_class }}">
-                                    <option value="">Cualquier tipo</option>
-                                    {% for pt in property_types %}
-                                    <option value="{{ pt }}">{{ pt }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div>
-                                <label for="filterBusinessType" class="block text-sm font-medium text-gray-700 mb-1">
-                                    Operación <span class="text-red-500" aria-hidden="true">*</span>
-                                </label>
-                                <select name="business_type" id="filterBusinessType" required
-                                    class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500">
-                                    <option value="" disabled selected>Selecciona…</option>
-                                    {% for bt in BusinessType.values() %}
-                                    <option value="{{ bt }}">{{ bt }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="grid grid-cols-2 gap-2">
-                                <div>
-                                    <label class="block text-xs font-medium text-gray-600 mb-1">Dorm. mín.</label>
-                                    <input type="number" name="min_bedrooms" min="0" max="20" placeholder="–"
-                                        class="{{ ui.input_class }}">
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-medium text-gray-600 mb-1">Dorm. máx.</label>
-                                    <input type="number" name="max_bedrooms" min="0" max="20" placeholder="–"
-                                        class="{{ ui.input_class }}">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600 mb-1">Baños mín.</label>
-                                <input type="number" name="min_bathrooms" min="0" max="10" placeholder="–"
-                                    class="{{ ui.input_class }}">
-                            </div>
-                        </div>
-
-                        <!-- Precio + m² + agente + notas -->
-                        <div class="space-y-3">
-                            <div class="grid grid-cols-2 gap-2">
-                                <div>
-                                    <label class="block text-xs font-medium text-gray-600 mb-1">Precio mín. €</label>
-                                    <input type="number" name="min_price" min="0" step="1000" placeholder="–"
-                                        class="{{ ui.input_class }}">
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-medium text-gray-600 mb-1">Precio máx. €</label>
-                                    <input type="number" name="max_price" min="0" step="1000" placeholder="–"
-                                        class="{{ ui.input_class }}">
-                                </div>
-                            </div>
-                            <div class="grid grid-cols-2 gap-2">
-                                <div>
-                                    <label class="block text-xs font-medium text-gray-600 mb-1">m² mín.</label>
-                                    <input type="number" name="min_m2" min="0" placeholder="–"
-                                        class="{{ ui.input_class }}">
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-medium text-gray-600 mb-1">m² máx.</label>
-                                    <input type="number" name="max_m2" min="0" placeholder="–"
-                                        class="{{ ui.input_class }}">
-                                </div>
-                            </div>
-                            {% if is_admin %}
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Agente responsable</label>
-                                <select name="agent_id"
-                                    class="{{ ui.input_class }}">
-                                    <option value="">Sin asignar</option>
-                                    {% for agent in agents %}
-                                    <option value="{{ agent.id }}">{{ agent.name }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            {% endif %}
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Imprescindibles</label>
-                                <textarea name="notes" rows="3" placeholder="Ej: planta baja, piscina, sin reformar..."
-                                    class="{{ ui.input_class }} resize-none"></textarea>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-
-            {{ ui.modal_footer(submit_label="Guardar y ver compatibles") }}
-        </form>
-{% endcall %}
-
 <script>
 // ---- Filtros de alertas: buscar texto desde la vista por defecto ----
 // En la vista por defecto, Pendiente y En Proceso salen marcadas solo para
@@ -1460,154 +1329,6 @@ function setBuyerMode(mode) {
         if (touched || !q || !q.value.trim()) return;
         boxes.forEach(function (box) { box.checked = false; });
     });
-})();
-
-// ---- Autocompletado de compradores del modal "Agregar alerta con filtro" ----
-// Mismo patrón que el de "Agregar alerta comprador" (/alerts/search-buyers),
-// en vez de un <select> con todos los compradores de la empresa.
-(function () {
-    var input = document.getElementById('fcBuyerSearch');
-    if (!input) return;
-    var hidden = document.getElementById('fcBuyerIdHidden');
-    var list = document.getElementById('fcBuyerResults');
-    var selected = document.getElementById('fcBuyerSelected');
-    var selectedName = document.getElementById('fcBuyerSelectedName');
-    var selectedMeta = document.getElementById('fcBuyerSelectedMeta');
-    var form = document.getElementById('filterAlertForm');
-
-    var timer = null;
-    var items = [];
-    var activeIndex = -1;
-
-    function escapeHtml(text) {
-        var div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    function hideResults() {
-        list.classList.add('hidden');
-        list.innerHTML = '';
-        items = [];
-        activeIndex = -1;
-        input.setAttribute('aria-expanded', 'false');
-        input.removeAttribute('aria-activedescendant');
-    }
-
-    function showMessage(text) {
-        list.innerHTML = '<li class="px-4 py-3 text-sm text-gray-500" role="presentation">' + escapeHtml(text) + '</li>';
-        list.classList.remove('hidden');
-        items = [];
-        activeIndex = -1;
-        input.setAttribute('aria-expanded', 'true');
-    }
-
-    function renderResults(results) {
-        items = results;
-        activeIndex = -1;
-
-        if (!results.length) {
-            showMessage('Sin coincidencias');
-            return;
-        }
-
-        list.innerHTML = results.map(function (b, i) {
-            var meta = [b.phone, b.email].filter(Boolean).join(' · ');
-            return '<li id="fcBuyerOption' + i + '" role="option" aria-selected="false" data-index="' + i + '" class="fc-buyer-option px-4 py-2 cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0">'
-                + '<p class="text-sm font-medium text-gray-800">' + escapeHtml(b.name) + '</p>'
-                + (meta ? '<p class="text-xs text-gray-500">' + escapeHtml(meta) + '</p>' : '')
-                + '</li>';
-        }).join('');
-
-        list.classList.remove('hidden');
-        input.setAttribute('aria-expanded', 'true');
-    }
-
-    function highlight(index) {
-        var options = list.querySelectorAll('.fc-buyer-option');
-        options.forEach(function (el, i) {
-            el.classList.toggle('bg-blue-50', i === index);
-            el.setAttribute('aria-selected', i === index ? 'true' : 'false');
-        });
-        if (options[index]) {
-            options[index].scrollIntoView({ block: 'nearest' });
-            input.setAttribute('aria-activedescendant', options[index].id);
-        }
-    }
-
-    function selectBuyer(buyer) {
-        hidden.value = buyer.id;
-        input.value = '';
-        input.classList.add('hidden');
-
-        selectedName.textContent = buyer.name;
-        selectedMeta.textContent = [buyer.phone, buyer.email].filter(Boolean).join(' · ');
-        selected.classList.remove('hidden');
-
-        hideResults();
-    }
-
-    window.clearFcBuyerSelection = function () {
-        hidden.value = '';
-        selected.classList.add('hidden');
-        input.classList.remove('hidden');
-        input.value = '';
-        hideResults();
-        if (fcBuyerMode === 'existing') input.focus();
-    };
-
-    input.addEventListener('input', function () {
-        var term = input.value.trim();
-        clearTimeout(timer);
-        if (term.length < 2) { hideResults(); return; }
-        timer = setTimeout(function () {
-            fetch('/alerts/search-buyers?q=' + encodeURIComponent(term))
-                .then(function (r) { return r.ok ? r.json() : { results: [] }; })
-                .then(function (data) { renderResults(data.results || []); })
-                .catch(function () { showMessage('No se pudo buscar. Intenta de nuevo.'); });
-        }, 250);
-    });
-
-    input.addEventListener('keydown', function (e) {
-        if (list.classList.contains('hidden') || !items.length) return;
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            activeIndex = (activeIndex + 1) % items.length;
-            highlight(activeIndex);
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            activeIndex = activeIndex <= 0 ? items.length - 1 : activeIndex - 1;
-            highlight(activeIndex);
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            if (activeIndex >= 0) selectBuyer(items[activeIndex]);
-        } else if (e.key === 'Escape') {
-            // Solo cierra la lista; el siguiente Escape cierra el modal
-            e.stopPropagation();
-            hideResults();
-        }
-    });
-
-    list.addEventListener('click', function (e) {
-        var option = e.target.closest('.fc-buyer-option');
-        if (option) selectBuyer(items[Number(option.dataset.index)]);
-    });
-
-    document.addEventListener('click', function (e) {
-        if (!list.contains(e.target) && e.target !== input) hideResults();
-    });
-
-    // En modo "existente" hay que elegir un comprador de la lista antes de enviar
-    if (form) {
-        form.addEventListener('submit', function (e) {
-            if (fcBuyerMode === 'existing' && !hidden.value) {
-                e.preventDefault();
-                input.classList.remove('hidden');
-                input.focus();
-                showMessage('Selecciona un comprador de la lista o cambia a "Nuevo comprador"');
-            }
-        });
-    }
 })();
 </script>
 

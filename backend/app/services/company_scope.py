@@ -2,9 +2,11 @@
 
 Punto único para restringir consultas a la empresa activa. Reglas:
 
-- `properties` y `buyers` tienen `company_id` directo.
+- `properties`, `buyers` y `property_alerts` tienen `company_id` directo (las
+  alertas desde PLAN_ALERTA_SIN_REFERENCIA.md: una búsqueda general puede no
+  tener propiedad todavía).
 - `agents` y `clients` pertenecen a N empresas (tablas de pertenencia).
-- Alertas, visitas, informes y logs heredan la empresa de su propiedad.
+- Visitas, informes y logs heredan la empresa de su propiedad.
 
 Se usan EXISTS (`.has()` / `.any()`) en lugar de JOIN para que el filtro
 se pueda añadir a cualquier consulta sin chocar con joins ya existentes.
@@ -43,7 +45,9 @@ def scope_clients(query, company_id: int):
 
 
 def scope_alerts(query, company_id: int):
-    return query.filter(PropertyAlert.property.has(Property.company_id == company_id))
+    # Columna propia de la alerta: incluye las búsquedas sin propiedad y evita
+    # el EXISTS sobre properties
+    return query.filter(PropertyAlert.company_id == company_id)
 
 
 def scope_visits(query, company_id: int):
@@ -100,9 +104,16 @@ def property_in_company(property_item, company_id: int) -> bool:
 
 
 def child_in_company(obj, company_id: int) -> bool:
-    """Para alertas, visitas e informes: la empresa es la de su propiedad."""
+    """Para alertas, visitas e informes.
+
+    Las alertas tienen empresa propia (pueden no tener propiedad); visitas e
+    informes heredan la de su propiedad.
+    """
     if obj is None:
         return False
+    own_company_id = getattr(obj, "company_id", None)
+    if own_company_id is not None:
+        return own_company_id == company_id
     return property_in_company(getattr(obj, "property", None), company_id)
 
 

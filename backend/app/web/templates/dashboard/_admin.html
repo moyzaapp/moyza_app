@@ -142,7 +142,7 @@
         <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
             <h2 id="attentionTitle" class="text-lg font-bold text-gray-900">Requiere atención</h2>
             {% if home.pending_by_agent %}
-            <button type="button" data-modal-open="pendingBuyersModal" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Compradores sin gestión</button>
+            <button type="button" data-modal-open="pendingBuyersModal" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Compradores sin atender</button>
             {% endif %}
         </header>
         {% if home.attention %}
@@ -178,8 +178,8 @@
 {# ---------------------------------------------------------------- Ventana de compradores sin atender (§3.4) #}
 {% if home.pending_by_agent %}
 {% set total = home.pending_by_agent | sum(attribute='count') %}
-{% call ui.modal("pendingBuyersModal", "Compradores sin atender", size="lg",
-                 subtitle=(total ~ (" comprador lleva" if total == 1 else " compradores llevan") ~ " más de " ~ buyer_reminder_hours ~ " h sin gestión")) %}
+{% call ui.modal("pendingBuyersModal", "Compradores que requieren atención", size="lg",
+                 subtitle=(total ~ (" comprador" if total == 1 else " compradores") ~ " sin gestión en " ~ buyer_reminder_hours ~ " h hábiles o sin pasar de Primera Llamada")) %}
 <div data-dismiss-daily="pending_buyers_dismissed">
     <div class="p-6">
     <ul class="divide-y divide-gray-100 -my-2">
@@ -187,7 +187,7 @@
         <li class="py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
             <div class="min-w-0 flex-1">
                 <p class="text-sm font-medium text-gray-900 truncate">{{ g.agent_name }}</p>
-                <p class="text-xs text-gray-500">{{ g.count }} {{ 'comprador' if g.count == 1 else 'compradores' }} · el más antiguo, <span class="font-medium text-red-700">{{ g.oldest_hours }} h</span></p>
+                <p class="text-xs text-gray-500">{{ g.summary }} · el más antiguo, <span class="font-medium text-red-700">{{ g.oldest_label }} hábiles</span></p>
             </div>
             {{ ui.button("Ver compradores", "secondary", href="/alerts?agent_id=" ~ g.agent_id, full_mobile=True) }}
         </li>

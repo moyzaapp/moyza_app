@@ -665,6 +665,12 @@ async def complete_visit_page(
         set_flash(response, "warning", "Debe firmar antes de continuar")
         return response
 
+    # Visita conjunta: los agentes confirman sus firmas antes de finalizar
+    if visit.visit_status == 'signed' and not visit.can_finalize_agents:
+        response = RedirectResponse(url=f"/visits/agent-signatures/{visit_id}", status_code=302)
+        set_flash(response, "warning", "Confirma las firmas de los agentes antes de finalizar la visita")
+        return response
+
     return templates.TemplateResponse(
         request=request,
         name="visits/complete.html",
@@ -675,6 +681,138 @@ async def complete_visit_page(
             "current_user": request.state.user
         }
     )
+
+
+@router.get("/visits/agent-signatures/{visit_id}", response_class=HTMLResponse)
+async def agent_signatures_page(
+    visit_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Confirmación de las firmas registradas de los dos agentes en una visita
+    conjunta, tras la firma del cliente (PLAN_FIRMA_AGENTES_VISITA.md §3.2).
+    Las visitas individuales no pasan por aquí.
+    """
+    company_id = get_active_company(request).id
+    visit = get_visit_in_company(db, visit_id, company_id)
+
+    if not visit:
+        response = RedirectResponse(url="/visits", status_code=302)
+        set_flash(response, "error", "Visita no encontrada")
+        return response
+
+    if visit.visit_status == 'completed':
+        response = RedirectResponse(url=f"/properties/{visit.property_id}", status_code=302)
+        set_flash(response, "info", "Esta visita ya está finalizada")
+        return response
+
+    if visit.visit_status != 'signed' or not visit.signature_filepath:
+        response = RedirectResponse(url=f"/visits/signature/{visit_id}", status_code=302)
+        set_flash(response, "warning", "El cliente debe firmar antes de confirmar las firmas de los agentes")
+        return response
+
+    if not visit.requires_agent_confirmation:
+        return RedirectResponse(url=f"/visits/complete/{visit_id}", status_code=302)
+
+    current_user = request.state.user
+    current_agent = get_agent_from_user(current_user, db)
+    admin = bool(is_admin(current_user))
+
+    def agent_card(agent, role_label):
+        return {
+            "agent": agent,
+            "role_label": role_label,
+            "has_signature": agent.has_signature_file,
+            # El agente registra su propia firma; el admin, la de cualquiera
+            # (upload_agent_signature), desde Agentes de su empresa activa
+            "can_register": admin or (current_agent is not None and current_agent.id == agent.id),
+            "in_active_company": any(c.id == company_id for c in agent.companies),
+            "companies": ", ".join(c.name for c in agent.companies),
+        }
+
+    cards = [
+        agent_card(agent, role_label)
+        for agent, role_label in (
+            (visit.signing_agent, "Agente inmobiliario"),
+            (visit.companion_agent, "Agente acompañante"),
+        )
+        if agent is not None
+    ]
+
+    return templates.TemplateResponse(
+        request=request,
+        name="visits/agent_signatures.html",
+        context={
+            "request": request,
+            "visit": visit,
+            "property": visit.property,
+            "cards": cards,
+            "missing_agents": visit.agents_missing_signature,
+            "is_admin": admin,
+            "current_user": current_user
+        }
+    )
+
+
+@router.post("/visits/{visit_id}/remove-companion")
+async def remove_companion(
+    visit_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Quita al acompañante antes de confirmar las firmas de los agentes: la
+    visita pasa a individual (decisión 4 de PLAN_FIRMA_AGENTES_VISITA.md).
+    """
+    from app.services.visit_audit_service import log_visit_event
+
+    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
+
+    if not visit:
+        response = RedirectResponse(url="/visits", status_code=302)
+        set_flash(response, "error", "Visita no encontrada")
+        return response
+
+    step_url = f"/visits/agent-signatures/{visit_id}"
+
+    if visit.visit_status != 'signed' or not visit.requires_agent_confirmation:
+        response = RedirectResponse(url=step_url, status_code=302)
+        set_flash(response, "error", "Solo se puede quitar al acompañante tras la firma del cliente y antes de finalizar")
+        return response
+
+    if visit.agent_signatures_confirmed:
+        response = RedirectResponse(url=step_url, status_code=302)
+        set_flash(response, "error", "Las firmas de los agentes ya están confirmadas: no se puede quitar al acompañante")
+        return response
+
+    removed_id = visit.companion_agent_id
+    removed_name = visit.companion_agent.name if visit.companion_agent else "El acompañante"
+
+    try:
+        visit.companion_agent_id = None
+        db.commit()
+
+        log_visit_event(
+            visit=visit,
+            event_type='companion_removed_before_confirmation',
+            db=db,
+            request=request,
+            event_data={
+                'agent_id': visit.agent_id,
+                'companion_agent_id': removed_id,
+            }
+        )
+    except Exception:
+        db.rollback()
+        logger.exception("Error quitando el acompañante de la visita: visit_id=%s", visit_id)
+        response = RedirectResponse(url=step_url, status_code=302)
+        set_flash(response, "error", "No se pudo quitar al acompañante. Inténtalo de nuevo")
+        return response
+
+    response = RedirectResponse(url=f"/visits/complete/{visit_id}", status_code=302)
+    set_flash(response, "success", f"{removed_name} ya no figura en la visita. La ficha se emite como visita individual")
+    return response
 
 
 @router.get("/visits/edit/{visit_id}", response_class=HTMLResponse)

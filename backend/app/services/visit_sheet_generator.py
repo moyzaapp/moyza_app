@@ -42,6 +42,102 @@ def _first_existing_path(*paths):
     return None
 
 
+# Visita conjunta: tres columnas de firma de 150 pt con separadores de 15 pt
+# (480 pt). El ancho útil de A4 con márgenes de 50 y el padding del marco es
+# ~483 pt, así que no caben las columnas de 155 con separadores de 20.
+JOINT_SIGNATURE_COL_WIDTHS = [150, 15, 150, 15, 150]
+JOINT_SIGNATURE_LABELS = ("COMPRADOR", "AGENTE INMOBILIARIO", "AGENTE ACOMPAÑANTE")
+
+
+def _signature_image(path, who):
+    """Imagen de firma para la tabla, o "" (línea vacía) si no hay archivo."""
+    if not path or not os.path.exists(path):
+        return ""
+    try:
+        image = Image(path)
+        image.drawHeight = 40
+        image.drawWidth = 140
+        return image
+    except Exception as e:
+        logger.error(f"Error loading {who} signature image: {e}")
+        return ""
+
+
+def _signature_date(value, style):
+    if not value:
+        return ""
+    return Paragraph(f"<font size=7>Firmado digitalmente el {value.strftime('%d/%m/%Y %H:%M')}</font>", style)
+
+
+def _joint_signature_table(visit, agent, agent_name, companion_agent, body_style):
+    """Tabla de firmas de tres columnas con el nombre de cada firmante.
+
+    `agent_name` llega ya escapado (es el del texto legal). La firma de cada
+    agente es su firma registrada; si el archivo no existe, la línea queda
+    vacía (PDFs regenerados de visitas antiguas).
+    """
+    name_style = ParagraphStyle(
+        "SignerNameStyle",
+        parent=body_style,
+        fontSize=8,
+        leading=10,
+        alignment=TA_CENTER,
+    )
+
+    signers = [
+        (_safe_text(visit.visitor_name), visit.signature_filepath, visit.signature_captured_at, "buyer"),
+        (
+            agent_name,
+            agent.signature_filepath if agent else None,
+            agent.signature_uploaded_at if agent else None,
+            "agent",
+        ),
+        (
+            _safe_text(companion_agent.name),
+            companion_agent.signature_filepath,
+            companion_agent.signature_uploaded_at,
+            "companion agent",
+        ),
+    ]
+
+    def row(cells):
+        # Columnas de firma en 0, 2 y 4; separadores vacíos en 1 y 3
+        return [cells[0], "", cells[1], "", cells[2]]
+
+    signature_data = [
+        row(["", "", ""]),                                   # Espaciado
+        row(list(JOINT_SIGNATURE_LABELS)),                   # Etiquetas
+        row([Paragraph(f"<font size=8>{name}</font>", name_style) for name, _, _, _ in signers]),
+        row([_signature_image(path, who) for _, path, _, who in signers]),
+        row(["", "", ""]),                                   # Línea de firma
+        row([_signature_date(date, body_style) for _, _, date, _ in signers]),
+    ]
+
+    signature_table = Table(
+        signature_data,
+        colWidths=JOINT_SIGNATURE_COL_WIDTHS,
+        rowHeights=[15, 15, None, 50, 5, 20]
+    )
+
+    commands = [
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 4), (-1, 4), 0),
+        ("GRID", (0, 0), (-1, -1), 0, colors.white),
+    ]
+    for col in (0, 2, 4):
+        commands += [
+            ("FONTNAME", (col, 1), (col, 1), "Helvetica-Bold"),
+            ("ALIGN", (col, 0), (col, -1), "CENTER"),
+            ("LINEABOVE", (col, 4), (col, 4), 1, colors.black),
+        ]
+    signature_table.setStyle(TableStyle(commands))
+
+    return signature_table
+
+
 def generate_visit_sheet(
     property_item,
     visit,
@@ -55,7 +151,9 @@ def generate_visit_sheet(
     empresa propietaria del inmueble (MOYZA o MOES PREMIUM).
 
     `agent` es el agente que realizó la visita: figura como emisor y firma.
-    `companion_agent` (opcional) solo aparece en el texto legal; no firma.
+    `companion_agent` (opcional) aparece en el texto legal y firma en una
+    tercera columna con su firma registrada (PLAN_FIRMA_AGENTES_VISITA.md §3.4).
+    Sin acompañante, la tabla de firmas es la de siempre (dos columnas).
     `company` es opcional: por defecto se usa la empresa de la propiedad.
     """
 
@@ -352,86 +450,96 @@ def generate_visit_sheet(
     # FIRMAS CON FIRMA DIGITAL
     # =========================
 
-    signature_data = []
+    if companion_agent is not None:
+        # Visita conjunta: COMPRADOR · AGENTE INMOBILIARIO · AGENTE ACOMPAÑANTE
+        signature_table = _joint_signature_table(
+            visit=visit,
+            agent=agent,
+            agent_name=agent_name,
+            companion_agent=companion_agent,
+            body_style=body_style,
+        )
+    else:
+        signature_data = []
 
-    # Fila 1: Espaciado
-    signature_data.append(["", "", "", "", "", ""])
+        # Fila 1: Espaciado
+        signature_data.append(["", "", "", "", "", ""])
 
-    # Fila 2: Etiquetas
-    signature_data.append(["", "COMPRADOR", "", "", "AGENTE INMOBILIARIO", ""])
+        # Fila 2: Etiquetas
+        signature_data.append(["", "COMPRADOR", "", "", "AGENTE INMOBILIARIO", ""])
 
-    # Fila 3: Imágenes de firma
-    buyer_signature = ""
-    agent_signature = ""
+        # Fila 3: Imágenes de firma
+        buyer_signature = ""
+        agent_signature = ""
 
-    # Firma del comprador
-    if visit.signature_filepath and os.path.exists(visit.signature_filepath):
-        try:
-            buyer_signature = Image(visit.signature_filepath)
-            buyer_signature.drawHeight = 40
-            buyer_signature.drawWidth = 140
-        except Exception as e:
-            logger.error(f"Error loading buyer signature image: {e}")
-            buyer_signature = ""
+        # Firma del comprador
+        if visit.signature_filepath and os.path.exists(visit.signature_filepath):
+            try:
+                buyer_signature = Image(visit.signature_filepath)
+                buyer_signature.drawHeight = 40
+                buyer_signature.drawWidth = 140
+            except Exception as e:
+                logger.error(f"Error loading buyer signature image: {e}")
+                buyer_signature = ""
 
-    # Firma del agente
-    if agent and agent.signature_filepath and os.path.exists(agent.signature_filepath):
-        try:
-            agent_signature = Image(agent.signature_filepath)
-            agent_signature.drawHeight = 40
-            agent_signature.drawWidth = 140
-        except Exception as e:
-            logger.error(f"Error loading agent signature image: {e}")
-            agent_signature = ""
+        # Firma del agente
+        if agent and agent.signature_filepath and os.path.exists(agent.signature_filepath):
+            try:
+                agent_signature = Image(agent.signature_filepath)
+                agent_signature.drawHeight = 40
+                agent_signature.drawWidth = 140
+            except Exception as e:
+                logger.error(f"Error loading agent signature image: {e}")
+                agent_signature = ""
 
-    signature_data.append(["", buyer_signature, "", "", agent_signature, ""])
+        signature_data.append(["", buyer_signature, "", "", agent_signature, ""])
 
-    # Fila 4: Línea de firma
-    signature_data.append(["", "", "", "", "", ""])
+        # Fila 4: Línea de firma
+        signature_data.append(["", "", "", "", "", ""])
 
-    # Fila 5: Metadatos de firma
-    buyer_signature_date = ""
-    agent_signature_date = ""
+        # Fila 5: Metadatos de firma
+        buyer_signature_date = ""
+        agent_signature_date = ""
 
-    if visit.signature_captured_at:
-        signature_date = visit.signature_captured_at.strftime("%d/%m/%Y %H:%M")
-        buyer_signature_date = Paragraph(f"<font size=7>Firmado digitalmente el {signature_date}</font>", body_style)
+        if visit.signature_captured_at:
+            signature_date = visit.signature_captured_at.strftime("%d/%m/%Y %H:%M")
+            buyer_signature_date = Paragraph(f"<font size=7>Firmado digitalmente el {signature_date}</font>", body_style)
 
-    if agent and agent.signature_uploaded_at:
-        agent_sig_date = agent.signature_uploaded_at.strftime("%d/%m/%Y %H:%M")
-        agent_signature_date = Paragraph(f"<font size=7>Firmado digitalmente el {agent_sig_date}</font>", body_style)
+        if agent and agent.signature_uploaded_at:
+            agent_sig_date = agent.signature_uploaded_at.strftime("%d/%m/%Y %H:%M")
+            agent_signature_date = Paragraph(f"<font size=7>Firmado digitalmente el {agent_sig_date}</font>", body_style)
 
-    signature_data.append([
-        "",
-        buyer_signature_date,
-        "",
-        "",
-        agent_signature_date,
-        ""
-    ])
-
-    signature_table = Table(
-        signature_data,
-        colWidths=[40, 155, 40, 40, 155, 40],
-        rowHeights=[15, 15, 50, 5, 20]
-    )
-
-    signature_table.setStyle(
-        TableStyle([
-            ("FONTNAME", (1, 1), (1, 1), "Helvetica-Bold"),
-            ("FONTNAME", (4, 1), (4, 1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 10),
-            ("ALIGN", (1, 0), (1, -1), "CENTER"),
-            ("ALIGN", (4, 0), (4, -1), "CENTER"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            # Línea de firma para comprador
-            ("LINEABOVE", (1, 3), (1, 3), 1, colors.black),
-            # Línea de firma para agente
-            ("LINEABOVE", (4, 3), (4, 3), 1, colors.black),
-            ("TOPPADDING", (0, 3), (-1, 3), 0),
-            ("GRID", (0, 0), (-1, -1), 0, colors.white),
+        signature_data.append([
+            "",
+            buyer_signature_date,
+            "",
+            "",
+            agent_signature_date,
+            ""
         ])
-    )
+
+        signature_table = Table(
+            signature_data,
+            colWidths=[40, 155, 40, 40, 155, 40],
+            rowHeights=[15, 15, 50, 5, 20]
+        )
+
+        signature_table.setStyle(
+            TableStyle([
+                ("FONTNAME", (1, 1), (1, 1), "Helvetica-Bold"),
+                ("FONTNAME", (4, 1), (4, 1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("ALIGN", (1, 0), (1, -1), "CENTER"),
+                ("ALIGN", (4, 0), (4, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                # Línea de firma para comprador
+                ("LINEABOVE", (1, 3), (1, 3), 1, colors.black),
+                # Línea de firma para agente
+                ("LINEABOVE", (4, 3), (4, 3), 1, colors.black),
+                ("TOPPADDING", (0, 3), (-1, 3), 0),
+                ("GRID", (0, 0), (-1, -1), 0, colors.white),
+            ])
+        )
 
     elements.append(signature_table)
 
@@ -517,6 +625,11 @@ def generate_visit_sheet(
     if visit.signature_captured_at:
         sig_date = visit.signature_captured_at.strftime("%d/%m/%Y %H:%M")
         validation_metadata += f"Firma digital capturada el {sig_date}<br/>"
+
+    agent_signatures_confirmed_at = getattr(visit, "agent_signatures_confirmed_at", None)
+    if agent_signatures_confirmed_at:
+        confirmed_date = agent_signatures_confirmed_at.strftime("%d/%m/%Y %H:%M")
+        validation_metadata += f"Firmas de agentes confirmadas el {confirmed_date}<br/>"
 
     if visit.data_consent_ip:
         # Ofuscar IP por privacidad (mostrar solo primeros 2 octetos)
