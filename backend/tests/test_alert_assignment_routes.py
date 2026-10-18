@@ -105,11 +105,14 @@ def data():
                     company_id=moyza.id, agent_id=agents["captador"].id)
     orphan = Property(title=f"{TAG} SIN CAPTADOR", address="Calle Test 4", city="Jaen",
                       company_id=moyza.id, agent_id=None)
-    db.add_all([prop, orphan])
+    own = Property(title=f"{TAG} PISO DE OTRO", address="Calle Test 5", city="Jaen",
+                   company_id=moyza.id, agent_id=agents["otro"].id)
+    db.add_all([prop, orphan, own])
     db.commit()
 
     out = {key: ag.id for key, ag in agents.items()}
-    out.update(property_id=prop.id, orphan_id=orphan.id, moyza_id=moyza.id, moes_id=moes.id)
+    out.update(property_id=prop.id, orphan_id=orphan.id, own_property_id=own.id,
+               moyza_id=moyza.id, moes_id=moes.id)
     yield out
 
     _cleanup(db)
@@ -186,10 +189,11 @@ def test_autocompletado_devuelve_agente_y_sin_captador_solo_admin(data):
     assert results[data["property_id"]]["agent_id"] == data["captador"]
     assert results[data["orphan_id"]]["agent_id"] is None
 
+    # El agente solo ve sus propiedades asignadas: ni la del captador ni la huérfana
     agent = _Client(EMAIL.format("otro"), "MOYZA")
     status, body, _ = agent.get("/alerts/search-properties?q=" + urllib.parse.quote(TAG))
     ids = {r["id"] for r in json.loads(body)["results"]}
-    assert data["property_id"] in ids and data["orphan_id"] not in ids
+    assert ids == {data["own_property_id"]}
 
 
 def test_alta_por_defecto_va_al_captador_sin_aviso(data):
@@ -220,7 +224,8 @@ def test_alta_con_otro_agente_con_y_sin_motivo(data):
     [alert] = _alerts_of_buyer(db, name)
     assert alert.agent_id == data["otro"] and alert.assignment_reason == "Carga de trabajo"
     notes = [n for n in _assigned_notifications(db, "otro") if n.entity_id == alert.id]
-    assert len(notes) == 1 and "Carga de trabajo" in notes[0].body
+    # El aviso no lleva el motivo (PLAN_ALERTA_COMO_NUEVA.md): solo la propiedad
+    assert len(notes) == 1 and notes[0].body == f"{TAG} PISO"
     assert _assigned_notifications(db, "captador") == []
 
     # El motivo es opcional (decisión §4-8)
@@ -263,13 +268,19 @@ def test_agente_no_puede_elegir_agente(data):
     assert "Solo un administrador" in _flash(headers).get("message", "")
     assert _alerts_of_buyer(db, name) == []
 
-    # Sin agent_id, la alerta va al captador (y se le dice a quién)
-    name = f"{TAG} AGENTE DEFECTO"
+    # Sobre una propiedad ajena (del captador) no puede crear alertas
+    name = f"{TAG} AGENTE AJENA"
     status, _, headers = _create(agent, data["property_id"], name)
-    assert status == 302
-    assert f"asignada a {TAG} CAPTADOR, agente de la propiedad" in _flash(headers).get("message", "")
+    assert status == 302 and _flash(headers).get("category") == "error"
+    assert "propiedades que tienes asignadas" in _flash(headers).get("message", "")
+    assert _alerts_of_buyer(db, name) == []
+
+    # Sobre una propiedad suya sí, y la alerta queda a su nombre
+    name = f"{TAG} AGENTE PROPIA"
+    status, _, headers = _create(agent, data["own_property_id"], name)
+    assert status == 302 and _flash(headers).get("category") == "success"
     [alert] = _alerts_of_buyer(db, name)
-    assert alert.agent_id == data["captador"]
+    assert alert.agent_id == data["otro"]
     db.close()
 
 
@@ -297,14 +308,28 @@ def _new_alert_for(data, name, agent_key=None):
     return alert.id
 
 
+def _clear_queue(data, agent_key):
+    """Cierra las alertas abiertas de prueba del agente para que la siguiente
+    no quede bloqueada por la cola (un agente ya no abre alertas en cola)."""
+    from app.models.property_alert import PropertyAlert
+    db = _session()
+    db.query(PropertyAlert).filter(
+        PropertyAlert.agent_id == data[agent_key],
+        PropertyAlert.status.in_(["PENDING", "IN_PROGRESS"]),
+    ).update({"status": "COMPLETED"}, synchronize_session=False)
+    db.commit()
+    db.close()
+
+
 def test_reasignar_desde_detalle(data):
     from app.models.property_alert import PropertyAlert
 
+    _clear_queue(data, "captador")
     alert_id = _new_alert_for(data, f"{TAG} REASIGNAR DETALLE")
     captador = _Client(EMAIL.format("captador"), "MOYZA")
     nuevo = _Client(EMAIL.format("nuevo"), "MOYZA")
 
-    # El captador la abre (queda en proceso y leída)
+    # El captador la abre (queda en proceso y leída; su cola está vacía)
     status, body, _ = captador.get(f"/alerts/{alert_id}")
     assert status == 200 and 'id="reassignModal"' not in body and "Reasignar" not in body
 
@@ -334,13 +359,49 @@ def test_reasignar_desde_detalle(data):
     assert f"{TAG} REASIGNAR DETALLE" not in captador.get("/alerts")[1]
     status, body, _ = nuevo.get("/alerts")
     assert status == 200 and f"{TAG} REASIGNAR DETALLE" in body
+    # Para el nuevo agente es una alerta nueva (PLAN_ALERTA_COMO_NUEVA.md): sin
+    # bloque de asignación, sin nota de reasignación ni motivo
     status, body, _ = nuevo.get(f"/alerts/{alert_id}")
+    assert status == 200
+    for hidden in ("Antes: ", "Motivo: ", "Historial de asignaciones", "Reasignada", 'id="alertAssignment"'):
+        assert hidden not in body, hidden
+    assert "Aún no hay seguimientos. Registra el primero." in body
+    # El admin conserva toda la trazabilidad
+    status, body, _ = admin.get(f"/alerts/{alert_id}")
     assert status == 200 and "Antes: " + f"{TAG} CAPTADOR" in body and "Motivo: Sin respuesta" in body
-    assert "Historial de asignaciones (2)" in body
+    assert "Historial de asignaciones (2)" in body and "Reasignada de " in body
 
     # La campana del Inicio del nuevo agente tiene el aviso
     status, body, _ = nuevo.get("/dashboard")
     assert status == 200 and f"Te han asignado un comprador: {TAG} REASIGNAR DETALLE" in body
+
+
+def test_alerta_bloqueada_no_se_abre_y_no_cambia_de_estado(data):
+    """PLAN_ALERTA_COMO_NUEVA.md: el agente no abre una alerta en cola por
+    ningún camino; vuelve a /alerts con el aviso y la alerta sigue sin leer."""
+    from app.models.property_alert import PropertyAlert
+
+    first_id = _new_alert_for(data, f"{TAG} COLA PRIMERA", agent_key="nuevo")
+    queued_id = _new_alert_for(data, f"{TAG} COLA SEGUNDA", agent_key="nuevo")
+    nuevo = _Client(EMAIL.format("nuevo"), "MOYZA")
+
+    status, _, headers = nuevo.get(f"/alerts/{queued_id}")
+    assert status == 302 and headers.get("location") == "/alerts"
+    assert _flash(headers) == {
+        "category": "warning",
+        "message": "Esta alerta está en tu cola. Gestiona primero las anteriores para verla.",
+    }
+    db = _session()
+    queued = db.get(PropertyAlert, queued_id)
+    assert queued.read_at is None and queued.status == "PENDING"
+    db.close()
+
+    # El admin la abre sin bloqueo y sin marcarla como leída
+    assert _Client(ADMIN_EMAIL, "MOYZA").get(f"/alerts/{queued_id}")[0] == 200
+    db = _session()
+    assert db.get(PropertyAlert, queued_id).read_at is None
+    assert db.get(PropertyAlert, first_id).agent_id == data["nuevo"]
+    db.close()
 
 
 def test_reasignar_desde_listado_vuelve_al_listado(data):

@@ -9,6 +9,10 @@ y a la misma propiedad. Hay dos niveles:
   aviso informativo. Repetirla puede tener sentido si el comprador vuelve a
   interesarse.
 
+Las búsquedas generales (alertas sin referencia) se comparan por comprador y
+operación (`find_open_search_alerts`); al asociarles una propiedad se vuelve
+a mirar comprador + propiedad.
+
 También se detectan compradores ya registrados con el mismo teléfono o correo,
 para evitar dar de alta dos veces a la misma persona desde "Nuevo comprador".
 """
@@ -19,7 +23,7 @@ from typing import Dict, Iterable, List, Optional
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from app.core.constants import AlertStatus, AlertType
+from app.core.constants import AlertOrigin, AlertStatus, AlertType
 from app.core.constants import FollowUpActionType
 from app.core.phone import phone_display
 from app.models.buyer import Buyer
@@ -121,6 +125,33 @@ def find_duplicate_alerts(
     return {"open": open_alerts, "recent_closed": recent_closed}
 
 
+def find_open_search_alerts(
+    db: Session,
+    company_id: int,
+    buyer_id: int,
+    business_type: Optional[str],
+    exclude_id: Optional[int] = None,
+) -> List[PropertyAlert]:
+    """Búsquedas generales abiertas del comprador con esa operación (PLAN_ALERTA_SIN_REFERENCIA.md).
+
+    Sirve para avisar al crear una segunda búsqueda abierta del mismo
+    comprador y operación (Venta / Alquiler). Cuentan las búsquedas que ya
+    tienen propiedad asociada: siguen siendo la búsqueda de ese comprador.
+    """
+    query = (
+        scope_alerts(db.query(PropertyAlert), company_id)
+        .filter(
+            PropertyAlert.buyer_id == buyer_id,
+            PropertyAlert.origin == AlertOrigin.SEARCH,
+            PropertyAlert.business_type == business_type,
+            PropertyAlert.status.in_(OPEN_STATUSES),
+        )
+    )
+    if exclude_id is not None:
+        query = query.filter(PropertyAlert.id != exclude_id)
+    return query.order_by(PropertyAlert.created_at.desc(), PropertyAlert.id.desc()).all()
+
+
 def find_matching_buyers(
     db: Session,
     company_id: int,
@@ -195,6 +226,12 @@ def serialize_duplicates(db: Session, duplicates: Dict[str, List[PropertyAlert]]
     }
 
 
+def serialize_search_duplicates(db: Session, alerts: List[PropertyAlert]) -> dict:
+    """Búsquedas abiertas del comprador para el aviso del alta sin referencia."""
+    names = _user_names(db, (a.created_by for a in alerts))
+    return {"open": [serialize_alert(a, names) for a in alerts], "recent_closed": []}
+
+
 def serialize_buyer(buyer: Buyer) -> dict:
     return {
         "id": buyer.id,
@@ -209,6 +246,18 @@ def serialize_buyer(buyer: Buyer) -> dict:
 # ---------------------------------------------------------------------------
 # Textos
 # ---------------------------------------------------------------------------
+
+def search_duplicate_note(existing: PropertyAlert) -> str:
+    """Nota al confirmar una segunda búsqueda abierta del mismo comprador y operación."""
+    fecha = madrid_dt(existing.created_at, "%d/%m/%Y")
+    return f"Búsqueda duplicada confirmada de la alerta #{existing.id} ({fecha})."
+
+
+def linked_duplicate_note(existing: PropertyAlert) -> str:
+    """Nota al asociar una propiedad que el comprador ya tiene en otra alerta abierta."""
+    fecha = madrid_dt(existing.created_at, "%d/%m/%Y")
+    return f"Propiedad asociada pese a la alerta abierta #{existing.id} ({fecha}) sobre la misma propiedad."
+
 
 def duplicate_note(existing: PropertyAlert) -> str:
     """Nota que se añade al mensaje cuando el usuario confirma el duplicado."""

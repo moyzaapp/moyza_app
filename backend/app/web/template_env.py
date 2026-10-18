@@ -5,8 +5,8 @@ from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 
-from app.core.constants import BusinessType, PhoneCountryCodes
-from app.core.phone import phone_display, split_phone, tel_href
+from app.core.constants import AlertOrigin, BusinessType, PhoneCountryCodes
+from app.core.phone import phone_display, split_phone, tel_href, whatsapp_url
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,16 @@ def madrid_dt(value, fmt: str = "%d/%m/%Y %H:%M"):
     return aware.astimezone(_MADRID).strftime(fmt)
 
 
+def eur(value, empty: str = "–") -> str:
+    """Importe en euros con formato de España: 120000 -> '120.000 €'."""
+    if value is None or value == "":
+        return empty
+    try:
+        return f"{int(round(float(value))):,}".replace(",", ".") + " €"
+    except (TypeError, ValueError):
+        return empty
+
+
 def company_context(request) -> dict:
     """Expone la empresa activa a todas las plantillas.
 
@@ -76,16 +86,22 @@ templates = Jinja2Templates(
     context_processors=[company_context],
 )
 templates.env.filters["madrid_dt"] = madrid_dt
+# Enlace wa.me del teléfono (None si no es utilizable): {{ phone | whatsapp_url }}
+templates.env.filters["whatsapp_url"] = whatsapp_url
 # Teléfono para mostrar ('+34 600 112 233'), enlace tel: y (código, local) del
 # selector de país (PLAN_TELEFONO_COMPRADOR.md)
 templates.env.filters["phone_display"] = phone_display
 templates.env.filters["tel_href"] = tel_href
 templates.env.filters["split_phone"] = split_phone
+# Precios: {{ prop.price | eur }} -> '120.000 €'
+templates.env.filters["eur"] = eur
 # Opciones del selector de país; globales para que las vea el macro phone_field
 templates.env.globals["phone_country_choices"] = PhoneCountryCodes.choices()
 templates.env.globals["phone_default_country"] = PhoneCountryCodes.DEFAULT
 templates.env.globals["current_year"] = lambda: datetime.now().year
 # Operaciones fijas (Venta / Alquiler) para los selects: BusinessType.values()
 templates.env.globals["BusinessType"] = BusinessType
+# Origen de una alerta: con referencia ('property') o búsqueda general ('search')
+templates.env.globals["AlertOrigin"] = AlertOrigin
 # Tailwind: <link> al CSS compilado si existe; si es None, base.html carga tailwind.js
 templates.env.globals["tailwind_css_version"] = tailwind_css_version

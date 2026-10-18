@@ -1,0 +1,102 @@
+{#
+  Perfil de búsqueda del comprador (PLAN_ALERTA_SIN_REFERENCIA.md).
+
+  Lo usan la ficha del comprador (buyers/detail.html) y el paso "Perfil" del
+  detalle de una alerta sin referencia (alerts/detail.html). Sin superficie
+  (m²): salió del perfil en toda la app (decisión cerrada 5).
+
+  Uso (dentro de un <form>):
+    {% from "components/search_profile_form.html" import search_profile_fields %}
+    {{ search_profile_fields(criteria, zones, cities, property_types, prefix="bc") }}
+    {{ search_profile_fields(criteria, zones, cities, property_types, business_type_fixed=alert.business_type, prefix="sp") }}
+
+  - business_type_fixed: la operación viene de la alerta y se muestra como texto
+    (el servidor usa la de la alerta). Sin ella, select obligatorio Venta / Alquiler.
+  - caller(): campos extra al final (p. ej. "Agente responsable" en la ficha).
+#}
+{% import "components/ui_macros.html" as ui %}
+
+{% macro _places(name, legend, values, selected, empty_text) -%}
+<fieldset>
+    <legend class="block text-sm font-medium text-gray-700 mb-2">{{ legend }}</legend>
+    {% if values %}
+    <div class="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+        {% for value in values %}
+        <label class="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50">
+            <input type="checkbox" name="{{ name }}" value="{{ value }}"
+                {% if selected and value in selected %}checked{% endif %}
+                class="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900/30">
+            {{ value }}
+        </label>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-sm text-gray-500">{{ empty_text }}</p>
+    {% endif %}
+</fieldset>
+{%- endmacro %}
+
+{% macro search_profile_fields(criteria=None, zones=[], cities=[], property_types=[], business_type_fixed=None, prefix="sp") -%}
+{% set c = criteria %}
+{% set type_options = [] %}
+{% for pt in property_types %}{% set _ = type_options.append((pt, pt)) %}{% endfor %}
+<div class="space-y-5">
+    {{ _places("zones", "Zonas", zones, c.zones if c else none, "No hay zonas registradas en las propiedades") }}
+    {{ _places("cities", "Ciudades", cities, c.cities if c else none, "No hay ciudades registradas en las propiedades") }}
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {{ ui.select("property_type", "Tipo de inmueble", type_options,
+                     value=(c.property_type if c else none), empty="Cualquier tipo", id=prefix ~ "PropertyType") }}
+
+        {% if business_type_fixed %}
+        <div>
+            <p class="block text-sm font-medium text-gray-700 mb-1">Operación</p>
+            <p class="flex items-center gap-2 min-h-[2.5rem] text-sm text-gray-500">
+                {{ ui.status_badge("business", business_type_fixed, dot=False) }}
+                <span>La de la alerta</span>
+            </p>
+        </div>
+        {% else %}
+        {% set current_bt = c.business_type if c else none %}
+        <div>
+            <label for="{{ prefix }}BusinessType" class="block text-sm font-medium text-gray-700 mb-1">
+                Operación <span class="text-red-500" aria-hidden="true">*</span>
+            </label>
+            <select name="business_type" id="{{ prefix }}BusinessType" required class="{{ ui.input_class }}">
+                <option value="" disabled {% if current_bt not in BusinessType.values() %}selected{% endif %}>Selecciona…</option>
+                {% for bt in BusinessType.values() %}
+                <option value="{{ bt }}" {% if current_bt == bt %}selected{% endif %}>{{ bt }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+
+        <div class="grid grid-cols-2 gap-3">
+            {{ ui.field("min_bedrooms", "Dormitorios mín.", type="number",
+                        value=(c.min_bedrooms if c and c.min_bedrooms is not none else ""),
+                        placeholder="–", attrs='min="0" max="20" inputmode="numeric"', id=prefix ~ "MinBedrooms") }}
+            {{ ui.field("max_bedrooms", "Dormitorios máx.", type="number",
+                        value=(c.max_bedrooms if c and c.max_bedrooms is not none else ""),
+                        placeholder="–", attrs='min="0" max="20" inputmode="numeric"', id=prefix ~ "MaxBedrooms") }}
+        </div>
+
+        {{ ui.field("min_bathrooms", "Baños mín.", type="number",
+                    value=(c.min_bathrooms if c and c.min_bathrooms is not none else ""),
+                    placeholder="–", attrs='min="0" max="10" inputmode="numeric"', id=prefix ~ "MinBathrooms") }}
+
+        <div class="grid grid-cols-2 gap-3 sm:col-span-2">
+            {{ ui.field("min_price", "Precio mín. (€)", type="number",
+                        value=((c.min_price | int) if c and c.min_price is not none else ""),
+                        placeholder="–", attrs='min="0" step="1000" inputmode="numeric"', id=prefix ~ "MinPrice") }}
+            {{ ui.field("max_price", "Precio máx. (€)", type="number",
+                        value=((c.max_price | int) if c and c.max_price is not none else ""),
+                        placeholder="–", attrs='min="0" step="1000" inputmode="numeric"', id=prefix ~ "MaxPrice") }}
+        </div>
+    </div>
+
+    {{ ui.field("notes", "Imprescindibles", type="textarea", value=(c.notes if c and c.notes else ""),
+                placeholder="Ej: planta baja, terraza, ascensor, sin reformar…", id=prefix ~ "Notes") }}
+
+    {% if caller %}{{ caller() }}{% endif %}
+</div>
+{%- endmacro %}

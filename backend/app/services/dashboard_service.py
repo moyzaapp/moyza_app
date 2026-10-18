@@ -40,6 +40,9 @@ from app.models.alert_follow_up import AlertFollowUp
 from app.models.property import Property
 from app.models.property_alert import PropertyAlert
 from app.models.property_visit import PropertyVisit
+from app.services.alert_view import assignment_start_expr
+from app.services.alert_view import get_locked_alert_ids
+from app.services.alert_view import real_follow_ups_clause
 from app.services.buyer_reminder_service import get_pending_buyers_by_agent
 from app.services.company_scope import scope_agents
 from app.services.performance_report_service import BREAKDOWN_KEYS
@@ -358,28 +361,39 @@ class DashboardService:
     # ------------------------------------------------------------------
 
     def _latest_follow_up_subquery(self):
-        """Último seguimiento (por id) de cada alerta, sin las notas del sistema
-        (la de reasignación no tiene próxima acción y ocultaría la pendiente)."""
+        """Último seguimiento (por id) de cada alerta desde su asignación, sin
+        las notas del sistema (la de reasignación no tiene próxima acción y
+        ocultaría la pendiente).
+
+        Para el agente una alerta reasignada es nueva (PLAN_ALERTA_COMO_NUEVA.md):
+        un seguimiento del agente anterior con próxima acción no entra en la
+        agenda del nuevo.
+        """
         return (
             self.db.query(
                 AlertFollowUp.alert_id.label("alert_id"),
                 func.max(AlertFollowUp.id).label("follow_up_id"),
             )
-            .filter(AlertFollowUp.action_type.notin_(FollowUpActionType.SYSTEM_ACTIONS))
+            .join(PropertyAlert, PropertyAlert.id == AlertFollowUp.alert_id)
+            .filter(real_follow_ups_clause(assignment_start_expr()))
             .group_by(AlertFollowUp.alert_id)
             .subquery()
         )
 
-    def _agent_open_alerts(self, agent_id: int):
-        return (
+    def _agent_open_alerts(self, agent_id: int, exclude_ids=()):
+        # Empresa de la propia alerta: incluye las búsquedas sin propiedad
+        # (PLAN_ALERTA_SIN_REFERENCIA.md)
+        query = (
             self.db.query(PropertyAlert)
-            .join(Property, Property.id == PropertyAlert.property_id)
             .filter(
-                Property.company_id == self.company_id,
+                PropertyAlert.company_id == self.company_id,
                 PropertyAlert.agent_id == agent_id,
                 PropertyAlert.status.in_([AlertStatus.PENDING, AlertStatus.IN_PROGRESS]),
             )
         )
+        if exclude_ids:
+            query = query.filter(PropertyAlert.id.notin_(list(exclude_ids)))
+        return query
 
     def agenda(self, agent: Agent, now: Optional[datetime] = None) -> dict:
         """Hoy y pendiente: próximas acciones vencidas o de hoy, sin leer y sin respuesta.
@@ -387,15 +401,22 @@ class DashboardService:
         `next_action_date` se guarda como la hora local que el agente escribe
         (input datetime-local), así que se compara con el final del día de
         hoy en Madrid.
+
+        Próximas acciones y "sin respuesta" solo cuentan seguimientos desde la
+        asignación de cada alerta y solo de alertas que el agente puede abrir:
+        las bloqueadas por su cola no salen (PLAN_ALERTA_COMO_NUEVA.md). "Sin
+        leer" es un contador que lleva al listado, donde las bloqueadas ya se
+        muestran sin datos, así que sigue contando toda la cola.
         """
         local_now = madrid_now(now)
         end_of_today = datetime.combine(local_now.date(), time(23, 59, 59))
         start_of_today = datetime.combine(local_now.date(), time.min)
         latest = self._latest_follow_up_subquery()
         labels = FollowUpActionType.labels()
+        locked = get_locked_alert_ids(agent.id, self.db, self.company_id)
 
         due_query = (
-            self._agent_open_alerts(agent.id)
+            self._agent_open_alerts(agent.id, exclude_ids=locked)
             .join(latest, latest.c.alert_id == PropertyAlert.id)
             .join(AlertFollowUp, AlertFollowUp.id == latest.c.follow_up_id)
             .filter(
@@ -429,7 +450,7 @@ class DashboardService:
 
         no_response_cutoff = (now or datetime.utcnow()) - timedelta(days=DashboardThresholds.NO_RESPONSE_DAYS)
         no_response = (
-            self._agent_open_alerts(agent.id)
+            self._agent_open_alerts(agent.id, exclude_ids=locked)
             .join(latest, latest.c.alert_id == PropertyAlert.id)
             .join(AlertFollowUp, AlertFollowUp.id == latest.c.follow_up_id)
             .filter(
@@ -525,9 +546,9 @@ class DashboardService:
         kind = business_kind(PropertyAlert.business_type)
         rows = (
             self.db.query(PropertyAlert.agent_id, week.label("week"), func.count(PropertyAlert.id))
-            .join(Property, Property.id == PropertyAlert.property_id)
             .filter(
-                Property.company_id == self.company_id,
+                # Por agente: cuentan también las búsquedas sin propiedad
+                PropertyAlert.company_id == self.company_id,
                 PropertyAlert.agent_id.in_(list(agent_ids)),
                 PropertyAlert.created_at >= start,
                 PropertyAlert.created_at <= end,
@@ -645,11 +666,8 @@ class DashboardService:
         return kpis
 
     def _company_alerts(self):
-        return (
-            self.db.query(PropertyAlert)
-            .join(Property, Property.id == PropertyAlert.property_id)
-            .filter(Property.company_id == self.company_id)
-        )
+        # Empresa de la propia alerta (las búsquedas pueden no tener propiedad)
+        return self.db.query(PropertyAlert).filter(PropertyAlert.company_id == self.company_id)
 
     def abandoned_buyers_count(self, now: datetime) -> int:
         """Compradores PENDING con más de 7 días (misma regla que Resultados Comerciales).
@@ -763,9 +781,8 @@ class DashboardService:
         for agent_id, when in (
             self.db.query(PropertyAlert.agent_id, func.max(AlertFollowUp.created_at))
             .join(AlertFollowUp, AlertFollowUp.alert_id == PropertyAlert.id)
-            .join(Property, Property.id == PropertyAlert.property_id)
             .filter(
-                Property.company_id == self.company_id,
+                PropertyAlert.company_id == self.company_id,
                 PropertyAlert.agent_id.in_(agent_ids),
                 # La nota de reasignación la escribe el admin y los seguimientos
                 # anteriores a la asignación son del agente previo: no son
@@ -778,8 +795,7 @@ class DashboardService:
             keep(agent_id, when)
         for agent_id, when in (
             self.db.query(PropertyAlert.agent_id, func.max(PropertyAlert.read_at))
-            .join(Property, Property.id == PropertyAlert.property_id)
-            .filter(Property.company_id == self.company_id, PropertyAlert.agent_id.in_(agent_ids))
+            .filter(PropertyAlert.company_id == self.company_id, PropertyAlert.agent_id.in_(agent_ids))
             .group_by(PropertyAlert.agent_id)
         ):
             keep(agent_id, when)
@@ -957,10 +973,9 @@ class DashboardService:
         closings = (
             self.db.query(AlertFollowUp, PropertyAlert)
             .join(PropertyAlert, PropertyAlert.id == AlertFollowUp.alert_id)
-            .join(Property, Property.id == PropertyAlert.property_id)
             .options(joinedload(PropertyAlert.agent))
             .filter(
-                Property.company_id == self.company_id,
+                PropertyAlert.company_id == self.company_id,
                 AlertFollowUp.action_type == FollowUpActionType.CERRADO,
                 AlertFollowUp.created_at >= since,
             )

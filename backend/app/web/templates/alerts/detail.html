@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% import "components/ui_macros.html" as ui %}
 {% from "alerts/assign_fields.html" import assign_fields with context %}
+{# Qué trata la alerta: la propiedad o, sin ella, la búsqueda general (PLAN_ALERTA_SIN_REFERENCIA.md) #}
+{% set alert_subject = alert.property.title if alert.property else ("Búsqueda general" ~ (" · " ~ alert.business_type if alert.business_type else "")) %}
 
 {% block title %}Detalle Alerta - {{ brand_name }}{% endblock %}
 
@@ -19,7 +21,15 @@
             </a>
             <div>
                 <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">Detalle de Alerta</h1>
+                {% if alert.property %}
                 <p class="text-gray-600 mt-1">{{ alert.lead_name }} - {{ alert.property.title }}</p>
+                {% else %}
+                <p class="flex flex-wrap items-center gap-2 text-gray-600 mt-1">
+                    <span>{{ alert.lead_name }}</span>
+                    {{ ui.badge("Búsqueda general", "gray") }}
+                    {% if alert.business_type %}{{ ui.status_badge("business", alert.business_type, dot=False) }}{% endif %}
+                </p>
+                {% endif %}
             </div>
         </div>
 
@@ -27,6 +37,10 @@
 
             <!-- Información de la Alerta -->
             <div class="lg:col-span-2 space-y-6">
+
+                {% if show_steps %}
+                {% include "alerts/_search_steps.html" %}
+                {% endif %}
 
                 <!-- Datos del Interesado -->
                 <div class="bg-white rounded-xl border border-gray-200 p-6">
@@ -39,13 +53,21 @@
                         </div>
 
                         {% if alert.lead_phone %}
+                        {% set lead_whatsapp_url = alert.lead_phone | whatsapp_url %}
                         <div>
                             <label class="text-sm text-gray-600">Teléfono</label>
-                            <p class="text-gray-800 font-medium">
+                            <div class="flex flex-col sm:flex-row sm:items-center gap-2 text-gray-800 font-medium">
                                 <a href="{{ alert.lead_phone | tel_href }}" class="text-blue-600 hover:underline">
                                     {{ alert.lead_phone | phone_display }}
                                 </a>
-                            </p>
+                                {# Chat de WhatsApp (PLAN_WHATSAPP_ALERTA.md): solo si el número es utilizable #}
+                                {% if lead_whatsapp_url %}
+                                {% set whatsapp_attrs %}target="_blank" rel="noopener noreferrer" aria-label="Abrir chat de WhatsApp con {{ alert.lead_name }}"{% endset %}
+                                {% call ui.button("WhatsApp", "secondary", href=lead_whatsapp_url, attrs=whatsapp_attrs, full_mobile=True) %}
+                                <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z"/></svg>
+                                {% endcall %}
+                                {% endif %}
+                            </div>
                         </div>
                         {% endif %}
 
@@ -85,21 +107,33 @@
                     {% endif %}
                 </div>
 
-                <!-- Datos de la Propiedad -->
+                <!-- Datos de la Propiedad (o de la búsqueda general sin propiedad) -->
                 <div class="bg-white rounded-xl border border-gray-200 p-6">
-                    <h2 class="text-xl font-bold text-gray-800 mb-4">Propiedad</h2>
+                    <div class="flex items-start justify-between gap-3 mb-4">
+                        <h2 class="text-xl font-bold text-gray-800">Propiedad</h2>
+                        {# Cambiar la propiedad de una búsqueda: solo origen 'search', abierta, agente asignado o admin #}
+                        {% if is_search and can_manage_search and alert.property and not show_steps %}
+                        <a href="/alerts/{{ alert.id }}?step=proposal#propuesta"
+                           class="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Cambiar propiedad</a>
+                        {% endif %}
+                    </div>
 
+                    {% if alert.property %}
                     <div class="space-y-2">
                         <div>
+                            {% if property_link_allowed %}
                             <a href="/properties/{{ alert.property.id }}"
                                class="text-blue-600 hover:underline font-semibold text-base">
                                 {{ alert.property.title }}
                             </a>
+                            {% else %}
+                            <p class="text-gray-900 font-semibold text-base">{{ alert.property.title }}</p>
+                            {% endif %}
                         </div>
 
                         <div>
                             <label class="text-sm text-gray-600">Dirección</label>
-                            <p class="text-gray-800">{{ alert.property.address }}</p>
+                            <p class="text-gray-800">{{ alert.property.address or '—' }}</p>
                         </div>
 
                         {% if alert.property.price %}
@@ -109,10 +143,30 @@
                         </div>
                         {% endif %}
 
+                        {% if is_search %}
+                        <p class="text-xs text-gray-500">
+                            Búsqueda general{% if alert.property_linked_at %} · propiedad asociada el {{ alert.property_linked_at | madrid_dt('%d/%m/%Y %H:%M') }}{% endif %}{% if alert.property.agent and alert.property.agent_id != alert.agent_id %} · agente de la propiedad: {{ alert.property.agent.name }}{% endif %}
+                        </p>
+                        {% endif %}
                     </div>
+                    {% else %}
+                    <div class="space-y-2">
+                        <p class="flex flex-wrap items-center gap-2">
+                            {{ ui.badge("Búsqueda general", "gray") }}
+                            {% if alert.business_type %}{{ ui.status_badge("business", alert.business_type, dot=False) }}{% endif %}
+                        </p>
+                        {% if criteria_parts %}
+                        <p class="text-sm text-gray-700">{{ criteria_parts | join(" · ") }}</p>
+                        {% else %}
+                        <p class="text-sm text-gray-500">Aún sin perfil de búsqueda ni propiedad asociada.</p>
+                        {% endif %}
+                    </div>
+                    {% endif %}
 
-                    <!-- Agente asignado (PLAN_ASIGNACION_ALERTAS.md §2.3) -->
-                    {% set owner = alert.property.agent %}
+                    <!-- Agente asignado (PLAN_ASIGNACION_ALERTAS.md §2.3). Solo admin: para el
+                         agente una alerta reasignada es nueva y no ve su rastro (PLAN_ALERTA_COMO_NUEVA.md) -->
+                    {% if show_assignment %}
+                    {% set owner = alert.property.agent if alert.property else none %}
                     {% set reassignments = alert.assignment_logs | selectattr('from_agent_id') | list %}
                     <div class="mt-4 pt-4 border-t border-gray-200" id="alertAssignment">
                         <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -123,7 +177,9 @@
                                     Asignada{% if alert.assigned_by_user %} por {{ alert.assigned_by_user.full_name or alert.assigned_by_user.email }}{% endif %}
                                     el {{ (alert.assigned_at or alert.created_at) | madrid_dt('%d/%m/%Y %H:%M') }}
                                 </p>
-                                {% if not owner %}
+                                {% if not alert.property %}
+                                <p class="text-xs text-gray-500">Búsqueda general: sin propiedad asociada</p>
+                                {% elif not owner %}
                                 <p class="text-xs text-gray-500">La propiedad no tiene agente captador</p>
                                 {% elif owner.id != alert.agent_id %}
                                 <p class="text-xs text-gray-500">Agente de la propiedad: {{ owner.name }}</p>
@@ -165,9 +221,10 @@
                         </details>
                         {% endif %}
                     </div>
+                    {% endif %}
                 </div>
 
-                <!-- Historial de Seguimientos -->
+                <!-- Historial de Seguimientos (el agente recibe solo los suyos desde la asignación) -->
                 <div class="bg-white rounded-xl border border-gray-200 p-6">
                     <h2 class="text-xl font-bold text-gray-800 mb-4">Historial de Seguimientos</h2>
 
@@ -199,6 +256,8 @@
                         </div>
                         {% endfor %}
                     </div>
+                    {% elif not is_admin and alert.status in [AlertStatus.PENDING, AlertStatus.IN_PROGRESS] %}
+                    <p class="text-gray-500 text-center py-8">Aún no hay seguimientos. Registra el primero.</p>
                     {% else %}
                     <p class="text-gray-500 text-center py-8">No hay seguimientos registrados aún</p>
                     {% endif %}
@@ -236,12 +295,32 @@
                             <p class="text-gray-800 font-medium">{{ alert.priority }}</p>
                         </div>
 
+                        {# Fecha: el admin ve la de creación y, si difiere, la de asignación;
+                           el agente solo la de su asignación (PLAN_ALERTA_COMO_NUEVA.md) #}
+                        {% if is_admin %}
                         <div>
-                            <label class="text-sm text-gray-600">Fecha Creación</label>
+                            <p class="text-sm text-gray-600">Fecha creación</p>
                             <p class="text-gray-800 text-sm">
                                 {{ alert.created_at | madrid_dt('%d/%m/%Y %H:%M') if alert.created_at else '-' }}
                             </p>
                         </div>
+
+                        {% if alert.assigned_at and alert.assigned_at != alert.created_at %}
+                        <div>
+                            <p class="text-sm text-gray-600">Asignada</p>
+                            <p class="text-gray-800 text-sm">
+                                {{ alert.assigned_at | madrid_dt('%d/%m/%Y %H:%M') }}
+                            </p>
+                        </div>
+                        {% endif %}
+                        {% else %}
+                        <div>
+                            <p class="text-sm text-gray-600">Fecha</p>
+                            <p class="text-gray-800 text-sm">
+                                {{ display_date | madrid_dt('%d/%m/%Y %H:%M') if display_date else '-' }}
+                            </p>
+                        </div>
+                        {% endif %}
 
                         {% if alert.read_at %}
                         <div>
@@ -268,6 +347,7 @@
                     <h3 class="text-lg font-bold text-gray-800 mb-4">Acciones</h3>
 
                     <div class="space-y-3">
+                        {# El agente bloqueado ya no llega aquí (alert_detail redirige); se deja por seguridad #}
                         {% if alert_locked %}
                         <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
                             <svg class="w-8 h-8 mx-auto text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -315,7 +395,7 @@
 
 {% if can_reassign %}
 <!-- Modal Reasignar (solo admin, alertas abiertas) -->
-{% call ui.modal("reassignModal", "Reasignar alerta", size="lg", subtitle=alert.lead_name ~ " · " ~ alert.property.title) %}
+{% call ui.modal("reassignModal", "Reasignar alerta", size="lg", subtitle=alert.lead_name ~ " · " ~ alert_subject) %}
 <form method="POST" action="/alerts/{{ alert.id }}/reassign" data-once data-loading-text="Reasignando…">
     <input type="hidden" name="next" value="/alerts/{{ alert.id }}">
     <div class="p-6 space-y-4">
@@ -335,7 +415,7 @@
 {% endif %}
 
 <!-- Modal Agregar Seguimiento -->
-{% call ui.modal("followUpModal", "Agregar seguimiento", size="lg", subtitle=alert.lead_name ~ " · " ~ alert.property.title) %}
+{% call ui.modal("followUpModal", "Agregar seguimiento", size="lg", subtitle=alert.lead_name ~ " · " ~ alert_subject) %}
 <form method="POST" action="/alerts/{{ alert.id }}/follow-up" data-once>
     <div class="p-6 space-y-4">
         <div>

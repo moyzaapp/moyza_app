@@ -214,6 +214,22 @@ class AlertStatus:
         return value in cls.values()
 
 
+class AlertOrigin:
+    """Cómo nació una alerta de comprador (PLAN_ALERTA_SIN_REFERENCIA.md).
+
+    - ``property``: creada con referencia (interés en un inmueble concreto).
+      No cambia de propiedad.
+    - ``search``: creada sin referencia (búsqueda general). La propiedad se
+      asocia después, a la misma alerta, y se puede cambiar.
+    """
+    PROPERTY = "property"
+    SEARCH = "search"
+
+    @classmethod
+    def values(cls):
+        return (cls.PROPERTY, cls.SEARCH)
+
+
 class FollowUpActionType:
     # Etapas de progresión (avanzan la etapa visible del comprador)
     PRIMERA_LLAMADA = "PRIMERA_LLAMADA"
@@ -241,8 +257,14 @@ class FollowUpActionType:
     # alerta ni marca actividad.
     REASIGNADA = "REASIGNADA"
 
+    # Asociar o cambiar la propiedad de una búsqueda (PLAN_ALERTA_SIN_REFERENCIA.md).
+    # Lo escribe la ruta /alerts/{id}/link-property, nunca el formulario de
+    # seguimiento (no está en STAGE_ORDER). Es una gestión real: desbloquea la
+    # cola y permite cerrar, pero no avanza la etapa visible.
+    PROPIEDAD_ASOCIADA = "PROPIEDAD_ASOCIADA"
+
     # Acciones que no avanzan la etapa de progresión visible
-    REPEATABLE_ACTIONS = {"SIN_RESPUESTA"}
+    REPEATABLE_ACTIONS = {"SIN_RESPUESTA", "PROPIEDAD_ASOCIADA"}
 
     # Acciones del sistema: se muestran en el historial pero no son seguimientos
     SYSTEM_ACTIONS = {"REASIGNADA"}
@@ -275,6 +297,7 @@ class FollowUpActionType:
             cls.SIN_SOLVENCIA_ECONOMICA: "Sin Solvencia Económica",
             cls.NO_APTO_PROPIETARIO: "No apto para el propietario",
             cls.REASIGNADA: "Reasignada",
+            cls.PROPIEDAD_ASOCIADA: "Propiedad asociada",
             # Etiquetas heredadas para registros antiguos
             "LLAMADA": "Llamada",
             "EMAIL_ENVIADO": "Email Enviado",
@@ -325,6 +348,8 @@ class FollowUpActionType:
             "NO_APTO_PROPIETARIO": "bg-red-100 text-red-700",
             # Nota del sistema: neutro, no es una etapa
             "REASIGNADA": "bg-gray-100 text-gray-700",
+            # Gestión que no es etapa: informativo
+            "PROPIEDAD_ASOCIADA": "bg-blue-100 text-blue-700",
             # Legados
             "LLAMADA": "bg-gray-100 text-gray-700",
             "EMAIL_ENVIADO": "bg-gray-100 text-gray-700",

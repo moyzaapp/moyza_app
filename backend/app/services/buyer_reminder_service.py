@@ -15,7 +15,6 @@ from typing import Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import selectinload
 
 from app.models.agent import Agent
@@ -53,7 +52,7 @@ def get_pending_buyers_by_agent(
     Devuelve un dict {(agent_id, company_id): [lista de compradores pendientes]}.
     Un comprador aparece si tiene al menos una alerta activa cuya
     última gestión supera `hours_threshold` horas. La empresa es la de la
-    propiedad de la alerta.
+    alerta (las búsquedas generales pueden no tener propiedad).
     """
     cutoff = datetime.utcnow() - timedelta(hours=hours_threshold)
 
@@ -61,9 +60,10 @@ def get_pending_buyers_by_agent(
 
     alerts = (
         db.query(PropertyAlert)
-        # Seguimientos y propiedad en lote (antes, 2 consultas por alerta);
-        # el Inicio llama a esta función en cada carga.
-        .options(selectinload(PropertyAlert.follow_ups), joinedload(PropertyAlert.property))
+        # Seguimientos en lote (antes, una consulta por alerta); el Inicio
+        # llama a esta función en cada carga. La empresa es columna propia de
+        # la alerta, así que ya no hace falta cargar la propiedad.
+        .options(selectinload(PropertyAlert.follow_ups))
         .outerjoin(last_followup, last_followup.c.alert_id == PropertyAlert.id)
         .filter(PropertyAlert.status.in_(REMINDER_STATUSES))
         # El reloj se reinicia al reasignar (PLAN_ASIGNACION_ALERTAS.md §2.5): no
@@ -94,8 +94,7 @@ def get_pending_buyers_by_agent(
             "hours_elapsed": int((datetime.utcnow() - last_action).total_seconds() // 3600),
         }
 
-        company_id = alert.property.company_id if alert.property else None
-        result.setdefault((alert.agent_id, company_id), []).append(entry)
+        result.setdefault((alert.agent_id, alert.company_id), []).append(entry)
 
     return result
 

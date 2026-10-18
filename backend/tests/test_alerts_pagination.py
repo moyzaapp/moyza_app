@@ -455,10 +455,11 @@ def test_ruta_estado_vacio_vista_por_defecto(sqlite_db):
     assert "Sin resultados" in table
 
 
-def test_modal_filtro_usa_autocompletado(sqlite_db):
+def test_sin_modal_con_filtro_y_autocompletado_de_compradores(sqlite_db):
+    # El modal "Agregar alerta con filtro" se eliminó (PLAN_ALERTA_SIN_REFERENCIA.md):
+    # el alta sin referencia vive en "Agregar alerta comprador"
     _, html = _get(sqlite_db)
-    assert 'id="fcBuyerSelect"' not in html
-    assert 'id="fcBuyerSearch"' in html
-    assert '<input type="hidden" name="buyer_id" id="fcBuyerIdHidden">' in html
-    # Ya no se vuelcan todos los compradores en un <option>
+    assert 'id="filterAlertModal"' not in html and 'id="fcBuyerSearch"' not in html
+    assert 'id="buyerSearch"' in html and 'id="btnRefWithout"' in html
+    # No se vuelcan todos los compradores en un <option>
     assert not re.search(r"<option[^>]*>\s*Comprador-", html)

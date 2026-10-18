@@ -17,6 +17,7 @@ import pytest
 from app.core.constants import AlertStatus
 from app.core.constants import FollowUpActionType
 from app.services import alert_assignment_service as svc
+from app.services import alert_view
 from app.services.alert_assignment_service import AlertAssignmentError
 
 
@@ -110,6 +111,71 @@ def test_reasignada_es_nota_del_sistema():
 
 
 # ---------------------------------------------------------------------------
+# Ventana de asignación (PLAN_ALERTA_COMO_NUEVA.md): unitarios sin base de datos
+# ---------------------------------------------------------------------------
+
+T0 = datetime(2026, 10, 1, 9, 0)
+REASSIGNED_AT = datetime(2026, 10, 10, 11, 30)
+
+
+def _fu(action, created_at, notes=""):
+    return SimpleNamespace(action_type=action, created_at=created_at, notes=notes)
+
+
+def _alert(created_at=T0, assigned_at=REASSIGNED_AT):
+    return SimpleNamespace(created_at=created_at, assigned_at=assigned_at)
+
+
+def test_assignment_start_cae_a_created_at():
+    assert alert_view.assignment_start(_alert()) == REASSIGNED_AT
+    assert alert_view.assignment_start(_alert(assigned_at=None)) == T0
+
+
+def test_display_date_por_rol():
+    alert = _alert()
+    assert alert_view.display_date(alert, is_admin=True) == T0
+    assert alert_view.display_date(alert, is_admin=False) == REASSIGNED_AT
+    assert alert_view.display_date(_alert(assigned_at=None), is_admin=False) == T0
+
+
+def test_visible_follow_ups_agente_solo_desde_la_asignacion_y_sin_notas():
+    alert = _alert()
+    old = _fu("PRIMERA_LLAMADA", T0 + timedelta(days=1))
+    note = _fu(FollowUpActionType.REASIGNADA, REASSIGNED_AT)
+    mine = _fu("CONTACTADO", REASSIGNED_AT + timedelta(hours=1))
+    undated = _fu("CONTACTADO", None)
+    follow_ups = [mine, note, old, undated]
+
+    assert alert_view.visible_follow_ups(follow_ups, alert, is_admin=False) == [mine]
+    # El admin lo ve todo, en el mismo orden
+    assert alert_view.visible_follow_ups(follow_ups, alert, is_admin=True) == follow_ups
+
+
+def test_seguimiento_justo_en_la_asignacion_cuenta():
+    alert = _alert()
+    same_instant = _fu("CONTACTADO", REASSIGNED_AT)
+    assert alert_view.visible_follow_ups([same_instant], alert, is_admin=False) == [same_instant]
+    assert alert_view.has_follow_up_since_assignment([same_instant], alert)
+
+
+def test_cerrar_exige_seguimiento_desde_la_asignacion():
+    alert = _alert()
+    assert not alert_view.has_follow_up_since_assignment(
+        [_fu("PRIMERA_LLAMADA", T0 + timedelta(days=1)), _fu(FollowUpActionType.REASIGNADA, REASSIGNED_AT)],
+        alert,
+    )
+    assert alert_view.has_follow_up_since_assignment([_fu("CONTACTADO", REASSIGNED_AT + timedelta(minutes=1))], alert)
+    # Alerta nunca reasignada (assigned_at = created_at): cuenta todo lo real
+    plain = _alert(assigned_at=T0)
+    assert alert_view.has_follow_up_since_assignment([_fu("CONTACTADO", T0 + timedelta(days=1))], plain)
+
+
+def test_real_follow_ups_since_sin_fecha_es_todo_lo_real():
+    follow_ups = [_fu("CONTACTADO", T0), _fu(FollowUpActionType.REASIGNADA, T0), _fu("CALIFICADO", None)]
+    assert [f.action_type for f in alert_view.real_follow_ups_since(follow_ups, None)] == ["CONTACTADO", "CALIFICADO"]
+
+
+# ---------------------------------------------------------------------------
 # Servicio con base de datos
 # ---------------------------------------------------------------------------
 
@@ -197,7 +263,9 @@ def test_alta_con_otro_agente_notifica_solo_al_nuevo(ctx):
     assert notes[0].company_id == ctx.moyza.id
     assert notes[0].url == f"/alerts/{alert.id}"
     assert "PYTEST-ASIG Comprador" in notes[0].title
-    assert "Carga de trabajo" in notes[0].body
+    # El motivo no va al agente (PLAN_ALERTA_COMO_NUEVA.md): solo la propiedad
+    assert notes[0].body == "PYTEST-ASIG Piso"
+    assert "Carga de trabajo" not in notes[0].body
     assert _notifications(ctx, ctx.users["ana"]) == []
     # El alta no escribe nota en los seguimientos
     assert alert.follow_ups == []
@@ -314,8 +382,9 @@ def test_recordatorio_48h_cuenta_desde_la_reasignacion(ctx):
 
 
 def test_nota_de_reasignacion_no_es_seguimiento(ctx):
-    """La nota REASIGNADA no oculta la próxima acción pendiente, no es
-    actividad del nuevo agente y no cuenta en el aviso de duplicados."""
+    """La nota REASIGNADA no es actividad del nuevo agente y no cuenta en el
+    aviso de duplicados. La próxima acción del agente anterior no entra en la
+    agenda del nuevo (PLAN_ALERTA_COMO_NUEVA.md); la suya sí."""
     from app.models.alert_follow_up import AlertFollowUp
     from app.services.alert_duplicate_service import serialize_alert
     from app.services.dashboard_service import DashboardService
@@ -325,12 +394,45 @@ def test_nota_de_reasignacion_no_es_seguimiento(ctx):
     ctx.db.add(AlertFollowUp(alert_id=alert.id, action_type="CONTACTADO", created_by=ctx.users["ana"].id,
                              created_at=now - timedelta(days=1), next_action_date=now - timedelta(hours=30)))
     ctx.db.flush()
-    svc.assign(ctx.db, alert, ctx.bea, ctx.admin, None, is_new=False, now=now)
+    svc.assign(ctx.db, alert, ctx.bea, ctx.admin, None, is_new=False, now=now - timedelta(hours=2))
     ctx.db.flush()
     ctx.db.refresh(alert)
 
     dashboard = DashboardService(ctx.db, ctx.moyza.id)
-    due = dashboard.agenda(ctx.bea, now=now)["due"]
-    assert [d["alert_id"] for d in due] == [alert.id]
+    assert dashboard.agenda(ctx.bea, now=now)["due"] == []
     assert dashboard.last_activity_by_agent([ctx.bea.id]).get(ctx.bea.id) is None
     assert serialize_alert(alert, {})["follow_ups"] == 1
+
+    ctx.db.add(AlertFollowUp(alert_id=alert.id, action_type="CALIFICADO", created_by=ctx.users["bea"].id,
+                             created_at=now - timedelta(hours=1), next_action_date=now - timedelta(minutes=30)))
+    ctx.db.flush()
+    due = dashboard.agenda(ctx.bea, now=now)["due"]
+    assert [d["alert_id"] for d in due] == [alert.id]
+
+
+def test_seguimientos_del_anterior_no_desbloquean_la_cola_del_nuevo(ctx):
+    """PLAN_ALERTA_COMO_NUEVA.md: la reasignada cuenta como "sin gestionar"
+    para el nuevo agente hasta que él registre un seguimiento."""
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.web.routes.alerts import get_locked_alert_ids
+
+    base = datetime.utcnow() - timedelta(days=10)
+    moved, _ = _new_alert(ctx, ctx.ana, created_at=base, name="PYTEST-ASIG MOVIDA")
+    ctx.db.add(AlertFollowUp(alert_id=moved.id, action_type="PRIMERA_LLAMADA", created_by=ctx.users["ana"].id,
+                             created_at=base + timedelta(hours=1)))
+    ctx.db.flush()
+    svc.assign(ctx.db, moved, ctx.bea, ctx.admin, None, is_new=False, now=base + timedelta(days=1))
+    later, _ = _new_alert(ctx, ctx.bea, created_at=base + timedelta(days=2), name="PYTEST-ASIG POSTERIOR")
+    ctx.db.flush()
+
+    assert get_locked_alert_ids(ctx.bea.id, ctx.db, ctx.moyza.id) == {later.id}
+
+    ctx.db.add(AlertFollowUp(alert_id=moved.id, action_type="CONTACTADO", created_by=ctx.users["bea"].id,
+                             created_at=base + timedelta(days=3)))
+    ctx.db.flush()
+    assert get_locked_alert_ids(ctx.bea.id, ctx.db, ctx.moyza.id) == set()
+    # El rastro se sigue guardando entero
+    ctx.db.refresh(moved)
+    assert sorted(f.action_type for f in moved.follow_ups) == ["CONTACTADO", "PRIMERA_LLAMADA", "REASIGNADA"]
+    assert alert_view.visible_follow_ups(moved.follow_ups, moved, is_admin=False)[0].action_type == "CONTACTADO"
+    assert len(alert_view.visible_follow_ups(moved.follow_ups, moved, is_admin=True)) == 3

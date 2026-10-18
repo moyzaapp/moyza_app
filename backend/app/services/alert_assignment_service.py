@@ -10,12 +10,17 @@ Reglas (decisiones §4):
   con `add_to_company`, igual que desde la ficha del agente. Su usuario gana
   acceso porque `get_allowed_companies` suma las empresas de su ficha.
 - Propiedad sin captador: se puede crear la alerta si el admin elige agente (§4-7).
+- Alerta sin referencia (búsqueda general, PLAN_ALERTA_SIN_REFERENCIA.md): no
+  hay captador; el admin elige el agente (obligatorio) y el agente que la crea
+  queda asignado a sí mismo (`resolve_search_assignee`).
 - Motivo: texto libre corto y opcional (§4-8).
 - Reasignar deja la alerta pendiente y sin leer, y conserva los seguimientos
   (§4-9). Se anota en el historial y como nota automática (`REASIGNADA`) en
   los seguimientos.
 - Aviso in-app `alert_assigned` solo al nuevo agente (§4-5): en el alta si no
-  es el captador y siempre en la reasignación. Nunca email ni WhatsApp.
+  es el captador y siempre en la reasignación. Nunca email ni WhatsApp. El
+  aviso no incluye el motivo ni dice que es una reasignación: para el agente
+  la alerta es nueva (PLAN_ALERTA_COMO_NUEVA.md); el rastro solo lo ve el admin.
 
 `resolve_assignee` y `validate_reassignment` son puras (sin base de datos)
 para poder probarlas como `visit_agents.resolve_visit_agents`.
@@ -128,6 +133,39 @@ def resolve_assignee(
     return agent
 
 
+def resolve_search_assignee(
+    *,
+    is_admin_user: bool,
+    requested_agent_id,
+    own_agent,
+    lookup_any_agent: Callable,
+):
+    """Agente de una alerta sin referencia (búsqueda general). Devuelve el Agent.
+
+    Sin propiedad no hay captador del que deducirlo: el admin debe elegirlo
+    (cualquier agente activo, §4-1 B) y el agente queda asignado a sí mismo.
+    Un agente que manda otro `agent_id` recibe un error, como en el alta con
+    referencia.
+    """
+    requested = _to_int(requested_agent_id)
+
+    if not is_admin_user:
+        if own_agent is None:
+            raise AlertAssignmentError("Tu usuario no tiene ficha de agente asociada")
+        if requested is not None and requested != own_agent.id:
+            raise AlertAssignmentError("Solo un administrador puede elegir el agente de la alerta")
+        return own_agent
+
+    if requested is None:
+        raise AlertAssignmentError(
+            "Sin propiedad, elige el agente que atenderá al comprador"
+        )
+    agent = lookup_any_agent(requested)
+    if agent is None:
+        raise AlertAssignmentError("El agente elegido no existe o no pertenece a ninguna empresa activa")
+    return agent
+
+
 def validate_reassignment(alert, agent, *, is_admin_user: bool) -> None:
     """Comprueba que la reasignación es posible; lanza AlertAssignmentError si no."""
     if not is_admin_user:
@@ -174,7 +212,11 @@ def assign(
     now = now or datetime.utcnow()
     reason = clean_reason(reason)
     prop = alert.property
-    company_id = prop.company_id if prop is not None else None
+    # Empresa de la alerta; una búsqueda general (PLAN_ALERTA_SIN_REFERENCIA.md)
+    # no tiene propiedad ni, por tanto, captador
+    company_id = alert.company_id if alert.company_id is not None else (
+        prop.company_id if prop is not None else None
+    )
     owner_agent_id = prop.agent_id if prop is not None else None
 
     result = AssignmentResult(agent=agent)
@@ -219,18 +261,31 @@ def assign(
         ))
 
     if not is_new or agent.id != owner_agent_id:
-        result.notifications = _notify_assigned(db, alert, agent, by_user, reason, company_id, now)
+        result.notifications = _notify_assigned(db, alert, agent, by_user, company_id, now)
 
     db.flush()
     return result
 
 
-def _notify_assigned(db: Session, alert, agent, by_user, reason, company_id, now) -> list:
-    """`alert_assigned` al nuevo agente; un fallo no deshace la asignación."""
+def alert_subject(alert) -> str:
+    """Texto corto de qué trata la alerta: el título de la propiedad o la búsqueda."""
     prop = alert.property
-    body = prop.title if prop is not None and prop.title else "Propiedad"
-    if reason:
-        body = f"{body} · {reason}"
+    if prop is not None:
+        return prop.title or "Propiedad"
+    if alert.business_type:
+        return f"Búsqueda general · {alert.business_type}"
+    return "Búsqueda general"
+
+
+def _notify_assigned(db: Session, alert, agent, by_user, company_id, now) -> list:
+    """`alert_assigned` al nuevo agente; un fallo no deshace la asignación.
+
+    Cuerpo: solo el título de la propiedad o, en una búsqueda sin propiedad,
+    "Búsqueda general · {operación}". El motivo de la asignación no se envía
+    al agente (PLAN_ALERTA_COMO_NUEVA.md): se guarda en la alerta y en el
+    historial, que solo ve el admin.
+    """
+    body = alert_subject(alert)
     try:
         with db.begin_nested():
             return notify(

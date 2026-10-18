@@ -123,6 +123,17 @@ def _available_property_id(db, company_code: str) -> int:
     return prop.id
 
 
+def _any_agent_id(db, company_code: str) -> int:
+    from app.models.agent import Agent
+    from app.models.company import Company
+
+    company = db.query(Company).filter(Company.code == company_code).first()
+    agent = db.query(Agent).filter(Agent.companies.any(Company.id == company.id)).first()
+    if agent is None:
+        pytest.skip(f"No hay agentes en {company_code} para asignar la búsqueda")
+    return agent.id
+
+
 def test_alta_indicativo_repetido_y_otro_pais(db):
     client = _Client("MOES")
 
@@ -163,22 +174,27 @@ def test_campo_antiguo_sigue_funcionando(db):
     client.post("/buyers/create", {"name": name, "phone": "600 11 22 33"})
     assert _buyer(db, name).phone == "34600112233"
 
-    name = f"{TAG} ANTIGUO CRITERIOS"
-    client.post("/buyers/create-with-criteria", {
+    # Alerta sin referencia (sustituye al alta "con filtro", PLAN_ALERTA_SIN_REFERENCIA.md)
+    name = f"{TAG} ANTIGUO BUSQUEDA"
+    client.post("/alerts/create", {
         "buyer_name": name, "buyer_phone": "+57 300 123 4567", "business_type": "Venta",
+        "confirm_new_buyer": "1", "agent_id": _any_agent_id(db, "MOES"),
     })
     assert _buyer(db, name).phone == "573001234567"
 
 
-def test_alta_con_criterios_campos_nuevos(db):
+def test_alerta_sin_referencia_campos_nuevos(db):
     client = _Client("MOES")
-    name = f"{TAG} CRITERIOS"
-    status, headers = client.post("/buyers/create-with-criteria", {
+    name = f"{TAG} BUSQUEDA"
+    status, headers = client.post("/alerts/create", {
         "buyer_name": name, "buyer_phone_country_code": "34",
         "buyer_phone_number": "0034 611 22 33 44", "business_type": "Venta",
+        "confirm_new_buyer": "1", "agent_id": _any_agent_id(db, "MOES"),
     })
     assert status == 302
-    assert _buyer(db, name).phone == "34611223344"
+    buyer = _buyer(db, name)
+    assert buyer.phone == "34611223344"
+    assert [(a.origin, a.lead_phone) for a in buyer.alerts] == [("search", "34611223344")]
 
 
 def test_edicion_conserva_pais_y_numero(db):

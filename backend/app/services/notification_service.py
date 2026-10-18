@@ -31,7 +31,6 @@ from app.models.agent import Agent
 from app.models.alert_follow_up import AlertFollowUp
 from app.models.company import Company
 from app.models.notification import Notification
-from app.models.property import Property
 from app.models.property_alert import PropertyAlert
 from app.models.role import Role
 from app.models.user import User
@@ -337,11 +336,12 @@ def run_follow_up_due(db: Session, now: Optional[datetime] = None) -> int:
         .group_by(AlertFollowUp.alert_id)
         .subquery()
     )
+    # Empresa de la propia alerta: las búsquedas sin propiedad también avisan
+    # (PLAN_ALERTA_SIN_REFERENCIA.md)
     rows = (
-        db.query(PropertyAlert, AlertFollowUp, Property.company_id)
+        db.query(PropertyAlert, AlertFollowUp, PropertyAlert.company_id)
         .join(latest, latest.c.alert_id == PropertyAlert.id)
         .join(AlertFollowUp, AlertFollowUp.id == latest.c.follow_up_id)
-        .join(Property, Property.id == PropertyAlert.property_id)
         .filter(
             PropertyAlert.status.in_([AlertStatus.PENDING, AlertStatus.IN_PROGRESS]),
             PropertyAlert.agent_id.isnot(None),
