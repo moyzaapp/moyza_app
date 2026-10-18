@@ -391,32 +391,32 @@ def buyer_kind(rule: str) -> str:
 BUYER_KINDS = (NotificationKind.BUYER_NO_ACTION, NotificationKind.BUYER_STAGE_STALL)
 
 
-def buyer_reminder_slot(due_at: datetime, now: datetime, repeat_business_days: int) -> datetime:
-    """Inicio del tramo de aviso en curso: `due_at`, `due_at` + N días hábiles, …
+def buyer_reminder_due(last_created_at: Optional[datetime], now: datetime, repeat_business_days: int) -> bool:
+    """¿Toca avisar otra vez? Cadencia de la campana (decisión 7).
 
-    Cadencia de la campana (decisión 7): al cruzar el umbral y de nuevo cada
-    `repeat_business_days` días hábiles mientras siga igual.
+    `last_created_at`: el último aviso de esa alerta y regla **del vencimiento
+    en curso** (creado desde `due_at`), o None si aún no hay ninguno. Se
+    avisa al cruzar el umbral y luego cuando han pasado al menos
+    `repeat_business_days` días hábiles desde el último aviso.
     """
-    from app.core.business_calendar import add_business_hours
+    from app.core.business_calendar import business_hours_between
 
-    slot = due_at
-    step = max(repeat_business_days, 1) * 24
-    while True:
-        following = add_business_hours(slot, step)
-        if following > now:
-            return slot
-        slot = following
+    if last_created_at is None:
+        return True
+    return business_hours_between(last_created_at, now) >= max(repeat_business_days, 1) * 24
 
 
 def run_buyer_attention(db: Session, items: Iterable, now: Optional[datetime] = None,
                         repeat_business_days: Optional[int] = None) -> int:
     """Una notificación por alerta vencida (`items` de `find_buyers_needing_attention`).
 
-    Deduplicación por alerta + regla + vencimiento: si el usuario ya tiene una
-    de esa regla y alerta creada en el tramo en curso (leída o no), no se
-    repite. Al abrir un tramo nuevo, la del tramo anterior que siga sin leer
-    se marca leída para que no se acumulen. Devuelve cuántas se crearon.
-    Solo in-app: sin email ni WhatsApp.
+    Deduplicación por alerta + regla + vencimiento (`due_at`): solo cuentan
+    los avisos de esa alerta y regla creados desde `due_at` (los de un ciclo
+    anterior, antes de una gestión o una reasignación, no). Se avisa al
+    cruzar el umbral y otra vez cuando han pasado `repeat_business_days`
+    días hábiles desde el último aviso, lo haya leído o no. Al repetir, el
+    aviso anterior que siga sin leer se marca leído para que no se acumulen.
+    Devuelve cuántas se crearon. Solo in-app: sin email ni WhatsApp.
     """
     from app.core.config import settings
 
@@ -426,23 +426,22 @@ def run_buyer_attention(db: Session, items: Iterable, now: Optional[datetime] = 
     for item in items:
         alert = item.alert
         kind = buyer_kind(item.rule)
-        slot = buyer_reminder_slot(item.due_at, now, repeat)
         try:
             users = []
             for user in users_for_agent(db, alert.agent):
-                same_slot = db.query(Notification.id).filter(
+                last = db.query(func.max(Notification.created_at)).filter(
                     Notification.user_id == user.id,
                     Notification.company_id == alert.company_id,
                     Notification.kind == kind,
                     Notification.entity_type == "alert",
                     Notification.entity_id == alert.id,
-                    Notification.created_at >= slot,
-                ).first()
-                if same_slot is None:
+                    Notification.created_at >= item.due_at,
+                ).scalar()
+                if buyer_reminder_due(last, now, repeat):
                     users.append(user)
             if not users:
                 continue
-            # La del tramo anterior queda superada por la nueva
+            # El aviso anterior que siga sin leer queda superado por el nuevo
             db.query(Notification).filter(
                 Notification.user_id.in_([u.id for u in users]),
                 Notification.company_id == alert.company_id,

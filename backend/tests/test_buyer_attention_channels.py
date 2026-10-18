@@ -1,11 +1,11 @@
 """
 Canales de los avisos de compradores en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md §2.3, fase 3).
 
-- Unitario: tramos de la cadencia in-app (al cruzar y cada 2 días hábiles).
+- Unitario: cadencia in-app (al cruzar y cada 2 días hábiles).
 - Con base de datos (transacción deshecha al terminar):
   - notificaciones `buyer_no_action` / `buyer_stage_stall`: una al cruzar,
-    sin duplicados en el mismo tramo (aunque se lea), otra al abrir el tramo
-    siguiente, y se marcan leídas cuando dejan de aplicar;
+    sin duplicados durante 2 días hábiles (aunque se lea), otra pasado ese
+    plazo, y se marcan leídas cuando dejan de aplicar;
   - job del email con un GmailService falso: no envía en sábado ni en lunes
     festivo; en día hábil, un email por agente con las dos secciones.
 - Integración contra la app levantada (se omite si no responde): el listado
@@ -40,14 +40,15 @@ def L(*args) -> datetime:
 # Unitario: cadencia
 # ---------------------------------------------------------------------------
 
-def test_tramos_de_aviso_cada_dos_dias_habiles():
-    due = L(2026, 10, 15, 9, 0)   # jueves
-    assert ns.buyer_reminder_slot(due, L(2026, 10, 16, 8, 0), 2) == due
-    assert ns.buyer_reminder_slot(due, L(2026, 10, 19, 8, 0), 2) == due
-    # jueves 9:00 + 2 días hábiles = lunes 9:00
-    assert ns.buyer_reminder_slot(due, L(2026, 10, 20, 8, 0), 2) == L(2026, 10, 19, 9, 0)
-    # lunes 9:00 + 2 = miércoles 9:00
-    assert ns.buyer_reminder_slot(due, L(2026, 10, 22, 8, 0), 2) == L(2026, 10, 21, 9, 0)
+def test_cadencia_al_cruzar_y_cada_dos_dias_habiles():
+    # Sin aviso previo del vencimiento en curso: toca
+    assert ns.buyer_reminder_due(None, L(2026, 10, 16, 8, 0), 2)
+    last = L(2026, 10, 16, 8, 0)   # viernes
+    assert not ns.buyer_reminder_due(last, L(2026, 10, 19, 8, 0), 2)    # lunes: 1 día hábil
+    assert ns.buyer_reminder_due(last, L(2026, 10, 20, 8, 0), 2)        # martes: 2
+    # Con lunes festivo por medio (2/11/2026): del viernes al martes es 1 día hábil
+    assert not ns.buyer_reminder_due(L(2026, 10, 30, 8, 0), L(2026, 11, 3, 8, 0), 2)
+    assert ns.buyer_reminder_due(L(2026, 10, 30, 8, 0), L(2026, 11, 4, 8, 0), 2)
 
 
 # ---------------------------------------------------------------------------
@@ -126,14 +127,14 @@ def test_notifica_al_cruzar_y_cada_dos_dias_habiles(ctx):
     assert "hábiles sin gestión" in first.body and "venció el jueves 15/10 a las 09:00" in first.body
     assert first.url == f"/alerts/{ctx.alert.id}"
     assert (first.entity_type, first.entity_id) == ("alert", ctx.alert.id)
-    # Mismo tramo: no se repite, ni aunque la haya leído
+    # Antes de 2 días hábiles no se repite, ni aunque la haya leído
     assert _run(ctx, L(2026, 10, 16, 15, 0)) == 0
     ns.mark_read(ctx.db, ctx.user.id, ctx.moyza.id, ids=[first.id], now=L(2026, 10, 16, 16, 0))
     assert _run(ctx, L(2026, 10, 19, 8, 0)) == 0
-    # Martes 8:00: tramo siguiente (lunes 9:00) -> otra
+    # Martes 8:00: 2 días hábiles desde la anterior -> otra
     assert _run(ctx, L(2026, 10, 20, 8, 0)) == 1
     assert _run(ctx, L(2026, 10, 21, 8, 0)) == 0
-    # Jueves 8:00 (tramo del miércoles 9:00): otra, y la del martes sin leer queda superada
+    # Jueves 8:00: otra, y la del martes sin leer queda superada
     assert _run(ctx, L(2026, 10, 22, 8, 0)) == 1
     notes = _mine(ctx, NotificationKind.BUYER_NO_ACTION)
     assert len(notes) == 3

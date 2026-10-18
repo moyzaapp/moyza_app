@@ -230,9 +230,10 @@ denegado") y todo su contenido es de la empresa activa:
   observaciones del admin.
 - Admin: KPIs del equipo, cumplimiento por agente, "Requiere atención",
   actividad reciente (visita cruzada marcada) y tendencia de 12 semanas.
-- Al entrar, ventana de compradores con más de `BUYER_REMINDER_HOURS`
-  (48 h) sin gestión: misma regla que el email de las 06:00, filtrada por
-  la empresa activa; una vez cerrada no vuelve ese día en ese navegador.
+- Al entrar, ventana de compradores que requieren atención: misma regla que
+  el email diario (desde la sección 12, en horas hábiles y con "sin avance"),
+  filtrada por la empresa activa; una vez cerrada no vuelve ese día en ese
+  navegador.
 - Notificaciones **solo in-app** (campana del navbar para agentes,
   `/notifications` y bloque "Novedades"): visita en tu inmueble, acompañante,
   ficha firmada, envío de ficha fallido, seguimiento de hoy o vencido
@@ -391,7 +392,86 @@ docker exec moyza_backend python scripts/normalize_buyer_phones.py --apply
 docker exec moyza_backend python -m pytest tests/test_phone.py tests/test_buyer_phone_routes.py -q
 ```
 
-## 12. Pendientes conocidos
+## 12. Avisos de compradores en horas hábiles (Jaén) y "sin avance"
+
+Detalle en `PLAN_ALERTAS_DIAS_HABILES.md` (decisiones en su §4). Los avisos de
+compradores pasan a contar **horas hábiles**: lunes a viernes, sin festivos
+nacionales, de Andalucía (con los traslados al lunes) ni locales de Jaén
+capital (11 de junio y 18 de octubre, `LocalHolidays` en `core/constants.py`,
+cargados para 2026-2028; para 2029 hay que añadirlos). 48 h hábiles = dos días
+hábiles completos a la misma hora: viernes 12:00 → martes 12:00 (miércoles si
+el lunes es festivo).
+
+- **R1 · Sin gestión**: 48 h hábiles desde la última gestión real (cualquier
+  seguimiento, también «Sin respuesta») o desde la asignación.
+- **R2 · Sin avance** (nuevo): 48 h hábiles sin pasar de **Primera llamada**
+  (o sin etapa); «Sin respuesta» no reinicia este reloj. Las etapas
+  siguientes no se vigilan.
+- Una sola fila por comprador/alerta, con la causa más grave (R1 antes que R2).
+- Canales: el email diario de siempre (ahora con dos secciones, "Sin gestión"
+  y "Sin avance de etapa"), el Inicio (modal y "Hoy y pendiente" del agente,
+  "Requiere atención" del admin), badge ámbar en `/alerts` con "Venció el …" y
+  plazos "Vence el …" en el detalle, y notificaciones in-app
+  `buyer_no_action` / `buyer_stage_stall`: una al cruzar el umbral y otra cada
+  2 días hábiles mientras siga igual. Cuando dejan de aplicar (seguimiento,
+  avance, cierre, reasignación o borrado) se **marcan leídas** (no se borran).
+  Ningún WhatsApp; ningún email para el admin.
+
+**Cambios que nota el equipo el día del despliegue (avisar antes):**
+
+1. **Los agentes van a recibir avisos de alertas `IN_PROGRESS` que hasta ahora
+   estaban en silencio.** Antes, con solo abrir la alerta (pasa a En proceso)
+   dejaba de avisar para siempre; ahora se vigilan las abiertas y hay que
+   registrar una gestión (R1) y avanzar de Primera llamada (R2). El primer
+   email y la primera tanda de la campana pueden traer compradores antiguos.
+2. El email diario cambia de hora y de calendario: de las 06:00 UTC todos los
+   días a las **08:00 de Madrid solo en días hábiles** (cron de lunes a
+   viernes con `timezone="Europe/Madrid"`; el servicio además se salta los
+   festivos de Jaén).
+
+Despliegue (sin migración de base de datos):
+
+```bash
+# Nueva dependencia `holidays` en requirements.txt: hay que reconstruir la imagen
+docker compose build backend   # o el comando de build habitual del servidor
+docker compose up -d backend
+docker exec moyza_backend python -c "import holidays; print(holidays.__version__)"
+```
+
+Variables (todas opcionales; valores por defecto entre paréntesis):
+
+- `BUYER_REMINDER_HOURS` (48): umbral de R1, ahora en **horas hábiles**.
+- `BUYER_STAGE_STALL_HOURS` (48, nueva): umbral de R2 en horas hábiles.
+- `BUYER_REMINDER_REPEAT_BUSINESS_DAYS` (2, nueva): cada cuántos días hábiles
+  se repite el aviso in-app.
+- `BUYER_REMINDER_HOUR` (8): **ahora es hora de Madrid** (antes 6 en UTC). Si
+  el `.env` de producción la fija a 6, quitarla o poner 8.
+- `BUYER_REMINDER_ENABLED` (true): apaga el email y los avisos in-app de este job.
+
+Rollback: desplegar el código anterior y reiniciar; no hay cambios de
+esquema. Las notificaciones `buyer_*` que queden se ven como un tipo
+desconocido (icono de campana) y se limpian a los 90 días una vez leídas.
+
+Prueba manual del job con fecha simulada y sin enviar correos (Gmail falso):
+
+```python
+# docker exec -it moyza_backend python
+import app.db.base
+from datetime import datetime
+from app.core.business_calendar import to_utc
+from app.jobs.scheduler import send_buyer_reminders
+class FakeGmail:
+    def send_email(self, to, subject, body): print(to, subject); return True
+send_buyer_reminders(now=to_utc(datetime(2026, 11, 3, 8, 0)), gmail_service=FakeGmail())
+# OJO: escribe alert_reminder_logs y notificaciones reales con esa fecha
+```
+
+```bash
+# Tests (calendario sin base de datos; servicio y canales con base de datos; ruta contra la app levantada)
+docker exec moyza_backend python -m pytest tests/test_business_calendar.py tests/test_buyer_attention_service.py tests/test_buyer_attention_channels.py -q
+```
+
+## 13. Pendientes conocidos
 
 - Datos legales y logo reales de MOES PREMIUM (sección 4).
 - Eliminar las columnas heredadas `users.company` y `agents.company` cuando ya

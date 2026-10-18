@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core import business_calendar as bc
 from app.core.config import settings
+from app.core.phone import phone_display
 from app.models.agent import Agent
 from app.models.alert_reminder_log import AlertReminderLog
 from app.models.company import Company
@@ -68,6 +69,13 @@ _CELL = "padding:8px 12px;border-bottom:1px solid #eee;"
 _HEAD = "padding:10px 12px;text-align:left;"
 
 
+def _phone(value) -> str:
+    """Teléfono legible (+34 600 111 222) o '—'."""
+    if not value or value == "—":
+        return "—"
+    return phone_display(value) or value
+
+
 def _section(title: str, intro: str, last_header: str, buyers: list[dict], value) -> str:
     """Tabla de una sección del email (vacía si no hay compradores)."""
     if not buyers:
@@ -76,7 +84,7 @@ def _section(title: str, intro: str, last_header: str, buyers: list[dict], value
         f"""
         <tr>
             <td style="{_CELL}">{escape(b['buyer_name'] or 'Comprador sin nombre')}</td>
-            <td style="{_CELL}">{escape(b['buyer_phone'] or '—')}</td>
+            <td style="{_CELL}">{escape(_phone(b['buyer_phone']))}</td>
             <td style="{_CELL}color:#c0392b;font-weight:bold;">{escape(value(b))}</td>
             <td style="{_CELL}">{escape(b['due_label'])}</td>
         </tr>"""

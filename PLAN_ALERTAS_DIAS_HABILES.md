@@ -113,32 +113,32 @@ Email solo en **días hábiles a las 08:00 Madrid** (hoy 06:00 UTC todos los dí
 Un commit por fase: `feat(compradores): fase N - avisos en horas hábiles …`. Skill `moyza-ui-ux-pro` en lo visual.
 
 ### Fase 1 · Calendario hábil
-- [ ] `holidays` en `requirements.txt` (+ `pip install` en el contenedor; recordar rebuild de imagen en producción).
-- [ ] `core/business_calendar.py` (§2.1), `LOCAL_HOLIDAYS` en `constants.py`, `BUYER_STAGE_STALL_HOURS` y
+- [x] `holidays` en `requirements.txt` (+ `pip install` en el contenedor; recordar rebuild de imagen en producción).
+- [x] `core/business_calendar.py` (§2.1), `LOCAL_HOLIDAYS` en `constants.py`, `BUYER_STAGE_STALL_HOURS` y
       `BUYER_REMINDER_REPEAT_BUSINESS_DAYS` en `config.py`.
-- [ ] `tests/test_business_calendar.py`.
+- [x] `tests/test_business_calendar.py`.
 
 ### Fase 2 · Servicio de atención y reglas
-- [ ] `services/buyer_attention_service.py` (§2.2) usando `alert_view` (ventana de asignación, seguimientos reales).
-- [ ] `get_pending_buyers_by_agent` delega en el servicio nuevo (misma forma de salida + campos nuevos
+- [x] `services/buyer_attention_service.py` (§2.2) usando `alert_view` (ventana de asignación, seguimientos reales).
+- [x] `get_pending_buyers_by_agent` delega en el servicio nuevo (misma forma de salida + campos nuevos
       `rule`, `due_at`, `business_hours_elapsed`, `stage_label`).
-- [ ] `REMINDER_STATUSES` pasa a incluir `IN_PROGRESS`.
-- [ ] Tests: R1 con fin de semana por medio; R2 con "sin respuesta" repetidos; alerta reasignada arranca de
+- [x] `REMINDER_STATUSES` pasa a incluir `IN_PROGRESS`.
+- [x] Tests: R1 con fin de semana por medio; R2 con "sin respuesta" repetidos; alerta reasignada arranca de
       cero; nota `REASIGNADA` no cuenta; alerta cerrada no aparece; empresa aislada.
 
 ### Fase 3 · Canales
-- [ ] Email: dos secciones, horas hábiles en la columna "Sin gestión", solo días hábiles a las 08:00 Madrid
+- [x] Email: dos secciones, horas hábiles en la columna "Sin gestión", solo días hábiles a las 08:00 Madrid
       (`jobs/scheduler.py`: cron con `timezone="Europe/Madrid"` y comprobación de día hábil).
-- [ ] Notificaciones in-app `BUYER_NO_ACTION` y `BUYER_STAGE_STALL` con la cadencia de §2.3; job que las
+- [x] Notificaciones in-app `BUYER_NO_ACTION` y `BUYER_STAGE_STALL` con la cadencia de §2.3; job que las
       genera a continuación del email (misma pasada, para no duplicar consultas).
-- [ ] Inicio (agente y admin): la lista y el modal incluyen R2 con la etapa; textos en horas/días hábiles.
-- [ ] `/alerts` y detalle: badge y "vence el …".
-- [ ] Tests de las notificaciones (dedupe y cadencia) y de ruta del listado.
+- [x] Inicio (agente y admin): la lista y el modal incluyen R2 con la etapa; textos en horas/días hábiles.
+- [x] `/alerts` y detalle: badge y "vence el …".
+- [x] Tests de las notificaciones (dedupe y cadencia) y de ruta del listado.
 
 ### Fase 4 · QA y despliegue
-- [ ] Prueba con fecha simulada (`now` inyectable en el servicio y en el job) cubriendo viernes → martes y un festivo.
-- [ ] `ui_lint.py`; revisión móvil.
-- [ ] Nota de despliegue en `MULTIEMPRESA_MOYZA_MOES.md`: nueva dependencia (rebuild), variables nuevas, el job
+- [x] Prueba con fecha simulada (`now` inyectable en el servicio y en el job) cubriendo viernes → martes y un festivo.
+- [x] `ui_lint.py`; revisión móvil.
+- [x] Nota de despliegue en `MULTIEMPRESA_MOYZA_MOES.md`: nueva dependencia (rebuild), variables nuevas, el job
       cambia de hora y de calendario, y **los agentes van a recibir avisos de alertas `IN_PROGRESS` que hasta
       ahora estaban en silencio** (avisar al equipo el día del despliegue).
 
