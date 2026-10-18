@@ -368,7 +368,7 @@ def test_cola_ordena_por_asignacion_y_la_nota_no_desbloquea(ctx):
 def test_recordatorio_48h_cuenta_desde_la_reasignacion(ctx):
     from app.services.buyer_reminder_service import get_pending_buyers_by_agent
 
-    old = datetime.utcnow() - timedelta(days=5)
+    old = datetime.utcnow() - timedelta(days=10)
     kept, _ = _new_alert(ctx, ctx.ana, created_at=old, name="PYTEST-ASIG SIGUE")
     moved, _ = _new_alert(ctx, ctx.ana, created_at=old, name="PYTEST-ASIG REASIGNADA")
     svc.assign(ctx.db, moved, ctx.bea, ctx.admin, None, is_new=False, now=datetime.utcnow())

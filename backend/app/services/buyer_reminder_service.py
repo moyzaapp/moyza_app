@@ -10,93 +10,51 @@ que trabaja en MOYZA y en MOES PREMIUM recibe un correo por cada empresa,
 cada uno con la marca correspondiente.
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
-from sqlalchemy.orm import selectinload
 
 from app.models.agent import Agent
-from app.models.alert_follow_up import AlertFollowUp
 from app.models.alert_reminder_log import AlertReminderLog
 from app.models.company import Company
-from app.models.property_alert import PropertyAlert
+from app.services.alert_view import OPEN_ALERT_STATUSES
+from app.services.buyer_attention_service import find_buyers_needing_attention
+from app.services.buyer_attention_service import group_by_agent_and_company
 from app.services.company_service import branding_for
 from app.services.gmail_service import GmailService
 
 logger = logging.getLogger(__name__)
 
-# Cambiar a ["PENDING"] para notificar solo alertas nuevas sin abrir.
-# Dejar ["PENDING", "IN_PROGRESS"] para notificar cualquier alerta activa.
-REMINDER_STATUSES = ["PENDING"]
-
-
-def _last_action_subquery(db: Session):
-    """Subconsulta: fecha del último follow-up por alerta."""
-    return (
-        db.query(
-            AlertFollowUp.alert_id,
-            func.max(AlertFollowUp.created_at).label("last_followup_at"),
-        )
-        .group_by(AlertFollowUp.alert_id)
-        .subquery()
-    )
+# Alertas vigiladas: las abiertas. Abrir una alerta (pasa a IN_PROGRESS) ya no
+# silencia los avisos (PLAN_ALERTAS_DIAS_HABILES.md, decisión 4).
+REMINDER_STATUSES = list(OPEN_ALERT_STATUSES)
 
 
 def get_pending_buyers_by_agent(
     db: Session,
-    hours_threshold: int
+    hours_threshold: int,
+    now: Optional[datetime] = None,
+    company_id: Optional[int] = None,
+    agent_id: Optional[int] = None,
 ) -> dict[tuple[int, int], list[dict]]:
     """
-    Devuelve un dict {(agent_id, company_id): [lista de compradores pendientes]}.
-    Un comprador aparece si tiene al menos una alerta activa cuya
-    última gestión supera `hours_threshold` horas. La empresa es la de la
-    alerta (las búsquedas generales pueden no tener propiedad).
+    Devuelve un dict {(agent_id, company_id): [compradores que requieren atención]}.
+
+    Envoltorio de `buyer_attention_service.find_buyers_needing_attention`
+    (horas hábiles, reglas R1 "sin gestión" y R2 "sin avance", una fila por
+    alerta). `hours_threshold` es el umbral de R1 en horas hábiles. Cada fila
+    conserva la forma de siempre (`alert_id`, `buyer_name`, `buyer_phone`,
+    `alert_status`, `last_action_at`, `hours_elapsed`, ahora en horas hábiles)
+    y añade `rule`, `due_at`, `business_hours_elapsed`, `stage_label`, `text`…
     """
-    cutoff = datetime.utcnow() - timedelta(hours=hours_threshold)
-
-    last_followup = _last_action_subquery(db)
-
-    alerts = (
-        db.query(PropertyAlert)
-        # Seguimientos en lote (antes, una consulta por alerta); el Inicio
-        # llama a esta función en cada carga. La empresa es columna propia de
-        # la alerta, así que ya no hace falta cargar la propiedad.
-        .options(selectinload(PropertyAlert.follow_ups))
-        .outerjoin(last_followup, last_followup.c.alert_id == PropertyAlert.id)
-        .filter(PropertyAlert.status.in_(REMINDER_STATUSES))
-        # El reloj se reinicia al reasignar (PLAN_ASIGNACION_ALERTAS.md §2.5): no
-        # se reclama al nuevo agente por el tiempo que la tuvo el anterior.
-        .filter(
-            func.greatest(
-                func.coalesce(last_followup.c.last_followup_at, PropertyAlert.created_at),
-                func.coalesce(PropertyAlert.assigned_at, PropertyAlert.created_at),
-            )
-            < cutoff
-        )
-        .all()
+    items = find_buyers_needing_attention(
+        db, company_id=company_id, agent_id=agent_id, now=now, no_action_hours=hours_threshold,
     )
-
-    result: dict[tuple[int, int], list[dict]] = {}
-
-    for alert in alerts:
-        last_action = max(
-            [fu.created_at for fu in alert.follow_ups if fu.created_at]
-            + [alert.created_at, alert.assigned_at or alert.created_at]
-        )
-        entry = {
-            "alert_id": alert.id,
-            "buyer_name": alert.lead_name,
-            "buyer_phone": alert.lead_phone or "—",
-            "alert_status": alert.status,
-            "last_action_at": last_action,
-            "hours_elapsed": int((datetime.utcnow() - last_action).total_seconds() // 3600),
-        }
-
-        result.setdefault((alert.agent_id, alert.company_id), []).append(entry)
-
-    return result
+    return {
+        key: [item.as_dict() for item in group]
+        for key, group in group_by_agent_and_company(items).items()
+    }
 
 
 def _build_email_body(

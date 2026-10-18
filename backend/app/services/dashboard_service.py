@@ -353,7 +353,7 @@ class DashboardService:
             "portfolio": self.portfolio(agent, now=now),
             "trend": self.agent_trend(agent, period, now=now),
             "admin_notes": (report.admin_notes or "").strip() if report else "",
-            "pending_buyers": self.pending_buyers_for_agent(agent.id),
+            "pending_buyers": self.pending_buyers_for_agent(agent.id, now=now),
         }
 
     # ------------------------------------------------------------------
@@ -469,9 +469,11 @@ class DashboardService:
             "is_empty": not due_total and not unread and not no_response,
         }
 
-    def pending_buyers_for_agent(self, agent_id: int) -> list:
+    def pending_buyers_for_agent(self, agent_id: int, now: Optional[datetime] = None) -> list:
         """Compradores con más de BUYER_REMINDER_HOURS sin gestión (regla del email de las 06:00)."""
-        pending = get_pending_buyers_by_agent(self.db, settings.BUYER_REMINDER_HOURS)
+        pending = get_pending_buyers_by_agent(
+            self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id, agent_id=agent_id,
+        )
         buyers = pending.get((agent_id, self.company_id), [])
         return sorted(buyers, key=lambda b: b["hours_elapsed"], reverse=True)
 
@@ -618,7 +620,7 @@ class DashboardService:
             for a in agents
         }
 
-        pending = self.pending_buyers_by_agent(agents)
+        pending = self.pending_buyers_by_agent(agents, now=now)
 
         return {
             "kpis": self.team_kpis(agent_ids, metrics_now, metrics_prev, period, previous_period),
@@ -743,9 +745,11 @@ class DashboardService:
 
     # -- Requiere atención -------------------------------------------------
 
-    def pending_buyers_by_agent(self, agents) -> list:
+    def pending_buyers_by_agent(self, agents, now: Optional[datetime] = None) -> list:
         """Compradores con más de BUYER_REMINDER_HOURS sin gestión, agrupados por agente."""
-        pending = get_pending_buyers_by_agent(self.db, settings.BUYER_REMINDER_HOURS)
+        pending = get_pending_buyers_by_agent(
+            self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id,
+        )
         names = {a.id: a.name for a in agents}
         groups = []
         for (agent_id, company_id), buyers in pending.items():
