@@ -38,12 +38,19 @@ class Settings:
         "app/credentials/gmail_token.json"
     )
 
-    # Umbral en horas sin gestión para disparar el recordatorio (default 48h)
+    # Avisos de compradores en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md).
+    # Las horas se cuentan solo en días hábiles de Jaén (24 h por día hábil,
+    # app/core/business_calendar.py): 48 = dos días hábiles completos.
+    # R1 "sin gestión": horas hábiles desde la última gestión real o la asignación
     BUYER_REMINDER_HOURS: int = int(os.getenv("BUYER_REMINDER_HOURS", "48"))
+    # R2 "sin avance": horas hábiles sin pasar de Primera llamada
+    BUYER_STAGE_STALL_HOURS: int = int(os.getenv("BUYER_STAGE_STALL_HOURS", "48"))
+    # Aviso in-app: al cruzar el umbral y de nuevo cada N días hábiles mientras siga igual
+    BUYER_REMINDER_REPEAT_BUSINESS_DAYS: int = int(os.getenv("BUYER_REMINDER_REPEAT_BUSINESS_DAYS", "2"))
 
-
-    # Hora del día (UTC) en que se ejecuta el recordatorio (default 6 = 6am UTC)
-    BUYER_REMINDER_HOUR: int = int(os.getenv("BUYER_REMINDER_HOUR", "6"))
+    # Hora del día (Europe/Madrid) del email diario y los avisos in-app; solo
+    # en días hábiles. Antes era 6 en UTC: revisar el .env al desplegar.
+    BUYER_REMINDER_HOUR: int = int(os.getenv("BUYER_REMINDER_HOUR", "8"))
 
     # Habilitar/deshabilitar el recordatorio sin necesidad de eliminar el job
     BUYER_REMINDER_ENABLED: bool = os.getenv("BUYER_REMINDER_ENABLED", "true").lower() in {"1", "true", "yes", "on"}

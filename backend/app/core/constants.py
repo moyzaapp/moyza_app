@@ -433,6 +433,28 @@ class PerformanceObjectives:
         return cls.TARGET_FIELDS[metric_key]
 
 
+class LocalHolidays:
+    """Festivos locales de Jaén capital (PLAN_ALERTAS_DIAS_HABILES.md, decisión 2).
+
+    Los fija el Ayuntamiento cada año y valen para las dos empresas. Los
+    nacionales y los de Andalucía (con sus traslados al lunes) salen de la
+    librería `holidays`; aquí solo van los dos locales. Si el Ayuntamiento los
+    cambia, o para un año nuevo, se edita esta lista: un año que no aparece no
+    tiene festivos locales.
+    """
+
+    # año -> [(mes, día, nombre)]
+    BY_YEAR = {
+        2026: [(6, 11, "Virgen de la Capilla"), (10, 18, "San Lucas")],
+        2027: [(6, 11, "Virgen de la Capilla"), (10, 18, "San Lucas")],
+        2028: [(6, 11, "Virgen de la Capilla"), (10, 18, "San Lucas")],
+    }
+
+
+# Atajo con el nombre del plan
+LOCAL_HOLIDAYS = LocalHolidays.BY_YEAR
+
+
 class DashboardThresholds:
     """Umbrales del Inicio (PLAN_DASHBOARD_INICIO.md §6-7).
 
