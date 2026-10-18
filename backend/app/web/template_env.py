@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 
+from app.core.config import settings
 from app.core.constants import AlertOrigin, BusinessType, PhoneCountryCodes
 from app.core.phone import phone_display, split_phone, tel_href, whatsapp_url
 
@@ -99,6 +100,8 @@ templates.env.filters["eur"] = eur
 templates.env.globals["phone_country_choices"] = PhoneCountryCodes.choices()
 templates.env.globals["phone_default_country"] = PhoneCountryCodes.DEFAULT
 templates.env.globals["current_year"] = lambda: datetime.now().year
+# Envío de la ficha de visita por WhatsApp (ver config.VISIT_SHEET_WHATSAPP_ENABLED)
+templates.env.globals["visit_sheet_whatsapp_enabled"] = settings.VISIT_SHEET_WHATSAPP_ENABLED
 # Operaciones fijas (Venta / Alquiler) para los selects: BusinessType.values()
 templates.env.globals["BusinessType"] = BusinessType
 # Origen de una alerta: con referencia ('property') o búsqueda general ('search')
