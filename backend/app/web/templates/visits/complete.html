@@ -26,8 +26,12 @@ Visita Completada
     </h1>
 
     <p class="text-gray-600 mb-8">
+        {% if visit_sheet_whatsapp_enabled %}
         El documento de visita está siendo generado y será enviado por WhatsApp
-        al cliente y al agente inmobiliario.
+        al cliente.
+        {% else %}
+        El documento de visita está siendo generado. Podrás descargarlo a continuación.
+        {% endif %}
     </p>
 
     <!-- Loading mientras se genera el PDF -->

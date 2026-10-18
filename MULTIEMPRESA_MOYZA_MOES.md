@@ -480,3 +480,14 @@ docker exec moyza_backend python -m pytest tests/test_business_calendar.py tests
   usuarios no es un dato de empresa.
 - Vista consolidada "Todas las empresas" para el admin: descartada en esta
   versión, pendiente de decidir.
+
+## 14. Ficha de visita: envío por WhatsApp desactivado (2026-10-18)
+
+La ficha firmada ya no se envía por WhatsApp al comprador, ni al finalizar la
+visita ni con el botón "Enviar" (que deja de mostrarse). El PDF se genera y se
+descarga igual. Cada finalización deja una fila `SKIPPED` en
+`visit_whatsapp_logs` con el motivo "Envío por WhatsApp desactivado".
+
+Para reactivarlo: `VISIT_SHEET_WHATSAPP_ENABLED=true` en el `.env` y reiniciar.
+No hay cambios de código ni de base de datos. Los envíos de informes a
+propietarios no se ven afectados.

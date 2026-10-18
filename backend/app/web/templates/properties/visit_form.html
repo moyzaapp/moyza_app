@@ -291,7 +291,11 @@ Registrar visita
                 >
                 <input type="hidden" name="generate_sheet" value="true">
                 <span class="text-xs sm:text-sm text-gray-700">
-                    Generar y enviar ficha de visita por WhatsApp al comprador y agente
+                    {% if visit_sheet_whatsapp_enabled %}
+                    Generar y enviar ficha de visita por WhatsApp al comprador
+                    {% else %}
+                    Generar ficha de visita (PDF firmado, disponible para descargar)
+                    {% endif %}
                 </span>
             </label>
         </div>

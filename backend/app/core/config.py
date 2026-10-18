@@ -17,6 +17,12 @@ class Settings:
     WHATSAPP_API_KEY: str = os.getenv("WHATSAPP_API_KEY")
     PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "https://moyza.duckdns.org")
 
+    # Envío de la ficha de visita firmada por WhatsApp al comprador (al finalizar
+    # la visita y con el botón "Enviar" del detalle de la propiedad). Desactivado
+    # por decisión del usuario el 2026-10-18; se reactiva con
+    # VISIT_SHEET_WHATSAPP_ENABLED=true sin tocar código. El PDF se genera igual.
+    VISIT_SHEET_WHATSAPP_ENABLED: bool = os.getenv("VISIT_SHEET_WHATSAPP_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+
     AI_ENABLED: bool = os.getenv("AI_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "openai")
 

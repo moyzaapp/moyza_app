@@ -700,6 +700,7 @@ Detalle Propiedad
                         <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
                             <div class="flex items-center justify-center gap-2 whitespace-nowrap">
                                 {% if visit.visit_sheet_filepath %}
+                                    {% if visit_sheet_whatsapp_enabled %}
                                     <form action="/visits/{{ visit.id }}/send-whatsapp" method="POST" class="inline-block">
                                         <button
                                             type="submit"
@@ -712,6 +713,7 @@ Detalle Propiedad
                                             Enviar
                                         </button>
                                     </form>
+                                    {% endif %}
                                     <a
                                         href="/visits/{{ visit.id }}/download"
                                         class="bg-gray-800 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-gray-900 active:bg-black transition-colors text-xs sm:text-sm font-medium flex items-center gap-1"

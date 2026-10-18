@@ -388,7 +388,21 @@ async def finalize_visit(
         sent_to = []
         send_failed = False
 
-        if visit.phone:
+        if not settings.VISIT_SHEET_WHATSAPP_ENABLED:
+            # Envío desactivado por configuración: el PDF queda generado y
+            # descargable; se deja constancia en el log para poder auditarlo.
+            log_whatsapp_attempt(
+                db=db,
+                visit_id=visit.id,
+                property_id=property_item.id,
+                recipient_type="comprador",
+                recipient_name=visit.visitor_name,
+                recipient_phone=visit.phone,
+                status="SKIPPED",
+                trigger="finalize",
+                error_message="Envío por WhatsApp desactivado (VISIT_SHEET_WHATSAPP_ENABLED=false)"
+            )
+        elif visit.phone:
             started_at = perf_counter()
             try:
                 send_report(

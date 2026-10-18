@@ -431,6 +431,24 @@ async def send_visit_sheet_whatsapp(
 
     triggered_by = request.state.user.id if request.state.user else None
 
+    if not settings.VISIT_SHEET_WHATSAPP_ENABLED:
+        # Envío desactivado por configuración (ver VISIT_SHEET_WHATSAPP_ENABLED)
+        log_whatsapp_attempt(
+            db=db,
+            visit_id=visit.id,
+            property_id=property_item.id,
+            recipient_type="comprador",
+            recipient_name=visit.visitor_name,
+            recipient_phone=visit.phone,
+            status="SKIPPED",
+            trigger="manual_resend",
+            error_message="Envío por WhatsApp desactivado (VISIT_SHEET_WHATSAPP_ENABLED=false)",
+            triggered_by=triggered_by
+        )
+        response = RedirectResponse(url=redirect_url, status_code=302)
+        set_flash(response, "info", "El envío de fichas de visita por WhatsApp está desactivado. La ficha sigue disponible para descargar.")
+        return response
+
     if visit.phone:
         started_at = perf_counter()
         try:
