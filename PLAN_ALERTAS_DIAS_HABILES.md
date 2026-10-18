@@ -151,19 +151,19 @@ Un commit por fase: `feat(compradores): fase N - avisos en horas hábiles …`. 
 
 ---
 
-## 4. Preguntas antes de ejecutar
+## 4. Decisiones tomadas (2026-10-18)
 
-| # | Pregunta | Recomendación |
+| # | Pregunta | Decisión |
 |---|---|---|
-| 1 | **Qué son "48 h hábiles"**: (a) dos días hábiles completos a la misma hora (viernes 18:00 → martes 18:00), o (b) horas de oficina, por ejemplo 9:00-20:00 de lunes a viernes (48 h = unas 4,4 jornadas)? | (a): más simple de explicar y de ver en el listado |
-| 2 | **Festivos locales de Jaén**: ¿los de Jaén capital para las dos empresas? Mi dato, **a confirmar**: 11 de junio (Virgen de la Capilla) y 18 de octubre (San Lucas). ¿Hay agentes en otros municipios con festivos distintos? | Jaén capital para todos; lista en configuración por año |
-| 3 | **Sábado**: ¿día hábil o no? | No hábil (lunes a viernes) |
-| 4 | **Alertas ya abiertas (`IN_PROGRESS`)**: confirmas que los avisos deben seguir aunque el agente haya abierto la alerta. Hoy abrirla los apaga. | Sí, seguir |
-| 5 | **Regla "sin avance" (R2)**: ¿48 h hábiles para **cualquier** etapa, o solo cuando está en la primera ("Primera llamada")? ¿Mismo umbral que R1? | Cualquier etapa, mismo umbral; se puede afinar por etapa después |
-| 6 | **Canal de R2**: in-app + Inicio + sección en el email diario que ya existe (sin correo nuevo). ¿O solo in-app, sin email? | In-app + sección en el email existente |
-| 7 | **Cadencia in-app**: una notificación al cruzar el umbral y otra cada 2 días hábiles mientras siga igual. ¿Vale, o solo una vez? | Al cruzar y cada 2 días hábiles |
-| 8 | **Email solo en días hábiles** a las 08:00 Madrid (hoy todos los días a las 06:00 UTC). ¿De acuerdo? | Sí |
-| 9 | **Admin**: ¿solo lo ve en "Requiere atención" del Inicio (como hoy), o también quiere el email diario con el resumen de todos los agentes? | Solo Inicio |
+| 1 | Qué son "48 h hábiles" | **Días hábiles completos** a la misma hora (viernes 18:00 → martes 18:00). |
+| 2 | Festivos locales de Jaén | **Los de Jaén capital para las dos empresas**: 11 de junio (Virgen de la Capilla) y 18 de octubre (San Lucas), en `LOCAL_HOLIDAYS` por año (2026, 2027, 2028). Si el Ayuntamiento los cambia, se edita la lista. |
+| 3 | Sábado | **No hábil.** Lunes a viernes. |
+| 4 | Alertas ya abiertas (`IN_PROGRESS`) | El usuario pide **que no se llene de avisos y que solo se reclame lo que de verdad requiere gestión**. Decisión: **sí se vigilan las abiertas** (si no, abrir la alerta la silencia para siempre y justo eso es lo que hoy falla), pero con estas limitaciones de ruido: (a) una sola fila por comprador con la causa más grave; (b) la campana avisa al cruzar el umbral y luego solo cada 2 días hábiles; (c) un único email diario, en días hábiles; (d) registrar **cualquier gestión real** (incluido "Sin respuesta") silencia R1; (e) R2 solo en Primera llamada (decisión 5). Nada de avisos por el mero hecho de estar abierta. |
+| 5 | Regla "sin avance" (R2) | **Solo para la primera etapa**: aplica cuando la alerta no tiene ningún seguimiento de etapa o su última etapa es `PRIMERA_LLAMADA`. Texto: "N días hábiles sin pasar de Primera llamada". Mismo umbral de 48 h hábiles (`BUYER_STAGE_STALL_HOURS`). Las etapas siguientes quedan fuera por ahora. |
+| 6 | Canal de R2 | **In-app + Inicio + sección en el email diario existente.** Sin correo nuevo. |
+| 7 | Cadencia in-app | **Al cruzar el umbral y cada 2 días hábiles** mientras siga igual. |
+| 8 | Email solo en días hábiles a las 08:00 Madrid | **Sí** (recomendación aceptada por defecto). |
+| 9 | Admin | **Solo Inicio** ("Requiere atención"). Sin email para el admin. |
 
 ---
 
