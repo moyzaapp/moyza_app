@@ -26,6 +26,7 @@ class PhoneCountryCodes:
         ("56", "CL", "🇨🇱", "Chile"),
         ("593", "EC", "🇪🇨", "Ecuador"),
         ("58", "VE", "🇻🇪", "Venezuela"),
+        ("55", "BR", "🇧🇷", "Brasil"),
         ("1", "US", "🇺🇸", "Estados Unidos"),
         ("44", "GB", "🇬🇧", "Reino Unido"),
         ("33", "FR", "🇫🇷", "Francia"),
