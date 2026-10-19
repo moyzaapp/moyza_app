@@ -51,6 +51,10 @@ class NotificationKind:
     ALERT_ASSIGNED = "alert_assigned"
     # Compradores que requieren atención (PLAN_ALERTAS_DIAS_HABILES.md §2.3)
     BUYER_NO_ACTION = "buyer_no_action"
+    # PLAN_RECORDATORIO_SIN_RESPUESTA.md: «volver a llamar» tras «Sin respuesta»
+    BUYER_CALLBACK_DUE = "buyer_callback_due"
+    # Regla retirada («sin avance de Primera llamada»): solo para pintar el
+    # historial y resolver las antiguas
     BUYER_STAGE_STALL = "buyer_stage_stall"
 
     # Icono (dashboard/components/icons.html) y tono por tipo
@@ -63,6 +67,7 @@ class NotificationKind:
         ADMIN_NOTE_ADDED: ("chat", "gray"),
         ALERT_ASSIGNED: ("user", "blue"),
         BUYER_NO_ACTION: ("inbox", "amber"),
+        BUYER_CALLBACK_DUE: ("clock", "amber"),
         BUYER_STAGE_STALL: ("user", "amber"),
     }
 
@@ -384,11 +389,13 @@ def run_follow_up_due(db: Session, now: Optional[datetime] = None) -> int:
 
 def buyer_kind(rule: str) -> str:
     """Tipo de notificación de una regla de `buyer_attention_service`."""
-    from app.services.buyer_attention_service import RULE_NO_ACTION
-    return NotificationKind.BUYER_NO_ACTION if rule == RULE_NO_ACTION else NotificationKind.BUYER_STAGE_STALL
+    from app.services.buyer_attention_service import RULE_CALLBACK
+    return NotificationKind.BUYER_CALLBACK_DUE if rule == RULE_CALLBACK else NotificationKind.BUYER_NO_ACTION
 
 
-BUYER_KINDS = (NotificationKind.BUYER_NO_ACTION, NotificationKind.BUYER_STAGE_STALL)
+# Tipos que `resolve_buyer_notifications` revisa (el retirado, solo para resolverlo)
+BUYER_KINDS = (NotificationKind.BUYER_NO_ACTION, NotificationKind.BUYER_CALLBACK_DUE,
+               NotificationKind.BUYER_STAGE_STALL)
 
 
 def buyer_reminder_due(last_created_at: Optional[datetime], now: datetime, repeat_business_days: int) -> bool:
@@ -455,7 +462,7 @@ def run_buyer_attention(db: Session, items: Iterable, now: Optional[datetime] = 
                 title = f"Comprador sin gestión · {name}"
                 body = f"{item.text} · venció el {item.due_label}. Registra un seguimiento."
             else:
-                title = f"Comprador sin avanzar · {name}"
+                title = f"Vuelve a llamar · {name}"
                 body = f"{item.text} · venció el {item.due_label}."
             created += len(notify(
                 db,

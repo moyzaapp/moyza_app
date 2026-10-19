@@ -44,9 +44,8 @@ from app.services.alert_view import assignment_start_expr
 from app.services.alert_view import get_locked_alert_ids
 from app.services.alert_view import real_follow_ups_clause
 from app.core.business_calendar import format_business_duration
+from app.services.buyer_attention_service import RULE_CALLBACK
 from app.services.buyer_attention_service import RULE_NO_ACTION
-from app.services.buyer_attention_service import RULE_STAGE_STALL
-from app.services.buyer_attention_service import first_stage_label
 from app.services.buyer_reminder_service import get_pending_buyers_by_agent
 from app.services.company_scope import scope_agents
 from app.services.performance_report_service import BREAKDOWN_KEYS
@@ -109,14 +108,14 @@ def long_date_es(value) -> str:
 
 
 def attention_summary(buyers: list) -> str:
-    """'2 sin gestión · 1 sin pasar de Primera Llamada' (filas de `get_pending_buyers_by_agent`)."""
+    """'2 pendientes de volver a llamar · 1 sin gestión' (filas de `get_pending_buyers_by_agent`)."""
+    callback = sum(1 for b in buyers if b["rule"] == RULE_CALLBACK)
     no_action = sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION)
-    stalled = sum(1 for b in buyers if b["rule"] == RULE_STAGE_STALL)
     parts = []
+    if callback:
+        parts.append(f"{callback} {'pendiente' if callback == 1 else 'pendientes'} de volver a llamar")
     if no_action:
         parts.append(f"{no_action} sin gestión")
-    if stalled:
-        parts.append(f"{stalled} sin pasar de {first_stage_label()}")
     return " · ".join(parts)
 
 
@@ -788,7 +787,8 @@ class DashboardService:
                 "agent_name": names.get(agent_id) or "Sin agente",
                 "count": len(buyers),
                 "no_action": sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION),
-                "stage_stall": sum(1 for b in buyers if b["rule"] == RULE_STAGE_STALL),
+                "callback": sum(1 for b in buyers if b["rule"] == RULE_CALLBACK),
+                "last_attempt": sum(1 for b in buyers if b["is_last_attempt"]),
                 "oldest_hours": int(oldest),
                 "oldest_label": format_business_duration(oldest),
                 "summary": attention_summary(buyers),

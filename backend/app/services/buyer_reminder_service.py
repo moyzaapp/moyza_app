@@ -24,10 +24,9 @@ from app.models.agent import Agent
 from app.models.alert_reminder_log import AlertReminderLog
 from app.models.company import Company
 from app.services.alert_view import OPEN_ALERT_STATUSES
+from app.services.buyer_attention_service import RULE_CALLBACK
 from app.services.buyer_attention_service import RULE_NO_ACTION
-from app.services.buyer_attention_service import RULE_STAGE_STALL
 from app.services.buyer_attention_service import find_buyers_needing_attention
-from app.services.buyer_attention_service import first_stage_label
 from app.services.buyer_attention_service import group_by_agent_and_company
 from app.services.company_service import branding_for
 from app.services.gmail_service import GmailService
@@ -111,32 +110,29 @@ def _build_email_body(
     buyers: list[dict],
     hours_threshold: int,
     system_name: str = "sistema MOYZA",
-    stall_hours: Optional[int] = None,
 ) -> str:
     """Email diario con dos secciones: "Sin gestión" (R1) y "Sin avance de etapa" (R2).
 
     Horas hábiles (lunes a viernes sin festivos de Jaén). Cada comprador sale
     una sola vez, en la sección de su causa más grave.
     """
-    stall_hours = settings.BUYER_STAGE_STALL_HOURS if stall_hours is None else stall_hours
     by_age = sorted(buyers, key=lambda b: -b["business_hours_elapsed"])
     no_action = [b for b in by_age if b["rule"] == RULE_NO_ACTION]
-    stalled = [b for b in by_age if b["rule"] == RULE_STAGE_STALL]
+    callback = [b for b in by_age if b["rule"] == RULE_CALLBACK]
 
     sections = _section(
+        "Pendientes de volver a llamar",
+        "No contestaron y ya ha pasado el plazo para volver a llamar.",
+        "Intento",
+        callback,
+        lambda b: b["text"],
+    ) + _section(
         "Sin gestión",
         f"Llevan más de <strong>{hours_threshold} horas hábiles</strong> sin ninguna gestión registrada. "
         "Registra un seguimiento (también «Sin respuesta» si no contestan).",
         "Sin gestión (horas hábiles)",
         no_action,
         lambda b: b["elapsed_label"],
-    ) + _section(
-        "Sin avance de etapa",
-        f"Llevan más de <strong>{stall_hours} horas hábiles</strong> sin pasar de "
-        f"<strong>{escape(first_stage_label())}</strong> aunque se haya intentado contactar.",
-        "Sin avanzar",
-        stalled,
-        lambda b: bc.business_days_label(b["business_hours_elapsed"]),
     )
 
     return f"""
@@ -191,7 +187,7 @@ def run_buyer_reminders(
 
     logger.info(
         f"Iniciando recordatorio de compradores (R1 {hours_threshold} h hábiles, "
-        f"R2 {settings.BUYER_STAGE_STALL_HOURS} h hábiles, estados: {REMINDER_STATUSES})"
+        f"R3 {settings.BUYER_CALLBACK_HOURS} h hábiles, estados: {REMINDER_STATUSES})"
     )
 
     items = find_buyers_needing_attention(db, now=now, no_action_hours=hours_threshold)
@@ -263,7 +259,7 @@ def run_buyer_reminders(
             "company": brand.name,
             "subject": subject,
             "no_action": [b["buyer_name"] for b in buyers if b["rule"] == RULE_NO_ACTION],
-            "stage_stall": [b["buyer_name"] for b in buyers if b["rule"] == RULE_STAGE_STALL],
+            "callback": [b["buyer_name"] for b in buyers if b["rule"] == RULE_CALLBACK],
             "sent": success,
         })
 

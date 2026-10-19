@@ -1116,15 +1116,11 @@ async def alert_detail(
     search_ctx = _search_context(db, alert, current_user, admin_view, step, confirm_property,
                                  follow_ups, company_id)
 
-    # Plazos en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md): la causa vencida
-    # más grave (banner) y los plazos que aún no han vencido ("vence el …").
-    clocks = buyer_attention_service.alert_clocks(alert)
-    attention = next((c for c in clocks if c.overdue), None)
-    upcoming_clocks = []
-    for clock in clocks:
-        if clock.overdue or any(c.due_at == clock.due_at for c in upcoming_clocks):
-            continue
-        upcoming_clocks.append(clock)
+    # Plazo en horas hábiles (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.1): la regla
+    # que gobierna la alerta, vencida (banner "Venció el …") o aún no ("Vence el …").
+    clock = buyer_attention_service.alert_clock(alert)
+    attention = clock if clock is not None and clock.overdue else None
+    upcoming_clocks = [clock] if clock is not None and not clock.overdue else []
 
     return templates.TemplateResponse(
         request=request,

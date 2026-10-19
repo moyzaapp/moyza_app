@@ -3,9 +3,9 @@ Canales de los avisos de compradores en horas hábiles (PLAN_ALERTAS_DIAS_HABILE
 
 - Unitario: cadencia in-app (al cruzar y cada 2 días hábiles).
 - Con base de datos (transacción deshecha al terminar):
-  - notificaciones `buyer_no_action` / `buyer_stage_stall`: una al cruzar,
-    sin duplicados durante 2 días hábiles (aunque se lea), otra pasado ese
-    plazo, y se marcan leídas cuando dejan de aplicar;
+  - notificaciones `buyer_no_action` (R1): una al cruzar, sin duplicados
+    durante 2 días hábiles (aunque se lea), otra pasado ese plazo;
+    `buyer_callback_due` (R3); se marcan leídas cuando dejan de aplicar;
   - job del email con un GmailService falso: no envía en sábado ni en lunes
     festivo; en día hábil, un email por agente con las dos secciones.
 - Integración contra la app levantada (se omite si no responde): el listado
@@ -142,19 +142,19 @@ def test_notifica_al_cruzar_y_cada_dos_dias_habiles(ctx):
     assert ns.unread_count(ctx.db, ctx.user.id, ctx.moyza.id) == 1
 
 
-def test_gestion_resuelve_r1_y_avance_resuelve_r2(ctx):
+def test_sin_respuesta_resuelve_r1_y_otra_gestion_resuelve_r3(ctx):
     assert _run(ctx, L(2026, 10, 16, 8, 0)) == 1
-    # «Sin respuesta»: R1 deja de aplicar (se marca leída); R2 sigue corriendo y ya venció
+    # «Sin respuesta» el viernes 10:00: R1 deja de aplicar (se marca leída) y pasa a R3
     _follow_up(ctx, "SIN_RESPUESTA", L(2026, 10, 16, 10, 0))
     assert ns.resolve_buyer_notifications(ctx.db, alert_ids=[ctx.alert.id], now=L(2026, 10, 16, 10, 5)) == 1
     assert ns.unread_count(ctx.db, ctx.user.id, ctx.moyza.id) == 0
-    assert _run(ctx, L(2026, 10, 19, 8, 0)) == 1
-    [stall] = _mine(ctx, NotificationKind.BUYER_STAGE_STALL)
-    assert stall.title == "Comprador sin avanzar · PYTEST-CANAL Comprador"
-    assert "sin pasar de Primera Llamada" in stall.body
-    # Pasa a Contactado: R2 ya no aplica
-    _follow_up(ctx, "CONTACTADO", L(2026, 10, 19, 10, 0))
-    assert ns.resolve_buyer_notifications(ctx.db, alert_ids=[ctx.alert.id], now=L(2026, 10, 19, 10, 5)) == 1
+    assert _run(ctx, L(2026, 10, 19, 8, 0)) == 0          # vence el lunes 10:00
+    assert _run(ctx, L(2026, 10, 19, 10, 0)) == 1
+    [callback] = _mine(ctx, NotificationKind.BUYER_CALLBACK_DUE)
+    assert callback.title == "Vuelve a llamar · PYTEST-CANAL Comprador"
+    # Contactado: R3 ya no aplica
+    _follow_up(ctx, "CONTACTADO", L(2026, 10, 19, 11, 0))
+    assert ns.resolve_buyer_notifications(ctx.db, alert_ids=[ctx.alert.id], now=L(2026, 10, 19, 11, 5)) == 1
     assert ns.unread_count(ctx.db, ctx.user.id, ctx.moyza.id) == 0
 
 
@@ -196,15 +196,15 @@ def test_job_no_envia_en_dia_no_habil(ctx, now):
 
 def test_job_en_dia_habil_un_email_con_dos_secciones(ctx):
     from app.models.property_alert import PropertyAlert
-    # Segundo comprador con «sin respuesta» repetidos: va a la sección de R2
-    stalled = PropertyAlert(company_id=ctx.moyza.id, agent_id=ctx.agent.id, lead_name="PYTEST-CANAL Sin avance",
-                            status=AlertStatus.IN_PROGRESS, created_by=ctx.admin.id,
-                            created_at=L(2026, 10, 13, 9, 0), assigned_at=L(2026, 10, 13, 9, 0), origin="search")
-    ctx.db.add(stalled)
+    # Segundo comprador con un «Sin respuesta» vencido: va a «Pendientes de volver a llamar»
+    callback = PropertyAlert(company_id=ctx.moyza.id, agent_id=ctx.agent.id, lead_name="PYTEST-CANAL Volver",
+                             lead_phone="+34611222333", status=AlertStatus.IN_PROGRESS, created_by=ctx.admin.id,
+                             created_at=L(2026, 10, 13, 9, 0), assigned_at=L(2026, 10, 13, 9, 0), origin="search")
+    ctx.db.add(callback)
     ctx.db.flush()
     from app.models.alert_follow_up import AlertFollowUp
-    ctx.db.add(AlertFollowUp(alert_id=stalled.id, action_type="SIN_RESPUESTA",
-                             created_at=L(2026, 10, 15, 17, 0), created_by=ctx.user.id))
+    ctx.db.add(AlertFollowUp(alert_id=callback.id, action_type="SIN_RESPUESTA",
+                             created_at=L(2026, 10, 14, 17, 0), created_by=ctx.user.id))
     ctx.db.flush()
 
     summary, mine = _job(ctx, L(2026, 10, 16, 8, 0))   # viernes
@@ -212,15 +212,18 @@ def test_job_en_dia_habil_un_email_con_dos_secciones(ctx):
     assert len(mine) == 1
     email = mine[0]
     assert email.subject.endswith("2 comprador(es) requieren atención")
-    assert "Sin gestión (1)" in email.body and "Sin avance de etapa (1)" in email.body
-    assert "PYTEST-CANAL Comprador" in email.body and "PYTEST-CANAL Sin avance" in email.body
+    assert "Pendientes de volver a llamar (1)" in email.body and "Sin gestión (1)" in email.body
+    assert email.body.index("Pendientes de volver a llamar") < email.body.index("Sin gestión (1)")
+    assert "PYTEST-CANAL Comprador" in email.body and "PYTEST-CANAL Volver" in email.body
+    assert "Intento 1 de 3" in email.body
     assert "horas hábiles" in email.body
+    assert "Sin avance" not in email.body and "Primera" not in email.body
     [entry] = [e for e in summary["emails"] if e["to"] == ctx.agent.email]
     assert entry["no_action"] == ["PYTEST-CANAL Comprador"]
-    assert entry["stage_stall"] == ["PYTEST-CANAL Sin avance"]
+    assert entry["callback"] == ["PYTEST-CANAL Volver"]
     # En la misma pasada, los avisos in-app (uno por alerta)
     kinds = sorted(n.kind for n in _mine(ctx))
-    assert kinds == [NotificationKind.BUYER_NO_ACTION, NotificationKind.BUYER_STAGE_STALL]
+    assert kinds == [NotificationKind.BUYER_CALLBACK_DUE, NotificationKind.BUYER_NO_ACTION]
 
 
 def test_email_escapa_el_nombre():
@@ -230,7 +233,7 @@ def test_email_escapa_el_nombre():
         "elapsed_label": "2 d 2 h", "due_label": "martes 20/10 a las 12:00",
     }], 48)
     assert "&lt;b&gt;X&lt;/b&gt;" in body and "<b>X</b>" not in body
-    assert "Sin avance de etapa" not in body
+    assert "Sin avance" not in body and "Pendientes de volver a llamar" not in body
 
 
 # ---------------------------------------------------------------------------
