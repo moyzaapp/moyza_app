@@ -120,7 +120,8 @@
         </ul>
         {% endif %}
         {% if home.pending_buyers %}
-        {# Compradores que requieren atención en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md) #}
+        {# Compradores que requieren atención en horas hábiles: volver a llamar y sin gestión
+           (PLAN_RECORDATORIO_SIN_RESPUESTA.md) #}
         <div class="px-4 sm:px-6 py-3 border-t border-gray-200">
             <button type="button" data-modal-open="pendingBuyersModal" class="text-sm font-medium text-red-700 hover:text-red-800 hover:underline underline-offset-2">
                 {{ home.pending_buyers | length }} {{ 'comprador requiere' if home.pending_buyers | length == 1 else 'compradores requieren' }} atención
@@ -205,9 +206,9 @@
                 <p class="text-sm font-medium text-gray-900 truncate">{{ b.buyer_name or 'Comprador sin nombre' }}</p>
                 <p class="text-xs text-gray-500">
                     {% if b.buyer_phone and b.buyer_phone != '—' %}<a href="{{ b.buyer_phone | tel_href }}" class="hover:text-blue-600">{{ b.buyer_phone | phone_display }}</a> · {% endif %}
-                    <span class="font-medium {{ 'text-red-700' if b.rule == 'no_action' else 'text-amber-700' }}">{{ b.text }}</span>
+                    <span class="font-medium {{ 'text-red-700' if b.tone == 'red' else 'text-amber-700' }}">{{ b.text }}</span>
                 </p>
-                <p class="text-xs text-gray-500">Venció el {{ b.due_label }}</p>
+                <p class="text-xs text-gray-500">{% if b.rule == 'callback' %}Sin respuesta desde el {{ b.since_label }} · venció{% else %}Venció{% endif %} el {{ b.due_label }}</p>
             </div>
             {{ ui.button("Gestionar", "secondary", href="/alerts/" ~ b.alert_id, full_mobile=True) }}
         </li>

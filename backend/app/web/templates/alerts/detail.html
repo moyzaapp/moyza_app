@@ -290,19 +290,25 @@
                             {% endif %}
                         </div>
 
-                        {# Plazos en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md): lo vencido en
-                           un aviso ámbar y lo que aún no ha vencido con su fecha #}
+                        {# Plazo en horas hábiles (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.2): la regla
+                           vencida en un aviso (ámbar; rojo el tercer intento) o, si aún no
+                           ha vencido, su fecha #}
                         {% if attention %}
-                        {{ ui.banner(attention.badge, "amber",
-                                     text="Venció el " ~ attention.due_label ~ ". "
-                                          ~ ("Registra un seguimiento; también vale «Sin respuesta» si no contesta." if attention.rule == RULE_NO_ACTION
-                                             else "Registra el avance de etapa cuando consigas hablar con el comprador.")) }}
+                        {% if attention.rule == RULE_CALLBACK %}
+                        {{ ui.banner(attention.badge, attention.tone,
+                                     text="Sin respuesta desde el " ~ attention.since_label ~ ". Venció el " ~ attention.due_label ~ ". "
+                                          ~ ("Tercer intento: si no contesta, cierra la alerta como «Sin interés»." if attention.is_last_attempt
+                                             else "Vuelve a llamar y registra el seguimiento.")) }}
+                        {% else %}
+                        {{ ui.banner(attention.badge, attention.tone,
+                                     text="Venció el " ~ attention.due_label ~ ". Registra un seguimiento; también vale «Sin respuesta» si no contesta.") }}
+                        {% endif %}
                         {% endif %}
                         {% for clock in upcoming_clocks %}
                         <div>
-                            <p class="text-sm text-gray-600">{{ "Plazo de gestión" if clock.rule == RULE_NO_ACTION else "Plazo para pasar de " ~ clock.stage_label }}</p>
+                            <p class="text-sm text-gray-600">{{ ("Volver a llamar · " ~ clock.attempt_label) if clock.rule == RULE_CALLBACK else "Plazo de gestión" }}</p>
                             <p class="text-gray-800 text-sm">Vence el {{ clock.due_label }}</p>
-                            <p class="text-xs text-gray-500">{{ (clock.threshold_hours // 24) }} días hábiles; sin contar fines de semana ni festivos de Jaén</p>
+                            <p class="text-xs text-gray-500">{{ clock.threshold_hours // 24 }} {{ 'día hábil' if clock.threshold_hours // 24 == 1 else 'días hábiles' }}; sin contar fines de semana ni festivos de Jaén</p>
                         </div>
                         {% endfor %}
 

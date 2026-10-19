@@ -569,9 +569,9 @@ async def alerts_page(
                 "color": FollowUpActionType.stage_badge_color(latest.action_type),
             }
 
-    # Compradores que requieren atención (PLAN_ALERTAS_DIAS_HABILES.md): badge
-    # ámbar con la causa más grave en horas hábiles. Se calcula sobre los
-    # seguimientos ya cargados de la página, sin consultas nuevas.
+    # Compradores que requieren atención (PLAN_RECORDATORIO_SIN_RESPUESTA.md):
+    # badge «Volver a llamar · intento N de 3» o «Sin gestión» en horas hábiles.
+    # Se calcula sobre los seguimientos ya cargados de la página, sin consultas nuevas.
     alert_attention = buyer_attention_service.evaluate_alerts(alerts)
 
     response = templates.TemplateResponse(
@@ -1144,7 +1144,7 @@ async def alert_detail(
             "can_reassign": can_reassign,
             "attention": attention,
             "upcoming_clocks": upcoming_clocks,
-            "RULE_NO_ACTION": buyer_attention_service.RULE_NO_ACTION,
+            "RULE_CALLBACK": buyer_attention_service.RULE_CALLBACK,
             "assignable_groups": (
                 assignment.assignable_agents(db, get_active_company(request).id) if can_reassign else []
             ),

@@ -318,11 +318,12 @@
                                         {% else %}
                                         <span class="text-gray-400 text-xs">Sin iniciar</span>
                                         {% endif %}
-                                        {# Requiere atención: causa más grave en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md) #}
+                                        {# Requiere atención en horas hábiles: «Volver a llamar · intento N de 3»
+                                           (rojo el tercero) o «Sin gestión» (PLAN_RECORDATORIO_SIN_RESPUESTA.md) #}
                                         {% set attn = alert_attention.get(alert.id) %}
                                         {% if attn %}
                                         <div class="mt-2" title="Venció el {{ attn.due_label }}">
-                                            {{ ui.badge(attn.badge, "amber", dot=True, extra="whitespace-nowrap") }}
+                                            {{ ui.badge(attn.badge, attn.tone, dot=True, extra="whitespace-nowrap") }}
                                             <span class="sr-only">, venció el {{ attn.due_label }}</span>
                                         </div>
                                         {% endif %}

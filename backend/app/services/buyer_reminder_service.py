@@ -1,10 +1,12 @@
 """
 Servicio de recordatorio de compradores que requieren atención.
 
-Usa `buyer_attention_service` (PLAN_ALERTAS_DIAS_HABILES.md): R1 "sin
-gestión" y R2 "sin avance" en horas hábiles de Jaén. Envía un único email
-diario por agente con las dos secciones, solo en días hábiles, y en la misma
-pasada crea los avisos in-app.
+Usa `buyer_attention_service` (PLAN_ALERTAS_DIAS_HABILES.md, ajustado por
+PLAN_RECORDATORIO_SIN_RESPUESTA.md): R3 "volver a llamar" tras un «Sin
+respuesta» y R1 "sin gestión", en horas hábiles de Jaén. Envía un único
+email diario por agente con las dos secciones, solo en días hábiles, y en la
+misma pasada crea los avisos in-app. Una pasada horaria solo in-app
+(`run_buyer_callback_notifications`) avisa de R3 en cuanto vence.
 
 Multiempresa: los recordatorios se agrupan por agente Y empresa. Un agente
 que trabaja en MOYZA y en MOES PREMIUM recibe un correo por cada empresa,
@@ -49,11 +51,11 @@ def get_pending_buyers_by_agent(
     Devuelve un dict {(agent_id, company_id): [compradores que requieren atención]}.
 
     Envoltorio de `buyer_attention_service.find_buyers_needing_attention`
-    (horas hábiles, reglas R1 "sin gestión" y R2 "sin avance", una fila por
-    alerta). `hours_threshold` es el umbral de R1 en horas hábiles. Cada fila
-    conserva la forma de siempre (`alert_id`, `buyer_name`, `buyer_phone`,
-    `alert_status`, `last_action_at`, `hours_elapsed`, ahora en horas hábiles)
-    y añade `rule`, `due_at`, `business_hours_elapsed`, `stage_label`, `text`…
+    (horas hábiles, reglas R3 "volver a llamar" y R1 "sin gestión", una fila
+    por alerta). `hours_threshold` es el umbral de R1 en horas hábiles. Cada
+    fila conserva la forma de siempre (`alert_id`, `buyer_name`,
+    `buyer_phone`, `alert_status`, `last_action_at`, `hours_elapsed`, en horas
+    hábiles) y añade `rule`, `due_at`, `attempts`, `is_last_attempt`, `text`…
     """
     items = find_buyers_needing_attention(
         db, company_id=company_id, agent_id=agent_id, now=now, no_action_hours=hours_threshold,
@@ -75,18 +77,24 @@ def _phone(value) -> str:
     return phone_display(value) or value
 
 
-def _section(title: str, intro: str, last_header: str, buyers: list[dict], value) -> str:
-    """Tabla de una sección del email (vacía si no hay compradores)."""
+def _section(title: str, intro: str, columns: list, buyers: list[dict]) -> str:
+    """Tabla de una sección del email (vacía si no hay compradores).
+
+    `columns`: [(cabecera, valor(b), resaltar)] además de Comprador y Teléfono.
+    """
     if not buyers:
         return ""
+    headers = "".join(f'<th style="{_HEAD}">{escape(header)}</th>' for header, _, _ in columns)
     rows = "".join(
         f"""
         <tr>
             <td style="{_CELL}">{escape(b['buyer_name'] or 'Comprador sin nombre')}</td>
-            <td style="{_CELL}">{escape(_phone(b['buyer_phone']))}</td>
-            <td style="{_CELL}color:#c0392b;font-weight:bold;">{escape(value(b))}</td>
-            <td style="{_CELL}">{escape(b['due_label'])}</td>
-        </tr>"""
+            <td style="{_CELL}">{escape(_phone(b['buyer_phone']))}</td>"""
+        + "".join(
+            f'<td style="{_CELL}{"color:#c0392b;font-weight:bold;" if strong else ""}">{escape(value(b))}</td>'
+            for _, value, strong in columns
+        )
+        + "</tr>"
         for b in buyers
     )
     return f"""
@@ -96,13 +104,17 @@ def _section(title: str, intro: str, last_header: str, buyers: list[dict], value
         <thead>
           <tr style="background:#0E567B;color:#fff;">
             <th style="{_HEAD}">Comprador</th>
-            <th style="{_HEAD}">Teléfono</th>
-            <th style="{_HEAD}">{last_header}</th>
-            <th style="{_HEAD}">Venció el</th>
+            <th style="{_HEAD}">Teléfono</th>{headers}
           </tr>
         </thead>
         <tbody>{rows}</tbody>
       </table>"""
+
+
+def _attempt_cell(b: dict) -> str:
+    """'Intento 2 de 3' o 'Intento 3 de 3 · cierra la alerta (Sin interés)'."""
+    text = f"Intento {b['attempts']} de {b['max_attempts']}"
+    return text + " · cierra la alerta (Sin interés)" if b["is_last_attempt"] else text
 
 
 def _build_email_body(
@@ -111,28 +123,34 @@ def _build_email_body(
     hours_threshold: int,
     system_name: str = "sistema MOYZA",
 ) -> str:
-    """Email diario con dos secciones: "Sin gestión" (R1) y "Sin avance de etapa" (R2).
+    """Email diario con dos secciones: "Pendientes de volver a llamar" (R3) y "Sin gestión" (R1).
 
     Horas hábiles (lunes a viernes sin festivos de Jaén). Cada comprador sale
-    una sola vez, en la sección de su causa más grave.
+    una sola vez, en la sección de su regla.
     """
     by_age = sorted(buyers, key=lambda b: -b["business_hours_elapsed"])
-    no_action = [b for b in by_age if b["rule"] == RULE_NO_ACTION]
     callback = [b for b in by_age if b["rule"] == RULE_CALLBACK]
+    no_action = [b for b in by_age if b["rule"] == RULE_NO_ACTION]
 
     sections = _section(
         "Pendientes de volver a llamar",
-        "No contestaron y ya ha pasado el plazo para volver a llamar.",
-        "Intento",
+        f"No contestaron y ya han pasado <strong>{settings.BUYER_CALLBACK_HOURS} horas hábiles</strong>. "
+        "Vuelve a llamar y registra el seguimiento; al tercer intento sin respuesta, cierra la alerta "
+        "como «Sin interés».",
+        [
+            ("Intento", _attempt_cell, True),
+            ("Sin respuesta desde", lambda b: b["since_label"], False),
+        ],
         callback,
-        lambda b: b["text"],
     ) + _section(
         "Sin gestión",
         f"Llevan más de <strong>{hours_threshold} horas hábiles</strong> sin ninguna gestión registrada. "
         "Registra un seguimiento (también «Sin respuesta» si no contestan).",
-        "Sin gestión (horas hábiles)",
+        [
+            ("Sin gestión (horas hábiles)", lambda b: b["elapsed_label"], True),
+            ("Venció el", lambda b: b["due_label"], False),
+        ],
         no_action,
-        lambda b: b["elapsed_label"],
     )
 
     return f"""
@@ -149,6 +167,25 @@ def _build_email_body(
     """
 
 
+def run_buyer_callback_notifications(db: Session, now: Optional[datetime] = None) -> dict:
+    """Pasada horaria, solo in-app: avisa de R3 «volver a llamar» en cuanto vence.
+
+    El email y R1 siguen en el job diario (`run_buyer_reminders`); aquí solo se
+    crea la notificación del intento vencido (una por intento, deduplicada en
+    `notification_service.run_buyer_attention`), sin email ni WhatsApp. Así un
+    «Sin respuesta» del viernes a las 17:00 avisa el lunes a las 17:00 y no el
+    martes a las 08:00.
+    """
+    from app.services import notification_service
+
+    now = now or datetime.utcnow()
+    items = [item for item in find_buyers_needing_attention(db, now=now) if item.rule == RULE_CALLBACK]
+    created = notification_service.run_buyer_attention(db, items, now=now)
+    if created:
+        logger.info(f"Avisos «volver a llamar»: {created} creados.")
+    return {"callbacks": len(items), "notifications": created}
+
+
 def run_buyer_reminders(
     db: Session,
     gmail_service: GmailService,
@@ -161,7 +198,7 @@ def run_buyer_reminders(
     Punto de entrada del job diario (08:00 Madrid, solo días hábiles).
 
     - En un día no hábil (sábado, domingo o festivo de Jaén) no hace nada.
-    - Una sola consulta de compradores que requieren atención (R1 y R2): con
+    - Una sola consulta de compradores que requieren atención (R3 y R1): con
       ella se envía un email por agente y empresa (dos secciones) y, en la
       misma pasada, los avisos in-app con su cadencia y la limpieza de los que
       ya no aplican. El admin no recibe email (decisión 9).
@@ -171,8 +208,8 @@ def run_buyer_reminders(
     simulada. `sender_name` se mantiene por compatibilidad; el remitente
     visible lo define cada empresa (`companies.email_sender_name`).
 
-    Devuelve un resumen: {"business_day", "emails": [{to, subject, no_action,
-    stage_stall, sent}], "skipped", "notifications", "resolved"}.
+    Devuelve un resumen: {"business_day", "emails": [{to, subject, callback,
+    no_action, sent}], "skipped", "notifications", "resolved"}.
     """
     from app.services import notification_service
 
@@ -258,8 +295,8 @@ def run_buyer_reminders(
             "agent": agent.name,
             "company": brand.name,
             "subject": subject,
-            "no_action": [b["buyer_name"] for b in buyers if b["rule"] == RULE_NO_ACTION],
             "callback": [b["buyer_name"] for b in buyers if b["rule"] == RULE_CALLBACK],
+            "no_action": [b["buyer_name"] for b in buyers if b["rule"] == RULE_NO_ACTION],
             "sent": success,
         })
 

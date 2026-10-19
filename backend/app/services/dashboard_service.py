@@ -489,9 +489,9 @@ class DashboardService:
     def pending_buyers_for_agent(self, agent_id: int, now: Optional[datetime] = None) -> list:
         """Compradores que requieren atención (misma regla que el email diario).
 
-        PLAN_ALERTAS_DIAS_HABILES.md: R1 "sin gestión" y R2 "sin pasar de
-        Primera llamada", en horas hábiles; una fila por alerta. Cada fila trae
-        `rule`, `text` ("2 d 5 h hábiles sin gestión"), `due_label`…
+        PLAN_RECORDATORIO_SIN_RESPUESTA.md: R3 "volver a llamar" (intento N de
+        3) y R1 "sin gestión", en horas hábiles; una fila por alerta. Cada fila
+        trae `rule`, `text`, `tone`, `due_label`, `since_label`…
         """
         pending = get_pending_buyers_by_agent(
             self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id, agent_id=agent_id,
@@ -770,8 +770,9 @@ class DashboardService:
     def pending_buyers_by_agent(self, agents, now: Optional[datetime] = None) -> list:
         """Compradores que requieren atención agrupados por agente (horas hábiles).
 
-        Por grupo: total, cuántos "sin gestión" (R1) y cuántos "sin avance" (R2)
-        y el más antiguo en horas hábiles.
+        Por grupo: total, cuántos "volver a llamar" (R3, y de ellos en el
+        último intento) y cuántos "sin gestión" (R1), y el más antiguo en horas
+        hábiles.
         """
         pending = get_pending_buyers_by_agent(
             self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id,
@@ -857,12 +858,15 @@ class DashboardService:
         items = []
 
         for group in pending:
+            text = f"{group['summary']}; el más antiguo, {group['oldest_label']} hábiles"
+            if group["last_attempt"]:
+                text += f"; {group['last_attempt']} en el tercer intento sin respuesta (toca cerrar)"
             items.append({
-                "tone": "red" if group["no_action"] else "amber",
+                "tone": "red" if group["no_action"] or group["last_attempt"] else "amber",
                 "icon": "user",
                 "title": f"{group['agent_name']} · {group['count']} "
                          f"{'comprador requiere' if group['count'] == 1 else 'compradores requieren'} atención",
-                "text": f"{group['summary']}; el más antiguo, {group['oldest_label']} hábiles",
+                "text": text,
                 "href": f"/alerts?agent_id={group['agent_id']}",
             })
 

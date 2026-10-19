@@ -1,15 +1,20 @@
 """
-Canales de los avisos de compradores en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md §2.3, fase 3).
+Canales de los avisos de compradores en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md §2.3,
+ajustado por PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.2).
 
 - Unitario: cadencia in-app (al cruzar y cada 2 días hábiles).
 - Con base de datos (transacción deshecha al terminar):
   - notificaciones `buyer_no_action` (R1): una al cruzar, sin duplicados
     durante 2 días hábiles (aunque se lea), otra pasado ese plazo;
-    `buyer_callback_due` (R3); se marcan leídas cuando dejan de aplicar;
+    `buyer_callback_due` (R3): una por intento, sin repetición, el tercero
+    pide cerrar y el cuarto «Sin respuesta» pasa a R1; se marcan leídas
+    cuando dejan de aplicar (también las antiguas `buyer_stage_stall`);
   - job del email con un GmailService falso: no envía en sábado ni en lunes
-    festivo; en día hábil, un email por agente con las dos secciones.
+    festivo; en día hábil, un email por agente con las secciones «Pendientes
+    de volver a llamar» y «Sin gestión»; pasada horaria solo in-app de R3;
+  - Inicio del agente y «Requiere atención» del admin con las dos reglas.
 - Integración contra la app levantada (se omite si no responde): el listado
-  /alerts muestra el badge y el detalle el vencimiento.
+  /alerts muestra los badges y el detalle el vencimiento.
 
 Ningún test envía emails reales ni WhatsApp.
 
@@ -158,6 +163,117 @@ def test_sin_respuesta_resuelve_r1_y_otra_gestion_resuelve_r3(ctx):
     assert ns.unread_count(ctx.db, ctx.user.id, ctx.moyza.id) == 0
 
 
+def test_r3_un_aviso_por_intento_y_el_cuarto_pasa_a_r1(ctx):
+    kind = NotificationKind.BUYER_CALLBACK_DUE
+    # 1er «Sin respuesta» el viernes 16 a las 17:00 -> vence el lunes 19 a las 17:00
+    _follow_up(ctx, "SIN_RESPUESTA", L(2026, 10, 16, 17, 0))
+    assert _run(ctx, L(2026, 10, 19, 16, 0)) == 0
+    assert _run(ctx, L(2026, 10, 19, 17, 15)) == 1
+    [first] = _mine(ctx, kind)
+    assert first.title == "Vuelve a llamar · PYTEST-CANAL Comprador"
+    assert first.body.startswith("Intento 1 de 3 sin respuesta desde el viernes 16/10 a las 17:00")
+    assert "venció el lunes 19/10 a las 17:00" in first.body
+    # Sin repetición del mismo intento, ni pasados 2 días hábiles
+    assert _run(ctx, L(2026, 10, 20, 8, 0)) == 0
+    assert _run(ctx, L(2026, 10, 22, 8, 0)) == 0
+    # 2º intento: aviso nuevo y el anterior sin leer queda superado
+    _follow_up(ctx, "SIN_RESPUESTA", L(2026, 10, 22, 9, 0))
+    assert _run(ctx, L(2026, 10, 23, 9, 15)) == 1
+    # 3º intento: pide cerrar
+    _follow_up(ctx, "SIN_RESPUESTA", L(2026, 10, 23, 10, 0))
+    assert _run(ctx, L(2026, 10, 26, 10, 15)) == 1
+    notes = _mine(ctx, kind)
+    assert len(notes) == 3
+    assert [n.read_at is None for n in notes] == [False, False, True]
+    assert "Intento 3 de 3" in notes[-1].body and "cierra la alerta como «Sin interés»" in notes[-1].body
+    assert _run(ctx, L(2026, 10, 27, 10, 15)) == 0
+    # 4º «Sin respuesta»: ya no hay R3; cae en R1 a las 48 h hábiles
+    _follow_up(ctx, "SIN_RESPUESTA", L(2026, 10, 26, 11, 0))
+    assert ns.resolve_buyer_notifications(ctx.db, alert_ids=[ctx.alert.id], now=L(2026, 10, 26, 11, 5)) == 1
+    assert _run(ctx, L(2026, 10, 27, 11, 15)) == 0
+    assert _run(ctx, L(2026, 10, 28, 11, 0)) == 1
+    assert len(_mine(ctx, kind)) == 3
+    [r1] = _mine(ctx, NotificationKind.BUYER_NO_ACTION)
+    assert r1.title == "Comprador sin gestión · PYTEST-CANAL Comprador"
+    # Nunca dos avisos distintos sin leer a la vez para la misma alerta
+    assert ns.unread_count(ctx.db, ctx.user.id, ctx.moyza.id) == 1
+
+
+def test_pasada_horaria_solo_r3_y_sin_email(ctx):
+    from app.models.property_alert import PropertyAlert
+    from app.services.buyer_reminder_service import run_buyer_callback_notifications
+    # ctx.alert sin gestión (R1 vencida) y otra con «Sin respuesta» vencido (R3)
+    other = PropertyAlert(company_id=ctx.moyza.id, agent_id=ctx.agent.id, lead_name="PYTEST-CANAL Volver",
+                          status=AlertStatus.IN_PROGRESS, created_by=ctx.admin.id,
+                          created_at=L(2026, 10, 13, 9, 0), assigned_at=L(2026, 10, 13, 9, 0), origin="search")
+    ctx.db.add(other)
+    ctx.db.flush()
+    from app.models.alert_follow_up import AlertFollowUp
+    ctx.db.add(AlertFollowUp(alert_id=other.id, action_type="SIN_RESPUESTA",
+                             created_at=L(2026, 10, 15, 12, 0), created_by=ctx.user.id))
+    ctx.db.flush()
+    run_buyer_callback_notifications(ctx.db, now=L(2026, 10, 16, 12, 15))
+    mine = _mine(ctx)
+    assert [(n.kind, n.entity_id) for n in mine] == [(NotificationKind.BUYER_CALLBACK_DUE, other.id)]
+    # La pasada diaria posterior no lo duplica y añade el R1 de la otra
+    _job(ctx, L(2026, 10, 19, 8, 0))
+    kinds = sorted((n.kind, n.entity_id) for n in _mine(ctx))
+    assert kinds == sorted([(NotificationKind.BUYER_CALLBACK_DUE, other.id),
+                            (NotificationKind.BUYER_NO_ACTION, ctx.alert.id)])
+
+
+def test_antiguas_de_sin_avance_se_resuelven(ctx):
+    old = Notification(user_id=ctx.user.id, company_id=ctx.moyza.id, kind=NotificationKind.BUYER_STAGE_STALL,
+                       title="Comprador sin avanzar · PYTEST", entity_type="alert", entity_id=ctx.alert.id,
+                       created_at=L(2026, 10, 16, 8, 0))
+    ctx.db.add(old)
+    ctx.db.flush()
+    now = L(2026, 10, 16, 9, 0)
+    assert ns.resolve_buyer_notifications(ctx.db, alert_ids=[ctx.alert.id], now=now) == 1
+    ctx.db.refresh(old)
+    assert old.read_at == now
+    # Se sigue pintando en el historial
+    assert ns.serialize(old)["tone"] == "amber"
+
+
+def test_inicio_agente_y_admin_con_las_dos_reglas(ctx):
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.models.property_alert import PropertyAlert
+    from app.services.dashboard_service import DashboardService
+    from app.services.dashboard_service import attention_summary
+
+    last = PropertyAlert(company_id=ctx.moyza.id, agent_id=ctx.agent.id, lead_name="PYTEST-CANAL Tercero",
+                         status=AlertStatus.IN_PROGRESS, created_by=ctx.admin.id,
+                         created_at=L(2026, 10, 13, 9, 0), assigned_at=L(2026, 10, 13, 9, 0), origin="search")
+    ctx.db.add(last)
+    ctx.db.flush()
+    for day in (13, 14, 15):
+        ctx.db.add(AlertFollowUp(alert_id=last.id, action_type="SIN_RESPUESTA",
+                                 created_at=L(2026, 10, day, 12, 0), created_by=ctx.user.id))
+    ctx.db.flush()
+    now = L(2026, 10, 16, 12, 30)
+    svc = DashboardService(ctx.db, ctx.moyza.id)
+
+    rows = svc.pending_buyers_for_agent(ctx.agent.id, now=now)
+    by_name = {r["buyer_name"]: r for r in rows}
+    assert by_name["PYTEST-CANAL Comprador"]["rule"] == "no_action"
+    assert by_name["PYTEST-CANAL Comprador"]["text"].endswith("hábiles sin gestión")
+    callback = by_name["PYTEST-CANAL Tercero"]
+    assert callback["rule"] == "callback" and callback["is_last_attempt"] and callback["tone"] == "red"
+    assert callback["text"] == "Tercer intento sin respuesta · cierra la alerta (Sin interés)"
+    assert callback["since_label"] == "jueves 15/10 a las 12:00"
+    assert attention_summary(rows) == "1 pendiente de volver a llamar · 1 sin gestión"
+
+    [group] = [g for g in svc.pending_buyers_by_agent([ctx.agent], now=now) if g["agent_id"] == ctx.agent.id]
+    assert (group["count"], group["callback"], group["no_action"], group["last_attempt"]) == (2, 1, 1, 1)
+    items = [i for i in svc.attention([ctx.agent], {}, svc.period("WEEKLY", "", now=now), [group], now)
+             if i["href"] == f"/alerts?agent_id={ctx.agent.id}" and i["icon"] == "user"]
+    assert items[0]["tone"] == "red"
+    assert items[0]["title"] == "PYTEST-CANAL ANA · 2 compradores requieren atención"
+    assert "1 pendiente de volver a llamar · 1 sin gestión" in items[0]["text"]
+    assert "tercer intento" in items[0]["text"]
+
+
 def test_alerta_cerrada_se_resuelve_en_la_pasada_del_job(ctx):
     assert _run(ctx, L(2026, 10, 16, 8, 0)) == 1
     ctx.alert.status = AlertStatus.COMPLETED
@@ -266,6 +382,31 @@ def _get(path, company="MOYZA"):
 
 
 @pytest.fixture
+def live_callback_alert(live_alert):
+    """Otra alerta del mismo agente con tres «Sin respuesta» vencidos (tercer intento)."""
+    from app.db.session import SessionLocal
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.models.property_alert import PropertyAlert
+
+    session = SessionLocal()
+    assigned = live_alert.assigned_at
+    alert = PropertyAlert(company_id=live_alert.company_id, agent_id=live_alert.agent_id,
+                          lead_name=f"{TAG} Volver", status=AlertStatus.IN_PROGRESS,
+                          created_by=live_alert.created_by, created_at=assigned, assigned_at=assigned,
+                          origin="search", business_type="Venta")
+    session.add(alert)
+    session.flush()
+    for days in (3, 2, 1):
+        session.add(AlertFollowUp(alert_id=alert.id, action_type="SIN_RESPUESTA", created_by=live_alert.created_by,
+                                  created_at=assigned + timedelta(days=days)))
+    session.commit()
+    yield alert
+    session.delete(session.get(PropertyAlert, alert.id))
+    session.commit()
+    session.close()
+
+
+@pytest.fixture
 def live_alert():
     if not _server_up():
         pytest.skip(f"La app no responde en {BASE_URL}; tests de integración omitidos")
@@ -307,3 +448,17 @@ def test_listado_y_detalle_muestran_horas_habiles(live_alert):
     assert status == 200
     assert "Sin gestión · " in html
     assert "Venció el " in html
+
+
+def test_listado_y_detalle_volver_a_llamar(live_callback_alert):
+    status, html = _get(f"/alerts?q={TAG}")
+    assert status == 200
+    assert "Volver a llamar · intento 3 de 3" in html
+    assert "bg-red-100 text-red-800" in html
+    assert "Sin avance" not in html
+
+    status, html = _get(f"/alerts/{live_callback_alert.id}")
+    assert status == 200
+    assert "Volver a llamar · intento 3 de 3" in html
+    assert "Venció el " in html and "Sin respuesta desde el " in html
+    assert "cierra la alerta como «Sin interés»" in html

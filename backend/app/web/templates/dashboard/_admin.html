@@ -179,7 +179,7 @@
 {% if home.pending_by_agent %}
 {% set total = home.pending_by_agent | sum(attribute='count') %}
 {% call ui.modal("pendingBuyersModal", "Compradores que requieren atención", size="lg",
-                 subtitle=(total ~ (" comprador" if total == 1 else " compradores") ~ " sin gestión en " ~ buyer_reminder_hours ~ " h hábiles o sin pasar de Primera Llamada")) %}
+                 subtitle=(total ~ (" comprador" if total == 1 else " compradores") ~ " pendientes de volver a llamar o sin gestión en " ~ buyer_reminder_hours ~ " h hábiles")) %}
 <div data-dismiss-daily="pending_buyers_dismissed">
     <div class="p-6">
     <ul class="divide-y divide-gray-100 -my-2">
@@ -188,6 +188,7 @@
             <div class="min-w-0 flex-1">
                 <p class="text-sm font-medium text-gray-900 truncate">{{ g.agent_name }}</p>
                 <p class="text-xs text-gray-500">{{ g.summary }} · el más antiguo, <span class="font-medium text-red-700">{{ g.oldest_label }} hábiles</span></p>
+                {% if g.last_attempt %}<p class="text-xs font-medium text-red-700">{{ g.last_attempt }} en el tercer intento: toca cerrar</p>{% endif %}
             </div>
             {{ ui.button("Ver compradores", "secondary", href="/alerts?agent_id=" ~ g.agent_id, full_mobile=True) }}
         </li>
