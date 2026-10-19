@@ -163,6 +163,24 @@ def test_job_anual_registrado(monkeypatch):
     fake.start.assert_called_once()
 
 
+def test_job_volver_a_llamar_registrado(monkeypatch):
+    """PLAN_RECORDATORIO_SIN_RESPUESTA.md: pasada horaria solo in-app de R3."""
+    from app.jobs import scheduler as sched
+
+    monkeypatch.setenv("WORKER_ID", "0")
+    monkeypatch.setenv("WORKER_HEARTBEAT_ENABLED", "false")
+    fake = Mock()
+    with patch.object(sched, "scheduler", fake), patch.object(sched, "update_worker_heartbeat"):
+        sched.start_scheduler()
+
+    jobs = {c.kwargs["id"]: c for c in fake.add_job.call_args_list}
+    job = jobs["notify_buyer_callbacks"]
+    assert job.args == (sched.notify_buyer_callbacks, "cron")
+    assert (job.kwargs["hour"], job.kwargs["minute"], job.kwargs["timezone"]) == ("*", 15, "Europe/Madrid")
+    # El email diario sigue igual
+    assert jobs["send_buyer_reminders"].kwargs["day_of_week"] == "mon-fri"
+
+
 @pytest.fixture
 def db_connection():
     """Conexión con transacción externa: todo lo que congela el job se deshace."""

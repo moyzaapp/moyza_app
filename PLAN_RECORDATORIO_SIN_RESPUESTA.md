@@ -99,34 +99,34 @@ si no None. `find_buyers_needing_attention` mantiene la firma (`company_id`, `ag
 Un commit por fase: `feat(compradores): fase N - recordatorio sin respuesta …`. Skill `moyza-ui-ux-pro` en lo visual.
 
 ### Fase 1 · Etapas
-- [ ] `constants.py`: `progression_stages`, `LEGACY_STAGES`, `is_valid`, `PERFIL_GUARDADO` (en
+- [x] `constants.py`: `progression_stages`, `LEGACY_STAGES`, `is_valid`, `PERFIL_GUARDADO` (en
       `REPEATABLE_ACTIONS`, etiqueta y color), `STAGE_ORDER` renumerado con legados.
-- [ ] `routes/alerts.py` guardado de perfil → `PERFIL_GUARDADO`; `buyer_matching.profile_note` docstring.
-- [ ] Tests: el formulario rechaza PRIMERA_LLAMADA/CALIFICADO; el historial antiguo se pinta; `PERFIL_GUARDADO`
+- [x] `routes/alerts.py` guardado de perfil → `PERFIL_GUARDADO`; `buyer_matching.profile_note` docstring.
+- [x] Tests: el formulario rechaza PRIMERA_LLAMADA/CALIFICADO; el historial antiguo se pinta; `PERFIL_GUARDADO`
       desbloquea la cola y no avanza etapa (`alert_view` lo cuenta como real).
 
 ### Fase 2 · Reglas
-- [ ] `buyer_attention_service.py` (§3.1): añadir R3 con prioridad, quitar R2, mantener R1; config nueva;
+- [x] `buyer_attention_service.py` (§3.1): añadir R3 con prioridad, quitar R2, mantener R1; config nueva;
       `get_pending_buyers_by_agent` adaptado.
-- [ ] Tests: 1er, 2º y 3er intento; 4º "Sin respuesta" cae en R1 a las 48 h; seguimiento posterior resuelve;
+- [x] Tests: 1er, 2º y 3er intento; 4º "Sin respuesta" cae en R1 a las 48 h; seguimiento posterior resuelve;
       reasignación reinicia (`attempts` solo en la ventana); fin de semana y festivo de Jaén por medio; alerta
       cerrada no aplica; una alerta nunca devuelve dos reglas; R1 sigue igual para alertas sin "Sin respuesta".
 
 ### Fase 3 · Canales
-- [ ] `notification_service.py`: `BUYER_CALLBACK_DUE` (una por intento, sin cadencia), R1 como hoy,
+- [x] `notification_service.py`: `BUYER_CALLBACK_DUE` (una por intento, sin cadencia), R1 como hoy,
       `resolve_buyer_notifications` sobre los tres tipos (el antiguo `buyer_stage_stall` solo para resolver).
-- [ ] Email: secciones "Pendientes de volver a llamar" y "Sin gestión"; `dashboard_service.py`: textos y
+- [x] Email: secciones "Pendientes de volver a llamar" y "Sin gestión"; `dashboard_service.py`: textos y
       `attention_summary`; `/alerts` y detalle: badges y vencimiento; quitar toda referencia a "sin avance" /
       "Primera llamada".
-- [ ] Migración de datos `z9a0b1c2d3e4` (marcar leídas las `buyer_stage_stall`).
-- [ ] Tests de canales (patrón `test_buyer_attention_channels.py`): una notificación por intento, R1 intacta,
+- [x] Migración de datos `z9a0b1c2d3e4` (marcar leídas las `buyer_stage_stall`).
+- [x] Tests de canales (patrón `test_buyer_attention_channels.py`): una notificación por intento, R1 intacta,
       email con las dos secciones, Inicio agente y admin.
 
 ### Fase 4 · QA y despliegue
-- [ ] Job con fecha simulada: "Sin respuesta" un viernes 17:00 → vence lunes 17:00 (o martes si el lunes es
+- [x] Job con fecha simulada: "Sin respuesta" un viernes 17:00 → vence lunes 17:00 (o martes si el lunes es
       festivo); tres intentos; cuarto cae en R1; una alerta nunca gestionada sigue avisando a las 48 h. Gmail falso.
-- [ ] `ui_lint.py`; verificación con `fetch_page.py` (admin y agentes 6 y 12).
-- [ ] Nota de despliegue en `MULTIEMPRESA_MOYZA_MOES.md` (§15): variable que desaparece y las dos nuevas,
+- [x] `ui_lint.py`; verificación con `fetch_page.py` (admin y agentes 6 y 12).
+- [x] Nota de despliegue en `MULTIEMPRESA_MOYZA_MOES.md` (§15): variable que desaparece y las dos nuevas,
       migración de datos, y aviso de que el email y la campana cambian de contenido.
 
 ### Criterios de aceptación

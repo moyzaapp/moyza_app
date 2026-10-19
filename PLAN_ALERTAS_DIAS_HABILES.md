@@ -2,6 +2,9 @@
 
 Fecha: 2026-10-18 · Rama `63-agregar-moes`
 
+> **Ajustado el 2026-10-19 por `PLAN_RECORDATORIO_SIN_RESPUESTA.md`: R2 eliminada, R3 "volver a llamar"
+> añadida; R1 y el calendario hábil se mantienen.**
+
 > **Prerrequisito:** hay trabajo sin commitear de otra sesión (PLAN_ALERTA_COMO_NUEVA.md,
 > `services/alert_view.py`, cambios en `buyer_reminder_service.py`, `notification_service.py`,
 > `dashboard_service.py`, `constants.py`, `property_alert.py`…). Este plan toca esos mismos archivos.
