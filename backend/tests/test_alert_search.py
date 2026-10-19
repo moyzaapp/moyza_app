@@ -210,6 +210,43 @@ def test_propiedad_asociada_es_gestion_que_no_avanza_etapa():
     assert not FollowUpActionType.is_valid(action)
 
 
+def test_perfil_guardado_es_gestion_que_no_avanza_etapa():
+    action = FollowUpActionType.PERFIL_GUARDADO
+    assert action in FollowUpActionType.REPEATABLE_ACTIONS
+    assert action not in FollowUpActionType.SYSTEM_ACTIONS
+    assert FollowUpActionType.labels()[action] == "Perfil guardado"
+    assert FollowUpActionType.stage_badge_color(action) == "bg-blue-100 text-blue-700"
+    # Solo lo escribe el guardado del perfil: el formulario no lo ofrece ni lo admite
+    assert not FollowUpActionType.is_valid(action)
+    assert action not in dict(FollowUpActionType.ordered_stages())
+    # Gestión real para la cola y el cierre (alert_view)
+    from app.services import alert_view
+    follow_up = SimpleNamespace(action_type=action, created_at=T0 + timedelta(hours=1))
+    assert alert_view.is_real_follow_up(follow_up)
+    alert = SimpleNamespace(assigned_at=T0, created_at=T0)
+    assert alert_view.has_follow_up_since_assignment([follow_up], alert)
+
+
+def test_etapas_heredadas_fuera_del_formulario_pero_con_etiqueta_y_orden():
+    """PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.3: Primera llamada y Calificado."""
+    order = FollowUpActionType.STAGE_ORDER
+    form = dict(FollowUpActionType.ordered_stages())
+    for legacy in ("PRIMERA_LLAMADA", "CALIFICADO"):
+        assert legacy in FollowUpActionType.LEGACY_STAGES
+        assert legacy not in form
+        assert not FollowUpActionType.is_valid(legacy)
+    assert FollowUpActionType.labels()["PRIMERA_LLAMADA"] == "Primera Llamada"
+    assert FollowUpActionType.labels()["CALIFICADO"] == "Calificado"
+    assert FollowUpActionType.stage_badge_color("CALIFICADO") == "bg-indigo-100 text-indigo-700"
+    assert [v for v, _ in FollowUpActionType.progression_stages()] == [
+        "SIN_RESPUESTA", "CONTACTADO", "VISITA_PROGRAMADA", "OFERTA"]
+    # Orden coherente para los historiales antiguos
+    assert order["SIN_RESPUESTA"] < order["PRIMERA_LLAMADA"] < order["CONTACTADO"] == order["CALIFICADO"]
+    assert order["CONTACTADO"] < order["VISITA_PROGRAMADA"] < order["OFERTA"] < order["CERRADO"]
+    for value in ("SIN_RESPUESTA", "CONTACTADO", "VISITA_PROGRAMADA", "OFERTA", "CERRADO", "SIN_INTERES"):
+        assert FollowUpActionType.is_valid(value)
+
+
 def test_resumen_del_perfil():
     from app.models.buyer_search_criteria import BuyerSearchCriteria
     from app.services.buyer_matching import criteria_summary, profile_note
@@ -372,7 +409,9 @@ def test_guardar_perfil_desde_la_alerta(env):
     assert float(criteria.max_price) == 150000 and criteria.notes == "Con terraza"
     assert float(criteria.min_m2) == 300
 
-    follow_ups = [f for f in stored.follow_ups if f.action_type == FollowUpActionType.CALIFICADO]
+    # PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.3: «Perfil guardado», ya no CALIFICADO
+    assert not [f for f in stored.follow_ups if f.action_type == FollowUpActionType.CALIFICADO]
+    follow_ups = [f for f in stored.follow_ups if f.action_type == FollowUpActionType.PERFIL_GUARDADO]
     assert len(follow_ups) == 1
     assert follow_ups[0].notes.startswith("Perfil de búsqueda: Piso · Centro, Jaen · 2-3 dorm")
     assert "Imprescindibles: Con terraza" in follow_ups[0].notes
@@ -397,6 +436,67 @@ def test_perfil_rechazado_a_otro_agente_y_con_alerta_bloqueada(env):
     assert _flash(response) == {"category": "warning", "message": LOCKED_TEXT}
     assert env.db.query(BuyerSearchCriteria).count() == 0
     assert _reload(env, alert).follow_ups == []
+
+
+def _add_follow_up(env, user, alert, action_type, notes=None):
+    from app.web.routes.alerts import add_follow_up
+    request = _request(env, user, f"/alerts/{alert.id}/follow-up", "POST", form={})
+    return asyncio.run(add_follow_up(alert.id, request, action_type=action_type, notes=notes,
+                                     next_action_date=None, db=env.db))
+
+
+def test_formulario_rechaza_etapas_heredadas(env):
+    alert = _property_alert(env, "ana", "ana")
+    for legacy, label in (("PRIMERA_LLAMADA", "Primera Llamada"), ("CALIFICADO", "Calificado")):
+        response = _add_follow_up(env, env.users["ana"], alert, legacy)
+        assert response.headers["location"] == f"/alerts/{alert.id}"
+        assert _flash(response) == {"category": "error",
+                                    "message": f"«{label}» ya no se registra como seguimiento. Elige otra etapa."}
+    assert _reload(env, alert).follow_ups == []
+    # Las propias del sistema tampoco se admiten por el formulario
+    response = _add_follow_up(env, env.users["ana"], alert, FollowUpActionType.PERFIL_GUARDADO)
+    assert _flash(response) == {"category": "error", "message": "Tipo de acción no válido"}
+
+    response = _add_follow_up(env, env.users["ana"], alert, "CONTACTADO")
+    assert _flash(response)["category"] == "success"
+    assert [f.action_type for f in _reload(env, alert).follow_ups] == ["CONTACTADO"]
+
+
+def test_historial_antiguo_se_pinta_y_el_select_no_ofrece_heredadas(env):
+    from app.models.alert_follow_up import AlertFollowUp
+
+    alert = _property_alert(env, "ana", "ana")
+    for i, action in enumerate(("PRIMERA_LLAMADA", "CALIFICADO", "PERFIL_GUARDADO")):
+        env.db.add(AlertFollowUp(alert_id=alert.id, action_type=action, created_by=env.users["ana"].id,
+                                 created_at=T0 + timedelta(hours=i + 1)))
+    env.db.commit()
+
+    response, html = _detail(env, env.admin, alert)
+    assert response.status_code == 200
+    assert "Primera Llamada" in html and "Calificado" in html and "Perfil guardado" in html
+    assert "bg-indigo-100 text-indigo-700" in html
+    assert 'value="PRIMERA_LLAMADA"' not in html and 'value="CALIFICADO"' not in html
+    assert 'value="PERFIL_GUARDADO"' not in html
+    assert '<option value="SIN_RESPUESTA">' in html and '<option value="CONTACTADO">' in html
+    # El JS de notas obligatorias conoce los cuatro cierres
+    assert '"NO_APTO_PROPIETARIO"' in html
+
+
+def test_perfil_guardado_no_avanza_la_etapa_del_listado(env):
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.web.routes.alerts import alerts_page
+
+    alert = _search_alert(env, "ana")
+    env.db.add(AlertFollowUp(alert_id=alert.id, action_type="CONTACTADO", created_by=env.users["ana"].id,
+                             created_at=T0 + timedelta(hours=1)))
+    env.db.commit()
+    assert _save_profile(env, env.users["ana"], alert).status_code == 302
+
+    response = asyncio.run(alerts_page(
+        _request(env, env.users["ana"], "/alerts"), q="", status_filter=[], agent_id=None,
+        page=None, per_page=None, b_q="", b_page=None, db=env.db,
+    ))
+    assert response.context["alert_stages"][alert.id]["value"] == "CONTACTADO"
 
 
 # ---------------------------------------------------------------------------

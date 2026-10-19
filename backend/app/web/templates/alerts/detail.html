@@ -468,7 +468,7 @@
 {% endcall %}
 
 <script>
-const CLOSING_STAGES = new Set(['CERRADO', 'SIN_INTERES', 'SIN_SOLVENCIA_ECONOMICA']);
+const CLOSING_STAGES = new Set({{ FollowUpActionType.CLOSING_STAGES | list | sort | tojson }});
 
 function openFollowUpModal() {
     UI.openModal('followUpModal');

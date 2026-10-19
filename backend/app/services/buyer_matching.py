@@ -190,7 +190,7 @@ def criteria_summary(criteria: Optional[BuyerSearchCriteria]) -> str:
 
 
 def profile_note(criteria: BuyerSearchCriteria) -> str:
-    """Nota del seguimiento automático CALIFICADO al guardar el perfil desde la alerta."""
+    """Nota del seguimiento automático PERFIL_GUARDADO al guardar el perfil desde la alerta."""
     summary = criteria_summary(criteria) or "sin filtros"
     note = f"Perfil de búsqueda: {summary}."
     if criteria.notes:

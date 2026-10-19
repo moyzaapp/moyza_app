@@ -233,11 +233,16 @@ class AlertOrigin:
 
 class FollowUpActionType:
     # Etapas de progresión (avanzan la etapa visible del comprador)
-    PRIMERA_LLAMADA = "PRIMERA_LLAMADA"
     CONTACTADO = "CONTACTADO"
-    CALIFICADO = "CALIFICADO"
     VISITA_PROGRAMADA = "VISITA_PROGRAMADA"
     OFERTA = "OFERTA"
+
+    # Etapas heredadas (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.3): ya no se
+    # ofrecen en el formulario e `is_valid` las rechaza, pero los registros
+    # antiguos se siguen mostrando con su etiqueta y color y ordenando.
+    PRIMERA_LLAMADA = "PRIMERA_LLAMADA"
+    CALIFICADO = "CALIFICADO"
+    LEGACY_STAGES = {"PRIMERA_LLAMADA", "CALIFICADO"}
 
     # Acción repetible (no avanza etapa; indica intento fallido de contacto)
     SIN_RESPUESTA = "SIN_RESPUESTA"
@@ -264,23 +269,32 @@ class FollowUpActionType:
     # cola y permite cerrar, pero no avanza la etapa visible.
     PROPIEDAD_ASOCIADA = "PROPIEDAD_ASOCIADA"
 
+    # Guardar el perfil de búsqueda desde la alerta (PLAN_RECORDATORIO_SIN_RESPUESTA.md
+    # §3.3). Lo escribe la ruta /alerts/{id}/profile, nunca el formulario de
+    # seguimiento (no está en STAGE_ORDER). Gestión real: desbloquea la cola y
+    # permite cerrar, pero no avanza la etapa visible. Sustituye al CALIFICADO
+    # automático que se creaba antes.
+    PERFIL_GUARDADO = "PERFIL_GUARDADO"
+
     # Acciones que no avanzan la etapa de progresión visible
-    REPEATABLE_ACTIONS = {"SIN_RESPUESTA", "PROPIEDAD_ASOCIADA"}
+    REPEATABLE_ACTIONS = {"SIN_RESPUESTA", "PROPIEDAD_ASOCIADA", "PERFIL_GUARDADO"}
 
     # Acciones del sistema: se muestran en el historial pero no son seguimientos
     SYSTEM_ACTIONS = {"REASIGNADA"}
 
-    # Orden numérico de las etapas de progresión
+    # Orden numérico de las etapas de progresión. Las heredadas conservan un
+    # orden coherente para los historiales antiguos: Primera llamada por debajo
+    # de Contactado y Calificado al mismo nivel que Contactado.
     STAGE_ORDER = {
         "PRIMERA_LLAMADA": 1,
         "CONTACTADO": 2,
-        "CALIFICADO": 3,
-        "VISITA_PROGRAMADA": 4,
-        "OFERTA": 5,
-        "CERRADO": 6,
-        "SIN_INTERES": 6,
-        "SIN_SOLVENCIA_ECONOMICA": 6,
-        "NO_APTO_PROPIETARIO": 6,
+        "CALIFICADO": 2,
+        "VISITA_PROGRAMADA": 3,
+        "OFERTA": 4,
+        "CERRADO": 5,
+        "SIN_INTERES": 5,
+        "SIN_SOLVENCIA_ECONOMICA": 5,
+        "NO_APTO_PROPIETARIO": 5,
         "SIN_RESPUESTA": 0,
     }
 
@@ -299,6 +313,7 @@ class FollowUpActionType:
             cls.NO_APTO_PROPIETARIO: "No apto para el propietario",
             cls.REASIGNADA: "Reasignada",
             cls.PROPIEDAD_ASOCIADA: "Propiedad asociada",
+            cls.PERFIL_GUARDADO: "Perfil guardado",
             # Etiquetas heredadas para registros antiguos
             "LLAMADA": "Llamada",
             "EMAIL_ENVIADO": "Email Enviado",
@@ -309,12 +324,10 @@ class FollowUpActionType:
 
     @classmethod
     def progression_stages(cls):
-        """Etapas de progresión + acción repetible para el formulario."""
+        """Etapas de progresión + acción repetible para el formulario (sin las heredadas)."""
         return [
-            (cls.PRIMERA_LLAMADA, "Primera Llamada"),
             (cls.SIN_RESPUESTA, "Sin Respuesta"),
             (cls.CONTACTADO, "Contactado"),
-            (cls.CALIFICADO, "Calificado"),
             (cls.VISITA_PROGRAMADA, "Visita Programada"),
             (cls.OFERTA, "Oferta/Negociación"),
         ]
@@ -351,6 +364,7 @@ class FollowUpActionType:
             "REASIGNADA": "bg-gray-100 text-gray-700",
             # Gestión que no es etapa: informativo
             "PROPIEDAD_ASOCIADA": "bg-blue-100 text-blue-700",
+            "PERFIL_GUARDADO": "bg-blue-100 text-blue-700",
             # Legados
             "LLAMADA": "bg-gray-100 text-gray-700",
             "EMAIL_ENVIADO": "bg-gray-100 text-gray-700",
@@ -362,7 +376,8 @@ class FollowUpActionType:
 
     @classmethod
     def values(cls):
-        return set(cls.STAGE_ORDER.keys())
+        """Valores que acepta el formulario de seguimiento (sin las etapas heredadas)."""
+        return set(cls.STAGE_ORDER.keys()) - cls.LEGACY_STAGES
 
     @classmethod
     def is_valid(cls, value: str) -> bool:

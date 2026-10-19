@@ -1466,9 +1466,10 @@ async def save_alert_search_profile(
 
     PLAN_ALERTA_SIN_REFERENCIA.md (decisión cerrada 4): upsert del perfil del
     comprador (uno por comprador, sin m²) con la operación y el agente de la
-    alerta, y un seguimiento automático CALIFICADO con el resumen como nota:
-    cuenta como gestión (desbloquea la cola) y deja constancia de cuándo se
-    tomaron los datos. Vuelve al paso "Propuesta". Solo el agente asignado o
+    alerta, y un seguimiento automático PERFIL_GUARDADO con el resumen como
+    nota (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.3; antes era CALIFICADO):
+    cuenta como gestión (desbloquea la cola y permite cerrar), no avanza la
+    etapa y deja constancia de cuándo se tomaron los datos. Vuelve al paso "Propuesta". Solo el agente asignado o
     el admin, nunca con la alerta bloqueada.
     """
     current_user = request.state.user
@@ -1519,7 +1520,7 @@ async def save_alert_search_profile(
 
         db.add(AlertFollowUp(
             alert_id=alert.id,
-            action_type=FollowUpActionType.CALIFICADO,
+            action_type=FollowUpActionType.PERFIL_GUARDADO,
             notes=buyer_matching.profile_note(criteria),
             created_at=now,
             created_by=current_user.id,
@@ -1528,6 +1529,8 @@ async def save_alert_search_profile(
             alert.status = AlertStatus.IN_PROGRESS
 
         db.commit()
+        # Gestión registrada: los avisos de comprador que ya no apliquen se marcan leídos
+        notification_service.safe_resolve_buyer_notifications(db, alert.id)
     except Exception:
         db.rollback()
         logger.exception("Error guardando el perfil desde la alerta: alert_id=%s", alert_id)
@@ -1820,7 +1823,12 @@ async def add_follow_up(
 
     if not FollowUpActionType.is_valid(action_type):
         response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)
-        set_flash(response, "error", "Tipo de acción no válido")
+        if action_type in FollowUpActionType.LEGACY_STAGES:
+            # Etapas retiradas del formulario (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.3)
+            label = FollowUpActionType.labels()[action_type]
+            set_flash(response, "error", f"«{label}» ya no se registra como seguimiento. Elige otra etapa.")
+        else:
+            set_flash(response, "error", "Tipo de acción no válido")
         return response
 
     # Notas obligatorias al cerrar
