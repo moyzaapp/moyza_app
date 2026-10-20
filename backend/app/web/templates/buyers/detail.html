@@ -137,7 +137,9 @@
                         <p class="text-sm text-gray-500 mt-1">Ubicación, tipo, habitaciones, baños, precio e imprescindibles</p>
                     </header>
                     <div class="p-4 sm:p-6">
-                        {% call search_profile_fields(criteria, zones, cities, property_types, prefix="bc") %}
+                        {# Mismos mínimos que en la alerta (PLAN_PERFIL_UBICACION.md); aquí no se registra seguimiento #}
+                        <p class="text-sm font-medium text-gray-900 mb-4">Datos mínimos: tipo, precio máximo y ubicación (provincia, población o zona)</p>
+                        {% call search_profile_fields(criteria, location, property_types, prefix="bc", required=True) %}
                         <div class="sm:max-w-sm">
                             {% if is_admin %}
                             {% set agent_options = [] %}
@@ -192,8 +194,9 @@
             <!-- Resumen de criterios aplicados -->
             <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5 flex flex-wrap gap-2 items-center">
                 <span class="text-xs font-semibold text-blue-600 uppercase tracking-wide mr-1">Filtros activos:</span>
+                {% if criteria.province %}<span class="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full">Provincia: {{ criteria.province }}</span>{% endif %}
+                {% if criteria.cities %}<span class="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full">Poblaciones: {{ criteria.cities | join(', ') }}</span>{% elif criteria.province %}<span class="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full">Todas las poblaciones</span>{% endif %}
                 {% if criteria.zones %}<span class="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full">Zonas: {{ criteria.zones | join(', ') }}</span>{% endif %}
-                {% if criteria.cities %}<span class="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full">Ciudades: {{ criteria.cities | join(', ') }}</span>{% endif %}
                 {% if criteria.property_type %}<span class="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full">{{ criteria.property_type }}</span>{% endif %}
                 {% if criteria.business_type %}<span class="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full">{{ criteria.business_type }}</span>{% endif %}
                 {% if criteria.max_price %}<span class="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full">Máx. {{ '{:,.0f}'.format(criteria.max_price) }} €</span>{% endif %}
@@ -445,6 +448,7 @@
 <script src="/static/js/alert-duplicates.js"></script>
 <script src="/static/js/alert-assign.js"></script>
 <script src="/static/js/phone-field.js"></script>
+<script src="/static/js/search-profile.js"></script>
 <script>
 var qaDupRequest = 0;
 var qaAssign = window.AlertAssign ? AlertAssign.init('qa') : null;

@@ -318,6 +318,11 @@
                                         {% else %}
                                         <span class="text-gray-400 text-xs">Sin iniciar</span>
                                         {% endif %}
+                                        {# Admin: alerta abierta cuyo comprador aún no tiene el perfil mínimo
+                                           (PLAN_PERFIL_OBLIGATORIO.md); no podrá pasar de Contactado #}
+                                        {% if alert.id in profile_missing_ids %}
+                                        <div class="mt-2">{{ ui.badge("Sin perfil", "gray", extra="whitespace-nowrap") }}</div>
+                                        {% endif %}
                                         {# Requiere atención en horas hábiles: «Volver a llamar · intento N de 3»
                                            (rojo el tercero) o «Sin gestión» (PLAN_RECORDATORIO_SIN_RESPUESTA.md) #}
                                         {% set attn = alert_attention.get(alert.id) %}

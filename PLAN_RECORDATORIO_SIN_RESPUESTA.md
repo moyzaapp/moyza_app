@@ -80,6 +80,10 @@ si no None. `find_buyers_needing_attention` mantiene la firma (`company_id`, `ag
 - Nueva acción `PERFIL_GUARDADO` ("Perfil guardado"): repetible, gestión real (desbloquea la cola y permite
   cerrar), no avanza etapa, no sale en el formulario (la crea el guardado del perfil). Sustituye al
   `CALIFICADO` automático en `routes/alerts.py` y en `buyer_matching.profile_note`.
+  > **Nota 2026-10-19 (`PLAN_PERFIL_OBLIGATORIO.md`)**: la **primera vez** que el perfil del comprador queda
+  > completo (paso Perfil o seguimiento Contactado, que ahora lleva el perfil dentro) se registra
+  > **`CONTACTADO`** (avanza la etapa); solo las **ediciones posteriores** registran `PERFIL_GUARDADO`.
+  > Visita programada, Oferta y Cerrado (éxito) exigen el perfil completo.
 - Donde se muestre "etapa actual" (detalle, Inicio), los registros antiguos muestran su etiqueta heredada.
 
 ### 3.4 Limpieza de lo anterior

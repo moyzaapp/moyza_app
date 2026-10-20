@@ -15,6 +15,7 @@ from sqlalchemy import or_
 
 from sqlalchemy.orm import relationship
 
+from app.core import geo
 from app.core.constants import PropertyStatus
 from app.db.base import Base
 
@@ -185,3 +186,13 @@ class Property(Base):
     @property
     def is_available(self):
         return (self.estado_inmueble or "").strip().lower() != self.NOT_AVAILABLE_STATE
+
+    # -----------------------------------------------------------------
+    # Provincia (PLAN_PERFIL_UBICACION.md): no hay columna; se deduce de
+    # los dos primeros dígitos del código postal español. Sin CP válido, o
+    # si el país no es España (vacío cuenta como España), no hay provincia.
+    # -----------------------------------------------------------------
+
+    @property
+    def provincia(self):
+        return geo.provincia_for(self.pais, self.cod_postal)

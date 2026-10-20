@@ -282,7 +282,7 @@
                     <div class="grid grid-cols-2 gap-4">
 
                         <div>
-                            <label class="block mb-2 text-sm font-medium text-gray-700">
+                            <label for="cod_postal" class="block mb-2 text-sm font-medium text-gray-700">
                                 Cód. postal
                             </label>
                             <input
@@ -293,7 +293,12 @@
                                 placeholder="28001"
                                 class="w-full border border-gray-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all"
                                 id="cod_postal"
+                                aria-describedby="cod_postal_provincia"
                             >
+                            {# Solo informativa: la provincia no se guarda, se deduce del CP (PLAN_PERFIL_UBICACION.md) #}
+                            <p id="cod_postal_provincia" class="text-xs text-gray-500 mt-1" aria-live="polite">
+                                Provincia (según CP): <span id="cod_postal_provincia_value" class="font-medium text-gray-700">—</span>
+                            </p>
                         </div>
 
                         <div>
@@ -761,6 +766,33 @@ const PROPERTY_FIELDS = [
     "status"
 ];
 
+// Provincia según el CP (PLAN_PERFIL_UBICACION.md): ayuda de solo lectura junto
+// al código postal. Misma regla que app/core/geo.py: CP español de cinco
+// dígitos (país vacío = España); si no, "Sin provincia". Tolerante a un
+// proceso sin el global `geo_cp` (plantilla nueva con Python sin reiniciar).
+const GEO_CP = {{ (geo_cp if geo_cp is defined else {}) | tojson }};
+
+function updateProvinciaHint() {
+    const cpInput = document.getElementById("cod_postal");
+    const paisInput = document.getElementById("pais");
+    const output = document.getElementById("cod_postal_provincia_value");
+    if (!cpInput || !output) {
+        return;
+    }
+    const cp = (cpInput.value || "").trim();
+    const pais = ((paisInput && paisInput.value) || "").trim().toLowerCase();
+    const spain = pais === "" || (GEO_CP.spain_aliases || []).includes(pais);
+    const provincia = spain && /^\d{5}$/.test(cp) ? (GEO_CP.provincias || {})[cp.slice(0, 2)] : null;
+    output.textContent = provincia || (cp ? (GEO_CP.no_province || "Sin provincia") : "—");
+}
+
+["cod_postal", "pais"].forEach((id) => {
+    const input = document.getElementById(id);
+    if (input) {
+        input.addEventListener("input", updateProvinciaHint);
+    }
+});
+
 // Valores que se aplican cuando el dato viene vacío
 const PROPERTY_FALLBACKS = {
     moneda: "EUR",
@@ -796,6 +828,7 @@ function openModal() {
 
     modal.classList.remove("hidden");
     modal.classList.add("flex");
+    updateProvinciaHint();
 }
 
 function editProperty(data) {
@@ -841,6 +874,7 @@ function editProperty(data) {
     }
 
     document.getElementById("propertyForm").action = "/properties/update";
+    updateProvinciaHint();
 }
 
 function editPropertyFromButton(button) {

@@ -6,9 +6,11 @@
  *    línea por serie (agente); "bars" = barras apiladas por serie + línea de
  *    total (equipo). Paleta y opciones de references/charts.md del skill.
  *    Si Chart.js no carga: banner ámbar y la tabla de datos queda abierta.
- *  - Ventana de compradores sin atender: se abre al entrar y, una vez cerrada,
- *    no vuelve a abrirse ese día en este navegador (localStorage con la
- *    fecha de Madrid). Si localStorage no está disponible, se muestra siempre.
+ *  - Ventana de compradores sin atender: se abre una vez por inicio de sesión.
+ *    El login deja la cookie `moyza_welcome=1` (2 min); al cargar el Inicio,
+ *    si la cookie existe se abre el modal marcado con [data-auto-open-on-login]
+ *    y la cookie se borra. Volver al Inicio en la misma sesión no la reabre;
+ *    queda el botón "Compradores sin atender" para hacerlo a mano.
  */
 (function () {
   'use strict';
@@ -89,48 +91,27 @@
 
   document.querySelectorAll('canvas[data-trend-kind]').forEach(mountTrend);
 
-  // ---- Ventana de compradores sin atender (una vez al día) ---------------
+  // ---- Ventana de compradores sin atender (una vez por inicio de sesión) --
 
-  function madridToday() {
-    try {
-      return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Madrid' });
-    } catch (e) {
-      return new Date().toISOString().slice(0, 10);
-    }
+  var WELCOME_COOKIE = 'moyza_welcome';
+
+  function hasCookie(name) {
+    return document.cookie.split(';').some(function (c) { return c.trim().indexOf(name + '=') === 0; });
   }
 
-  function storageGet(key) {
-    try { return window.localStorage.getItem(key); } catch (e) { return null; }
+  function deleteCookie(name) {
+    document.cookie = name + '=; Max-Age=0; path=/; SameSite=Lax';
   }
 
-  function storageSet(key, value) {
-    try {
-      // Limpia las marcas de días anteriores
-      var prefix = key.replace(/_\d{4}-\d{2}-\d{2}$/, '_');
-      for (var i = window.localStorage.length - 1; i >= 0; i--) {
-        var k = window.localStorage.key(i);
-        if (k && k.indexOf(prefix) === 0 && k !== key) window.localStorage.removeItem(k);
-      }
-      window.localStorage.setItem(key, value);
-    } catch (e) { /* sin almacenamiento: se volverá a mostrar */ }
-  }
+  var justLoggedIn = hasCookie(WELCOME_COOKIE);
+  // Se consume siempre: si no hay compradores pendientes el modal no existe y
+  // la marca no debe quedar viva para la siguiente visita al Inicio.
+  if (justLoggedIn) deleteCookie(WELCOME_COOKIE);
 
-  document.querySelectorAll('[data-dismiss-daily]').forEach(function (marker) {
-    var modal = marker.closest('[role="dialog"]');
-    if (!modal || !window.UI) return;
-    var key = marker.getAttribute('data-dismiss-daily') + '_' + madridToday();
-
-    function remember() { storageSet(key, '1'); }
-
-    // Cualquier cierre (X, fondo, "Lo reviso después", Escape) cuenta como visto hoy
-    modal.addEventListener('click', function (e) {
-      if (e.target.closest('[data-modal-close]')) remember();
+  if (justLoggedIn && window.UI) {
+    document.querySelectorAll('[data-auto-open-on-login]').forEach(function (marker) {
+      var modal = marker.closest('[role="dialog"]');
+      if (modal) window.UI.openModal(modal.id);
     });
-    // En captura: ui.js cierra el modal con Escape en su propio listener
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && !modal.classList.contains('hidden')) remember();
-    }, true);
-
-    if (!storageGet(key)) window.UI.openModal(modal.id);
-  });
+  }
 })();

@@ -266,7 +266,7 @@ def test_inicio_agente_y_admin_con_las_dos_reglas(ctx):
 
     [group] = [g for g in svc.pending_buyers_by_agent([ctx.agent], now=now) if g["agent_id"] == ctx.agent.id]
     assert (group["count"], group["callback"], group["no_action"], group["last_attempt"]) == (2, 1, 1, 1)
-    items = [i for i in svc.attention([ctx.agent], {}, svc.period("WEEKLY", "", now=now), [group], now)
+    items = [i for i in svc.attention([ctx.agent], [group], now)
              if i["href"] == f"/alerts?agent_id={ctx.agent.id}" and i["icon"] == "user"]
     assert items[0]["tone"] == "red"
     assert items[0]["title"] == "PYTEST-CANAL ANA · 2 compradores requieren atención"

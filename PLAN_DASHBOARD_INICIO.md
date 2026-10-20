@@ -257,8 +257,9 @@ Opción recomendada: **Chart.js 4 (UMD) vendorizado** en `static/js/chart.umd.js
   Es exactamente la lista que hoy se manda por email a las 06:00; en pantalla se ve al momento.
 - **Agente**: al cargar el Inicio, si tiene compradores con más de 48 h sin gestión, aparece un modal con la
   lista (nombre, teléfono, horas sin gestión, botón "Gestionar" → `/alerts/{id}`) y "Lo reviso después".
-  Se cierra una vez por día por navegador (`localStorage` con clave `pending_buyers_dismissed_<fecha>`), para
-  que no sea spam pero reaparezca al día siguiente si sigue sin gestionar. El bloque "Hoy y pendiente" lo
+  Se abre **una vez por inicio de sesión** (cookie `moyza_welcome` que deja el login y consume el Inicio;
+  cambiado el 2026-10-19 por PLAN_INICIO_SEMANA_MES.md, antes era una vez al día por navegador). Volver al
+  Inicio en la misma sesión no la reabre; queda el botón para hacerlo a mano. El bloque "Hoy y pendiente" lo
   sigue mostrando siempre.
 - **Admin**: mismo modal pero agrupado por agente ("Laura G. · 3 compradores · el más antiguo 71 h"), con
   enlace a `/alerts?agent_id=…`. También aparece en "Requiere atención".

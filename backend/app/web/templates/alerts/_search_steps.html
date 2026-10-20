@@ -1,29 +1,54 @@
 {#
-  Alerta sin referencia (búsqueda general): flujo guiado Contactar → Perfil → Propuesta
-  (PLAN_ALERTA_SIN_REFERENCIA.md). Se incluye desde alerts/detail.html con su contexto
-  (`_search_context` en routes/alerts.py). Una sola acción primaria por paso.
+  Flujo guiado Contactar → Perfil → Propuesta de una alerta (PLAN_ALERTA_SIN_REFERENCIA.md;
+  desde PLAN_PERFIL_OBLIGATORIO.md en TODAS las alertas, con o sin referencia). Se incluye
+  desde alerts/detail.html con su contexto (`_search_context` en routes/alerts.py). Una sola
+  acción primaria por paso.
+
+  Perfil obligatorio: mientras el perfil del comprador no esté completo
+  (`profile_complete`, de buyer_matching.profile_is_complete) se avisa con
+  "Perfil pendiente" en Contactar y Propuesta, y la Propuesta no sugiere ni
+  deja asociar. Con perfil completo, en su lugar, el resumen en chips y "Editar".
 #}
 {% import "components/ui_macros.html" as ui %}
 {% from "components/search_profile_form.html" import search_profile_fields %}
 {% from "components/property_card.html" import property_card %}
 {% set step_items = [] %}
 {% for key, label in search_steps %}{% set _ = step_items.append((key, label, "/alerts/" ~ alert.id ~ "?step=" ~ key ~ "#propuesta", none)) %}{% endfor %}
+{% set profile_url = "/alerts/" ~ alert.id ~ "?step=profile#propuesta" %}
+
+{# Estado del perfil en Contactar y Propuesta: aviso ámbar o resumen con "Editar" #}
+{% macro profile_status() -%}
+{% if profile_complete %}
+<div class="flex flex-wrap items-center gap-2">
+    <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Perfil</span>
+    {% for part in criteria_parts %}
+    <span class="rounded-lg bg-gray-100 px-2.5 py-1 text-xs text-gray-700">{{ part }}</span>
+    {% endfor %}
+    <a href="{{ profile_url }}" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Editar</a>
+</div>
+{% else %}
+{% set pending_text = "Cuando hables con el comprador, registra su perfil en el seguimiento Contactado." ~ ((" Falta: " ~ (profile_missing | join(", ")) ~ ".") if criteria else "") %}
+{% call ui.banner("Perfil pendiente", "amber", text=pending_text) %}
+    {{ ui.button("Ir al perfil", "secondary", href=profile_url, extra="px-3 py-2 text-xs border-amber-300 text-amber-800") }}
+{% endcall %}
+{% endif %}
+{%- endmacro %}
+
+{# Propiedad asociada de otra operación que la que busca el comprador (PLAN_PERFIL_UBICACION.md):
+   la propiedad se mantiene; se avisa en la Propuesta para que la cambie si procede #}
+{% macro operation_warning() -%}
+{% if operation_mismatch %}
+{{ ui.banner("La propiedad asociada es de " ~ operation_mismatch.property ~ " y el comprador busca " ~ operation_mismatch.wanted,
+             "amber", text="Propónle otra que encaje con su búsqueda o cambia la operación en el perfil.") }}
+{% endif %}
+{%- endmacro %}
 
 <section id="propuesta" class="bg-white rounded-2xl border border-gray-200 scroll-mt-4" aria-labelledby="searchStepsTitle">
     <div class="px-4 sm:px-6 pt-4">
-        <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-                <h2 id="searchStepsTitle" class="text-lg font-bold text-gray-900">
-                    {{ "Cambiar propiedad" if alert.property else "Búsqueda del comprador" }}
-                </h2>
-                <p class="text-sm text-gray-500 mt-1">
-                    {% if alert.property %}Asociada ahora: {{ alert.property.title }}{% else %}Llámale, toma su perfil y propónle una propiedad{% endif %}
-                </p>
-            </div>
-            {% if alert.property %}
-            <a href="/alerts/{{ alert.id }}" class="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Cancelar</a>
-            {% endif %}
-        </div>
+        <h2 id="searchStepsTitle" class="text-lg font-bold text-gray-900">Búsqueda del comprador</h2>
+        <p class="text-sm text-gray-500 mt-1">
+            {% if alert.property %}Llámale, toma su perfil y ofrécele esta u otras propiedades que encajen{% else %}Llámale, toma su perfil y proponle una propiedad{% endif %}
+        </p>
     </div>
     <div class="px-4 sm:px-6 mt-2">
         {{ ui.tabs(step_items, step, label="Pasos de la búsqueda") }}
@@ -61,6 +86,8 @@
             <p class="text-sm text-gray-500">El comprador no tiene teléfono registrado.</p>
             {% endif %}
 
+            {{ profile_status() }}
+
             <div class="flex flex-col sm:flex-row sm:items-center gap-3 pt-4 border-t border-gray-100">
                 {{ ui.button("Registrar seguimiento", "primary", attrs='onclick="openFollowUpModal()"', full_mobile=True) }}
                 {{ ui.button("Siguiente: perfil de búsqueda", "text", href="/alerts/" ~ alert.id ~ "?step=profile#propuesta") }}
@@ -70,18 +97,30 @@
         {# ------------------------------------------------------------ 2. Perfil #}
         {% elif step == "profile" %}
         <form method="POST" action="/alerts/{{ alert.id }}/search-profile" data-once data-loading-text="Guardando…">
-            <p class="text-sm text-gray-500 mb-5">
-                Pregúntale qué busca{% if criteria %}; sale su perfil guardado, cámbialo si hace falta{% endif %}.
-                Al guardar queda registrado un seguimiento «Calificado» con estos datos.
-            </p>
-            {{ search_profile_fields(criteria, zones, cities, property_types,
-                                     business_type_fixed=(alert.business_type or "Sin operación"), prefix="sp") }}
+            <div class="mb-5 space-y-1">
+                <p class="text-sm font-medium text-gray-900">Datos mínimos: tipo, precio máximo y ubicación (provincia, población o zona)</p>
+                <p class="text-sm text-gray-500">
+                    Pregúntale qué busca{% if criteria %}; sale su perfil guardado, cámbialo si hace falta{% endif %}.
+                    {% if profile_complete %}Al guardar queda registrado «Perfil guardado» con los cambios.{% else %}Al guardar se registra el seguimiento «Contactado» con estos datos.{% endif %}
+                </p>
+            </div>
+            {{ search_profile_fields(criteria, location, property_types,
+                                     alert_operation=(alert.business_type or ""), prefix="sp", required=True) }}
             <div class="mt-6 flex justify-end">
                 {{ ui.button("Guardar perfil y ver propiedades", "primary", type="submit", full_mobile=True) }}
             </div>
         </form>
 
         {# ------------------------------------------------------------ 3. Propuesta #}
+        {% elif not profile_complete %}
+        {# Sin perfil completo no hay propuesta: ni sugerencias ni buscador (asociar exige el perfil) #}
+        <div class="space-y-5">
+            {{ operation_warning() }}
+            {{ profile_status() }}
+            <div class="rounded-2xl border border-gray-200">
+                {{ ui.empty_state("Aún no hay propuesta", "Las propiedades sugeridas salen del perfil del comprador: tipo, precio máximo y ubicación.") }}
+            </div>
+        </div>
         {% else %}
         <div class="space-y-5">
             {% if link_duplicate %}
@@ -99,25 +138,17 @@
             {% endcall %}
             {% endif %}
 
-            <div class="flex flex-wrap items-center gap-2">
-                <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Perfil</span>
-                {% for part in criteria_parts %}
-                <span class="rounded-lg bg-gray-100 px-2.5 py-1 text-xs text-gray-700">{{ part }}</span>
-                {% else %}
-                {% if criteria %}<span class="text-xs text-gray-500">Sin filtros: se proponen todas las disponibles</span>{% endif %}
-                {% endfor %}
-                {% if criteria %}
-                <a href="/alerts/{{ alert.id }}?step=profile#propuesta" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Editar perfil</a>
-                {% endif %}
-            </div>
+            {{ operation_warning() }}
+            {{ profile_status() }}
 
-            {% if not criteria %}
-            <div class="rounded-2xl border border-gray-200">
-                {% call ui.empty_state("Aún no hay perfil de búsqueda", "Toma su perfil para ver las propiedades sugeridas.") %}
-                {{ ui.button("Ir al perfil", "primary", href="/alerts/" ~ alert.id ~ "?step=profile#propuesta") }}
-                {% endcall %}
+            {# Propiedad actual (p. ej. la de una alerta con referencia) que no sale entre las sugeridas #}
+            {% if alert.property and not current_in_suggestions %}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {{ property_card(alert.property, show_link=property_link_allowed, current=True) }}
             </div>
-            {% elif suggestions %}
+            {% endif %}
+
+            {% if suggestions %}
             <p class="text-sm text-gray-500">
                 {{ suggestions_total }} {{ "propiedad sugerida" if suggestions_total == 1 else "propiedades sugeridas" }} de la empresa, de cualquier agente
                 {% if suggestions_total > suggestions | length %} · se muestran las {{ suggestions | length }} más baratas; afina el perfil para ver otras{% endif %}

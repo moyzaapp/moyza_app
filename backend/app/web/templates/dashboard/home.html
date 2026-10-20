@@ -3,16 +3,15 @@
 {% block title %}Inicio - {{ brand_name }}{% endblock %}
 
 {#
-  Inicio para todos los roles (PLAN_DASHBOARD_INICIO.md). Cabecera y selector
-  de período comunes; el contenido va en un parcial por rol:
-  _agent.html, _admin.html o _no_agent.html (usuario sin ficha de agente).
+  Inicio para todos los roles (PLAN_DASHBOARD_INICIO.md, PLAN_INICIO_SEMANA_MES.md).
+  Sin selector de período: siempre la semana y el mes en curso. El contenido va
+  en un parcial por rol: _agent.html, _admin.html o _no_agent.html.
 #}
 {% block content %}
-{% from "dashboard/components/period_nav.html" import period_nav %}
 
 <div class="max-w-7xl mx-auto space-y-6">
 
-    <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
             <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">
                 {% if view == 'admin' %}Inicio{% elif first_name %}Hola, {{ first_name }}{% else %}Inicio{% endif %}
@@ -23,7 +22,11 @@
             </p>
         </div>
         {% if view != 'no_agent' %}
-        {{ period_nav(period, period_labels) }}
+        <a href="/commercial-results?tab=rendimiento"
+           class="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">
+            Ver histórico y año
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+        </a>
         {% endif %}
     </div>
 

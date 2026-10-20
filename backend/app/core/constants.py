@@ -219,9 +219,12 @@ class AlertOrigin:
     """Cómo nació una alerta de comprador (PLAN_ALERTA_SIN_REFERENCIA.md).
 
     - ``property``: creada con referencia (interés en un inmueble concreto).
-      No cambia de propiedad.
     - ``search``: creada sin referencia (búsqueda general). La propiedad se
-      asocia después, a la misma alerta, y se puede cambiar.
+      asocia después, a la misma alerta.
+
+    Desde PLAN_PERFIL_OBLIGATORIO.md el origen es solo un dato (cómo entró el
+    comprador, para etiquetas y analítica): ya no condiciona el flujo. Todas
+    las alertas tienen Perfil, Propuesta y "Cambiar propiedad".
     """
     PROPERTY = "property"
     SEARCH = "search"
@@ -270,11 +273,19 @@ class FollowUpActionType:
     PROPIEDAD_ASOCIADA = "PROPIEDAD_ASOCIADA"
 
     # Guardar el perfil de búsqueda desde la alerta (PLAN_RECORDATORIO_SIN_RESPUESTA.md
-    # §3.3). Lo escribe la ruta /alerts/{id}/profile, nunca el formulario de
-    # seguimiento (no está en STAGE_ORDER). Gestión real: desbloquea la cola y
-    # permite cerrar, pero no avanza la etapa visible. Sustituye al CALIFICADO
-    # automático que se creaba antes.
+    # §3.3). Lo escribe la ruta /alerts/{id}/search-profile, nunca el formulario
+    # de seguimiento (no está en STAGE_ORDER). Gestión real: desbloquea la cola
+    # y permite cerrar, pero no avanza la etapa visible. Sustituye al CALIFICADO
+    # automático que se creaba antes. Desde PLAN_PERFIL_OBLIGATORIO.md solo
+    # registra las EDICIONES del perfil: la primera vez que el perfil del
+    # comprador queda completo se registra CONTACTADO (perfil = contactado).
     PERFIL_GUARDADO = "PERFIL_GUARDADO"
+
+    # Etapas que exigen el perfil del comprador completo (PLAN_PERFIL_OBLIGATORIO.md,
+    # decisión 2): sin tipo, precio máximo y ubicación (provincia, población o
+    # zona; PLAN_PERFIL_UBICACION.md) no se pueden registrar. Sin respuesta y los cierres negativos sí se registran sin
+    # perfil (decisión 3); Contactado lleva el perfil dentro.
+    PROFILE_REQUIRED_STAGES = {"VISITA_PROGRAMADA", "OFERTA", "CERRADO"}
 
     # Acciones que no avanzan la etapa de progresión visible
     REPEATABLE_ACTIONS = {"SIN_RESPUESTA", "PROPIEDAD_ASOCIADA", "PERFIL_GUARDADO"}

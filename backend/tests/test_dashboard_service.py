@@ -183,18 +183,24 @@ def test_kpis_delta_objetivo_y_ranking(ctx):
     _target(ctx, ctx.laura, ctx.moyza, week, target_captaciones_crm=4, target_bajadas=2)
     _target(ctx, ctx.carlos, ctx.moyza, week, target_captaciones_crm=1, target_bajadas=1)
 
-    home = svc.agent_home(ctx.laura, week, now=NOW)
-    kpis = {k.key: k for k in home["objective_kpis"] + home["activity_kpis"]}
+    home = svc.agent_home(ctx.laura, now=NOW, week=week)
+    block = home["week"]
+    kpis = {k.key: k for k in block["objective_kpis"] + block["activity_kpis"]}
 
     capt = kpis["captaciones_crm"]
     assert capt.value == 2 and capt.previous == 1 and capt.delta == 1
     assert capt.is_objective and capt.target == 4 and capt.pct == 50 and capt.tone == "red"
     assert capt.breakdown == {"venta": 1, "alquiler": 1, "otros": 0}
-    # Cierres no es objetivo en semana: sin anillo ni tono
-    assert not kpis["cierres"].is_objective and kpis["cierres"].tone == "gray"
+    # Cierres no es objetivo en semana: no aparece en el bloque semanal
+    assert "cierres" not in kpis
+    # ...pero sí en el mensual (sin objetivo definido: tono neutro)
+    month_kpis = {k.key: k for k in home["month"]["objective_kpis"]}
+    assert month_kpis["cierres"].is_objective and month_kpis["cierres"].target is None
     # % global = media(50, 0) = 25; Carlos = media(100, 0) = 50 -> Laura segunda de 2
-    assert home["completion"] == 25
-    assert home["ranking"] == {"position": 2, "total": 2}
+    assert block["completion"] == 25
+    assert block["ranking"] == {"position": 2, "total": 2}
+    # Los dos bloques llevan su período
+    assert block["period"].period_type == "WEEKLY" and home["month"]["period"].period_type == "MONTHLY"
 
 
 def test_hojas_de_visita_por_participacion_y_tendencia(ctx):
@@ -283,20 +289,32 @@ def test_admin_home_kpis_equipo_cumplimiento_y_atencion(ctx):
     _visit(ctx, prop, ctx.laura, max(week.start, now - timedelta(minutes=1)), companion=ctx.carlos)
     _target(ctx, ctx.carlos, ctx.moyza, week, target_captaciones_crm=1, target_bajadas=2)
 
-    home = svc.admin_home(week, now=now)
-    kpis = {k.key: k for k in home["kpis"]}
-    team_visits = svc._company_visit_count(week.start, week.end)
-    assert kpis["hojas_visita"].value == team_visits
-    rows = {r["agent"].id: r for r in home["team"]}
+    home = svc.admin_home(now=now, week=week)
+    month = home["month"]["period"]
+    # Visitas y contactos (sin objetivo) son del mes
+    activity = {k.key: k for k in home["activity_kpis"]}
+    assert activity["hojas_visita"].value == svc._company_visit_count(month.start, month.end)
+    # KPIs con objetivo del equipo: la captación de Carlos sobre la suma de objetivos (1)
+    week_kpis = {k.key: k for k in home["week"]["kpis"]}
+    assert week_kpis["captaciones_crm"].value >= 1 and week_kpis["captaciones_crm"].target == 1
+    assert "cierres" not in week_kpis and "cierres" in {k.key for k in home["month"]["kpis"]}
+
+    rows = {r["agent"].id: r for r in home["week"]["team"]}
     carlos = rows[ctx.carlos.id]
     capt = next(c for c in carlos["cells"] if c["key"] == "captaciones_crm")
-    assert capt["is_objective"] and capt["pct"] == 100 and capt["tone"] == "green"
-    assert carlos["completion"] == 50                    # media(100, 0)
-    assert rows[ctx.laura.id]["completion"] is None
-    # Carlos (con objetivos) va antes que Laura (sin objetivos)
-    order = [r["agent"].id for r in home["team"]]
+    assert capt["is_objective"] and capt["pct"] == 100 and capt["tone"] == "green" and capt["sort_value"] == 100
+    # Misma tabla de siempre: las 5 métricas; en semana solo captaciones y bajadas llevan objetivo
+    assert [c["key"] for c in carlos["cells"]] == ["hojas_visita", "contactos", "captaciones_crm", "bajadas", "cierres"]
+    visits_cell = carlos["cells"][0]
+    assert not visits_cell["is_objective"] and visits_cell["value"] == 1 and visits_cell["sort_value"] == 1
+    assert not next(c for c in carlos["cells"] if c["key"] == "cierres")["is_objective"]
+    assert carlos["completion"] == 50 and carlos["completion_sort"] == 50   # media(100, 0)
+    assert rows[ctx.laura.id]["completion"] is None and rows[ctx.laura.id]["completion_sort"] == ""
+    # Carlos (con objetivos) va antes que Laura (sin objetivos); el mes trae sus propias filas
+    order = [r["agent"].id for r in home["week"]["team"]]
     assert order.index(ctx.carlos.id) < order.index(ctx.laura.id)
-    # Laura no tiene objetivos en la semana en curso
+    assert {r["agent"].id for r in home["month"]["team"]} >= {ctx.carlos.id, ctx.laura.id}
+    # Laura no tiene objetivos ni en la semana ni en el mes en curso: un aviso por período
     missing = [i for i in home["attention"] if i["icon"] == "flag"]
-    assert missing
+    assert len(missing) == 2
     assert ctx.laura.id not in svc.team_targets([ctx.laura.id, ctx.carlos.id], week)

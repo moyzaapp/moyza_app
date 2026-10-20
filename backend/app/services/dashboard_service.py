@@ -5,8 +5,10 @@ Entradas puras (sin `request`) para que se puedan probar sin la app:
 - `period()`: período de los query params (semana / mes / año) con su
   navegación. Es el mismo `period()` de `PerformanceReportService`: una sola
   implementación para el Inicio y Resultados Comerciales.
-- `agent_home(agent, period)`: Inicio del agente.
-- `admin_home(period)`: Inicio del admin (equipo de la empresa activa).
+- `agent_home(agent)`: Inicio del agente, con un bloque de la semana en curso
+  y otro del mes en curso (PLAN_INICIO_SEMANA_MES.md: se ven los dos a la vez).
+- `admin_home()`: Inicio del admin (equipo de la empresa activa), también con
+  bloque de semana y de mes, y la tabla de cumplimiento con ambos períodos.
 
 Reglas:
 - Todas las consultas se limitan a la empresa del servicio.
@@ -333,9 +335,15 @@ class DashboardService:
     # Inicio del agente
     # ------------------------------------------------------------------
 
-    def agent_home(self, agent: Agent, period: Period, now: Optional[datetime] = None) -> dict:
+    def current_periods(self, now: Optional[datetime] = None) -> tuple:
+        """(semana en curso, mes en curso): los dos bloques que muestra el Inicio."""
+        return self.period(PeriodType.WEEKLY, now=now), self.period(PeriodType.MONTHLY, now=now)
+
+    def agent_period_block(self, agent: Agent, period: Period, agents=None, now: Optional[datetime] = None) -> dict:
+        """Lo que depende del período en el Inicio del agente: KPIs contra
+        objetivo, actividad, % global, puesto y la nota del admin."""
         previous_period = self.previous_period(period, now=now)
-        agents = self.company_agents()
+        agents = agents if agents is not None else self.company_agents()
         agent_ids = [a.id for a in agents]
         if agent.id not in agent_ids:
             agent_ids.append(agent.id)
@@ -352,23 +360,46 @@ class DashboardService:
         }
 
         report = self.perf.get_report(agent.id, period.period_type, period.start)
-        pending_buyers = self.pending_buyers_for_agent(agent.id, now=now)
+        # Solo las métricas con objetivo en este tipo de período (semana: sin cierres)
+        objective_keys = self.perf.objective_keys(period.period_type)
 
         return {
+            "period": period,
             "objective_kpis": self.build_kpis(
-                OBJECTIVE_GROUP, metrics, metrics_prev[agent.id], target, period.period_type
+                [k for k in OBJECTIVE_GROUP if k in objective_keys], metrics, metrics_prev[agent.id], target,
+                period.period_type,
             ),
             "activity_kpis": self.build_kpis(
                 ACTIVITY_GROUP, metrics, metrics_prev[agent.id], target, period.period_type
             ),
-            "objective_keys": self.perf.objective_keys(period.period_type),
+            "objective_keys": objective_keys,
             "has_target": target is not None,
             "completion": completions[agent.id],
             "ranking": self.ranking(agent.id, completions),
+            "admin_notes": (report.admin_notes or "").strip() if report else "",
+        }
+
+    def agent_home(
+        self,
+        agent: Agent,
+        now: Optional[datetime] = None,
+        week: Optional[Period] = None,
+        month: Optional[Period] = None,
+    ) -> dict:
+        """Inicio del agente: bloque de la semana y del mes en curso más lo que
+        no depende del período (agenda, cartera, tendencia, compradores)."""
+        default_week, default_month = self.current_periods(now=now)
+        week = week or default_week
+        month = month or default_month
+        agents = self.company_agents()
+        pending_buyers = self.pending_buyers_for_agent(agent.id, now=now)
+
+        return {
+            "week": self.agent_period_block(agent, week, agents=agents, now=now),
+            "month": self.agent_period_block(agent, month, agents=agents, now=now),
             "agenda": self.agenda(agent, now=now),
             "portfolio": self.portfolio(agent, now=now),
-            "trend": self.agent_trend(agent, period, now=now),
-            "admin_notes": (report.admin_notes or "").strip() if report else "",
+            "trend": self.agent_trend(agent, week, now=now),
             "pending_buyers": pending_buyers,
             "pending_summary": attention_summary(pending_buyers),
         }
@@ -622,10 +653,10 @@ class DashboardService:
     # Inicio del admin
     # ------------------------------------------------------------------
 
-    def admin_home(self, period: Period, now: Optional[datetime] = None) -> dict:
-        now = now or datetime.utcnow()
+    def admin_period_block(self, period: Period, agents, now: Optional[datetime] = None) -> dict:
+        """Lo que depende del período en el Inicio del admin: KPIs del equipo
+        contra objetivo, cumplimiento medio y la fila de cada agente."""
         previous_period = self.previous_period(period, now=now)
-        agents = self.company_agents()
         agent_ids = [a.id for a in agents]
 
         metrics_now = self.team_metrics(agent_ids, period)
@@ -641,17 +672,58 @@ class DashboardService:
             a.id: self.perf.completion_pct(metrics_prev[a.id], targets_prev.get(a.id), period.period_type)
             for a in agents
         }
-
-        pending = self.pending_buyers_by_agent(agents, now=now)
+        defined = [pct for pct in completions.values() if pct is not None]
 
         return {
-            "kpis": self.team_kpis(agent_ids, metrics_now, metrics_prev, period, previous_period),
-            "secondary_kpis": self.team_secondary_kpis(agent_ids, metrics_now, metrics_prev, completions, now),
+            "period": period,
+            "kpis": self.team_objective_kpis(metrics_now, metrics_prev, targets_now, period),
+            "completion_avg": round(sum(defined) / len(defined)) if defined else None,
+            "completion_agents": len(defined),
             "team": self.team_rows(agents, metrics_now, targets_now, completions, completions_prev, period),
             "objective_keys": self.perf.objective_keys(period.period_type),
-            "attention": self.attention(agents, targets_now, period, pending, now),
+            # Agentes sin objetivos definidos (solo tiene sentido avisar del período en curso)
+            "missing_targets": [a for a in agents if a.id not in targets_now] if period.is_current else [],
+        }
+
+    def admin_home(
+        self,
+        now: Optional[datetime] = None,
+        week: Optional[Period] = None,
+        month: Optional[Period] = None,
+    ) -> dict:
+        """Inicio del admin: bloques de semana y mes (KPIs y filas de la tabla
+        de cumplimiento, que la plantilla muestra para la semana), actividad del
+        mes, atención, actividad reciente y tendencia."""
+        now = now or datetime.utcnow()
+        default_week, default_month = self.current_periods(now=now)
+        week = week or default_week
+        month = month or default_month
+        agents = self.company_agents()
+        agent_ids = [a.id for a in agents]
+
+        week_block = self.admin_period_block(week, agents, now=now)
+        month_block = self.admin_period_block(month, agents, now=now)
+        pending = self.pending_buyers_by_agent(agents, now=now)
+
+        # Visitas y contactos (sin objetivo) solo del mes, frente al mes anterior (D4)
+        prev_month = self.previous_period(month, now=now)
+        activity_kpis = self.team_activity_kpis(
+            self.team_metrics(agent_ids, month), self.team_metrics(agent_ids, prev_month), month, prev_month,
+        )
+
+        return {
+            "week": week_block,
+            "month": month_block,
+            "activity_kpis": activity_kpis,
+            "pending_buyers": self._company_alerts().filter(PropertyAlert.status == AlertStatus.PENDING).count(),
+            "abandoned_buyers": self.abandoned_buyers_count(now),
+            "abandoned_days": DashboardThresholds.ABANDONED_BUYER_DAYS,
+            "attention": self.attention(
+                agents, pending, now,
+                missing_targets=[(week, week_block["missing_targets"]), (month, month_block["missing_targets"])],
+            ),
             "feed": self.activity_feed(now),
-            "trend": self.team_trend(agents, period, now=now),
+            "trend": self.team_trend(agents, week, now=now),
             "pending_by_agent": pending,
         }
 
@@ -673,20 +745,41 @@ class DashboardService:
     def _sum(self, metrics_by_agent: dict, key: str) -> int:
         return sum(self.perf.metric_value(m, key) for m in metrics_by_agent.values())
 
-    def team_kpis(self, agent_ids, metrics_now, metrics_prev, period, previous_period) -> list:
-        kpis = [
+    def _team_breakdown(self, metrics_now: dict, key: str) -> Optional[dict]:
+        if key not in BREAKDOWN_KEYS:
+            return None
+        details = [self.perf.breakdown(m, key) for m in metrics_now.values()]
+        if details and all(d is not None for d in details):
+            return {kind: sum(d[kind] for d in details) for kind in ("venta", "alquiler", "otros")}
+        return None
+
+    def team_activity_kpis(self, metrics_now, metrics_prev, period, previous_period) -> list:
+        """Visitas de la empresa y contactos del equipo (sin objetivo), con delta."""
+        return [
             Kpi("hojas_visita", KPI_LABELS["hojas_visita"],
                 self._company_visit_count(period.start, period.end),
                 self._company_visit_count(previous_period.start, previous_period.end)),
+            Kpi("contactos", KPI_LABELS["contactos"], self._sum(metrics_now, "contactos"),
+                self._sum(metrics_prev, "contactos"), breakdown=self._team_breakdown(metrics_now, "contactos")),
         ]
-        for key in ("contactos", "captaciones_crm", "cierres"):
-            breakdown = None
-            if key in BREAKDOWN_KEYS:
-                details = [self.perf.breakdown(m, key) for m in metrics_now.values()]
-                if details and all(d is not None for d in details):
-                    breakdown = {kind: sum(d[kind] for d in details) for kind in ("venta", "alquiler", "otros")}
-            kpis.append(Kpi(key, KPI_LABELS[key], self._sum(metrics_now, key), self._sum(metrics_prev, key),
-                            breakdown=breakdown))
+
+    def team_objective_kpis(self, metrics_now, metrics_prev, targets, period) -> list:
+        """Métricas con objetivo en el período, sumadas para el equipo.
+
+        El objetivo del equipo es la suma de los objetivos definidos; si ningún
+        agente tiene objetivo, la KPI va sin anillo (tono neutro).
+        """
+        kpis = []
+        for key in self.perf.objective_keys(period.period_type):
+            team_target = sum(
+                self.perf.target_value(t, key) or 0 for t in targets.values()
+            ) or None
+            value = self._sum(metrics_now, key)
+            kpis.append(Kpi(
+                key, KPI_LABELS[key], value, self._sum(metrics_prev, key),
+                is_objective=True, target=team_target, pct=self.perf.metric_pct(value, team_target),
+                breakdown=self._team_breakdown(metrics_now, key),
+            ))
         return kpis
 
     def _company_alerts(self):
@@ -708,21 +801,18 @@ class DashboardService:
             .count()
         )
 
-    def team_secondary_kpis(self, agent_ids, metrics_now, metrics_prev, completions, now) -> dict:
-        defined = [pct for pct in completions.values() if pct is not None]
-        return {
-            "bajadas": Kpi("bajadas", KPI_LABELS["bajadas"], self._sum(metrics_now, "bajadas"),
-                           self._sum(metrics_prev, "bajadas")),
-            "completion_avg": round(sum(defined) / len(defined)) if defined else None,
-            "completion_agents": len(defined),
-            "pending_buyers": self._company_alerts().filter(PropertyAlert.status == AlertStatus.PENDING).count(),
-            "abandoned_buyers": self.abandoned_buyers_count(now),
-            "abandoned_days": DashboardThresholds.ABANDONED_BUYER_DAYS,
-        }
-
     # -- Cumplimiento del equipo -------------------------------------------
 
     def team_rows(self, agents, metrics_now, targets, completions, completions_prev, period) -> list:
+        """Fila por agente para un período: una celda por métrica (barra, % y
+        valor / objetivo si la métrica tiene objetivo; solo el valor si no),
+        % global y tendencia frente al período anterior.
+
+        `sort_value` en cada celda y `completion_sort` en la fila alimentan la
+        ordenación por columnas en el navegador: en métricas con objetivo se
+        ordena por % (sin objetivo definido queda vacío y va al final); en las
+        demás, por valor.
+        """
         objective_keys = set(self.perf.objective_keys(period.period_type))
         rows = []
         for agent in agents:
@@ -734,6 +824,10 @@ class DashboardService:
                 is_objective = key in objective_keys
                 target_value = self.perf.target_value(target, key) if is_objective else None
                 pct = self.perf.metric_pct(value, target_value)
+                if is_objective:
+                    sort_value = pct if pct is not None else ""
+                else:
+                    sort_value = value
                 cells.append({
                     "key": key,
                     "value": value,
@@ -742,6 +836,7 @@ class DashboardService:
                     "pct": pct,
                     "bar_pct": min(pct, 100) if pct is not None else None,
                     "tone": semaphore(pct),
+                    "sort_value": sort_value,
                 })
             current, previous = completions[agent.id], completions_prev[agent.id]
             if current is None or previous is None:
@@ -754,8 +849,10 @@ class DashboardService:
                 trend = "flat"
             rows.append({
                 "agent": agent,
+                "period": period,
                 "cells": cells,
                 "completion": current,
+                "completion_sort": current if current is not None else "",
                 "completion_tone": semaphore(current),
                 "previous_completion": previous,
                 "trend": trend,
@@ -853,8 +950,11 @@ class DashboardService:
             .scalar()
         ) or 0
 
-    def attention(self, agents, targets, period: Period, pending: list, now: datetime) -> list:
-        """Lista calculada (no son notificaciones), de más a menos urgente."""
+    def attention(self, agents, pending: list, now: datetime, missing_targets=None) -> list:
+        """Lista calculada (no son notificaciones), de más a menos urgente.
+
+        `missing_targets`: [(period, [agentes sin objetivo])], un aviso por período.
+        """
         items = []
 
         for group in pending:
@@ -909,16 +1009,16 @@ class DashboardService:
                 "href": f"/alerts?agent_id={agent.id}",
             })
 
-        if period.is_current and self.perf.objective_keys(period.period_type):
-            missing = [a for a in agents if a.id not in targets]
-            if missing:
-                items.append({
-                    "tone": "blue",
-                    "icon": "flag",
-                    "title": f"{len(missing)} {'agente sin objetivos' if len(missing) == 1 else 'agentes sin objetivos'} en {period.label}",
-                    "text": ", ".join(a.name for a in missing[:4]) + ("…" if len(missing) > 4 else ""),
-                    "href": f"/commercial-results?tab=rendimiento&period_type={period.period_type}&period_start={period.start_str}",
-                })
+        for period, missing in (missing_targets or []):
+            if not missing or not self.perf.objective_keys(period.period_type):
+                continue
+            items.append({
+                "tone": "blue",
+                "icon": "flag",
+                "title": f"{len(missing)} {'agente sin objetivos' if len(missing) == 1 else 'agentes sin objetivos'} en {period.label}",
+                "text": ", ".join(a.name for a in missing[:4]) + ("…" if len(missing) > 4 else ""),
+                "href": f"/commercial-results?tab=rendimiento&period_type={period.period_type}&period_start={period.start_str}",
+            })
 
         return items
 
