@@ -18,6 +18,12 @@ o `style="color: ..."`. Por qué no en botones: el negro de MOYZA ya es el prima
 dorado de MOES como fondo de botón con texto blanco queda justo en el límite de contraste
 y rompe la coherencia entre empresas. La marca se reconoce por la franja y el nombre.
 
+Distintivo de empresa de una propiedad (`ui.company_badge(company)`, PLAN_SUGERENCIAS_MULTIEMPRESA.md):
+badge neutro `bg-gray-100 text-gray-700` con el punto `w-1.5 h-1.5 rounded-full` coloreado con
+`style="background-color: {{ company.primary_color }}"` y el nombre de la empresa. Solo donde una
+propiedad puede ser de otra empresa que la activa (sugerencias del perfil, buscador de Propuesta,
+propiedad asociada a una alerta). El JS que pinte el mismo distintivo replica ese HTML.
+
 Logo: `/static/logo_moyza.png` para ambas por ahora (`companies.logo_path`). Solo se usa
 en documentos (ficha de visita, PDF). En la app, el nombre en texto basta.
 

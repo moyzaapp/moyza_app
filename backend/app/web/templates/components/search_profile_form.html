@@ -29,6 +29,16 @@
     máximo con `required`, y "provincia, o al menos una población o zona" con
     `data-places-required` (lo valida /static/js/search-profile.js al enviar; el
     servidor lo valida igualmente con buyer_matching.missing_profile_fields).
+  - required_operations (PLAN_PERFIL_SOLO_VENTA.md): lista de operaciones con
+    perfil obligatorio (`buyer_matching.profile_required_operations()`, la ÚNICA
+    fuente; aquí no se compara con "Venta"). Si se pasa, sustituye a `required`:
+    los mínimos dependen de la operación elegida en el select y el JS pone o
+    quita `required` y los asteriscos al cambiarla.
+  - minimums_if_filled: si los mínimos no son obligatorios, se exigen en cuanto
+    se rellena algún dato del perfil (perfil opcional de la alerta: si se
+    registra, va completo; en la ficha del comprador no se usa).
+  Los campos mínimos llevan `data-profile-min`; el bloque, `data-search-profile`
+  con la configuración para el JS.
   - notes_name: nombre del campo "Imprescindibles" (en el modal de seguimiento
     `notes` ya es la nota del seguimiento, allí va como `profile_notes`).
   - type_empty: texto de la opción vacía del tipo (por defecto "Selecciona…" si es
@@ -63,7 +73,9 @@
 </fieldset>
 {%- endmacro %}
 
-{% macro _location(loc, prefix, required) -%}
+{# validated: el bloque lleva el mínimo de ubicación (fijo o según operación/datos);
+   required: si es obligatorio al pintar (el asterisco sale visible) #}
+{% macro _location(loc, prefix, validated, required) -%}
 {% set countries = loc.countries or [] %}
 {% set single_country = countries | length == 1 %}
 {% set country_options = [] %}
@@ -71,10 +83,10 @@
 {% set province_options = [] %}
 {% for province in loc.provinces or [] %}{% set _ = province_options.append((province, province)) %}{% endfor %}
 <div class="space-y-4" data-geo-cascade data-geo-source="geoData-{{ prefix }}" data-no-province="{{ loc.no_province or 'Sin provincia' }}"
-     {% if required %}data-places-required data-places-error="{{ prefix }}PlacesError"{% endif %}>
+     {% if validated %}data-places-required data-places-error="{{ prefix }}PlacesError"{% endif %}>
     <script type="application/json" id="geoData-{{ prefix }}">{{ (loc.tree or {}) | tojson }}</script>
     <p id="{{ prefix }}PlacesHelp" class="text-xs text-gray-500">
-        {% if required %}Ubicación <span class="text-red-500" aria-hidden="true">*</span> · elige la provincia, o al menos una población o zona{% else %}Ubicación · provincia, poblaciones y zonas{% endif %}
+        {% if validated %}Ubicación <span class="text-red-500{% if not required %} hidden{% endif %}" aria-hidden="true" data-profile-mark>*</span> · elige la provincia, o al menos una población o zona{% else %}Ubicación · provincia, poblaciones y zonas{% endif %}
     </p>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {# Con un solo país, preseleccionado y fijo (el desplegable deshabilitado no se envía: va oculto) #}
@@ -90,27 +102,33 @@
                  "No hay poblaciones en esta provincia") }}
     {{ _geo_list("zones", "Zona", loc.zones or [], loc.selected_zones or [], loc.zones_all, prefix,
                  "Las poblaciones elegidas no tienen zonas registradas") }}
-    {% if required %}
+    {% if validated %}
     <p id="{{ prefix }}PlacesError" class="hidden text-xs text-red-600" role="alert">Elige la provincia, o al menos una población o zona</p>
     {% endif %}
 </div>
 {%- endmacro %}
 
-{% macro search_profile_fields(criteria=None, location={}, property_types=[], alert_operation=None, prefix="sp", required=False, notes_name="notes", type_empty=None) -%}
+{% macro search_profile_fields(criteria=None, location={}, property_types=[], alert_operation=None, prefix="sp", required=False, notes_name="notes", type_empty=None, required_operations=None, minimums_if_filled=False) -%}
 {% set c = criteria %}
 {% set type_options = [] %}
 {% for pt in property_types %}{% set _ = type_options.append((pt, pt)) %}{% endfor %}
-<div class="space-y-5">
-    {{ _location(location, prefix, required) }}
+{# Operación: en la alerta, precargada con la de la alerta y editable (si cambia,
+   cambia la de la alerta; PLAN_PERFIL_UBICACION.md); en la ficha, la del perfil #}
+{% set current_bt = alert_operation if alert_operation else (c.business_type if c else none) %}
+{# Mínimos obligatorios al pintar: según la operación (PLAN_PERFIL_SOLO_VENTA.md) o fijos #}
+{% set required = (current_bt in required_operations) if required_operations is not none else required %}
+{% set validated = required or required_operations is not none or minimums_if_filled %}
+<div class="space-y-5" {% if validated %}data-search-profile data-notes-name="{{ notes_name }}"
+     {% if required_operations is not none %}data-required-operations="{{ required_operations | tojson | forceescape }}"{% elif required %}data-profile-required{% endif %}
+     {% if minimums_if_filled %}data-minimums-if-filled{% endif %}{% endif %}>
+    {{ _location(location, prefix, validated, required) }}
 
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {{ ui.select("property_type", "Tipo de inmueble", type_options,
                      value=(c.property_type if c else none), required=required,
-                     empty=(type_empty or ("Selecciona…" if required else "Cualquier tipo")), id=prefix ~ "PropertyType") }}
+                     empty=(type_empty or ("Selecciona…" if validated else "Cualquier tipo")), id=prefix ~ "PropertyType",
+                     attrs=("data-profile-min" if validated else "")) }}
 
-        {# Operación: en la alerta, precargada con la de la alerta y editable (si cambia,
-           cambia la de la alerta; PLAN_PERFIL_UBICACION.md); en la ficha, la del perfil #}
-        {% set current_bt = alert_operation if alert_operation else (c.business_type if c else none) %}
         <div>
             <label for="{{ prefix }}BusinessType" class="block text-sm font-medium text-gray-700 mb-1">
                 Operación <span class="text-red-500" aria-hidden="true">*</span>
@@ -146,7 +164,8 @@
                         placeholder="–", attrs='min="0" step="1000" inputmode="numeric"', id=prefix ~ "MinPrice") }}
             {{ ui.field("max_price", "Precio máx. (€)", type="number", required=required,
                         value=((c.max_price | int) if c and c.max_price is not none else ""),
-                        placeholder="–", attrs='min="0" step="1000" inputmode="numeric"', id=prefix ~ "MaxPrice") }}
+                        placeholder="–", attrs=('min="0" step="1000" inputmode="numeric"' ~ (' data-profile-min' if validated else '')),
+                        id=prefix ~ "MaxPrice") }}
         </div>
     </div>
 

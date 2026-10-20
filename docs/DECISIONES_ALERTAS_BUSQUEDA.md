@@ -203,3 +203,71 @@ una ayuda de solo lectura "Provincia (según CP)".
 Implicaciones para analítica: `alert.business_type` puede cambiar después de
 crear la alerta; el historial del cambio está en la nota del seguimiento
 ("Operación: … → …"). Las métricas por operación leen el valor actual.
+
+## 7. 2026-10-20: perfil obligatorio solo en Venta (opcional en Alquiler)
+
+Plan: `PLAN_PERFIL_SOLO_VENTA.md`. Matiza las §5 y §6: el perfil de búsqueda
+(con los mínimos de la §6) es **obligatorio solo cuando la operación de la
+alerta es Venta**. En **Alquiler** es **opcional**: se puede registrar y, si
+existe completo, sugiere propiedades, pero no bloquea nada.
+
+Una sola fuente de verdad: `buyer_matching.profile_required(alert)` (Venta y
+con comprador; Alquiler, vacío o cualquier otro valor → opcional; sin
+comprador, nunca). La comparación con Venta vive solo en
+`buyer_matching.profile_required_for_business_type`, que también usa la ficha
+del comprador; el JS recibe la lista de operaciones obligatorias del servidor
+(`profile_required_operations`). `profile_is_complete` /
+`missing_profile_fields` no cambian (dicen si el perfil está completo, no si
+hace falta).
+
+| Punto | Venta (como antes) | Alquiler |
+|---|---|---|
+| Contactado | perfil obligatorio la 1.ª vez | campos opcionales; si se rellenan, con los mínimos y se registra el perfil (1 solo `CONTACTADO`) |
+| Visita programada / Oferta / Cerrado | bloqueados sin perfil | no se bloquean |
+| Paso Perfil | obligatorio | opcional; mínimos solo si se envía algún dato |
+| Propuesta | sin perfil: ni sugerencias ni buscador | sin perfil: buscador manual y asociar; con perfil, sugerencias |
+| Asociar / cambiar propiedad | exige perfil | no lo exige |
+| Aviso | banner "Perfil pendiente" | línea discreta "Perfil opcional en alquiler" con enlace al paso Perfil |
+| Chip "Sin perfil" (`/alerts`, admin) | sí | no |
+| Ficha del comprador | mínimos obligatorios | sin mínimos |
+
+Cambio de operación desde el perfil de la alerta (§6, decisión 2): la
+obligatoriedad se evalúa con la operación **pedida** en la misma petición.
+Venta → Alquiler deja de bloquear (aunque no se envíe ningún dato: se registra
+el cambio de operación en la nota); Alquiler → Venta con el perfil incompleto
+se rechaza con el error de mínimos y la alerta no cambia.
+
+Detalles de implementación: en Alquiler, el paso Perfil sin ningún dato ni
+cambio de operación no guarda nada (aviso "No se ha guardado nada: el perfil …
+está vacío y es opcional en alquiler"); si solo cambia la operación se
+registra `PERFIL_GUARDADO` con la línea "Operación: Venta → Alquiler" (el
+perfil no se toca, salvo su operación si ya existía). Tras la primera gestión,
+una alerta de Alquiler sin perfil abre por defecto en Propuesta (no en
+Perfil).
+
+Implicaciones para analítica: en Alquiler puede haber `CONTACTADO`, visitas y
+cierres sin perfil guardado; los informes que cuenten "perfiles registrados"
+no deben tomarlos como alertas incompletas.
+
+## 8. 2026-10-20: sugerencias de las dos empresas (MOYZA y MOES PREMIUM)
+
+Plan: `PLAN_SUGERENCIAS_MULTIEMPRESA.md` (resumen operativo en
+`MULTIEMPRESA_MOYZA_MOES.md` §16). Las propiedades sugeridas por el perfil
+del comprador (paso Propuesta y ficha del comprador) salen de **las dos
+empresas**, con el distintivo de empresa en cada tarjeta y en cada resultado
+del buscador manual de la Propuesta. Orden por precio ascendente, sin agrupar;
+la cabecera desglosa el total por empresa y ofrece "Solo {empresa activa}"
+(`?company=active`) cuando hay de más de una. La cascada de ubicación y los
+tipos del perfil también se alimentan de las dos.
+
+Asociar a la alerta una propiedad de la otra empresa está permitido:
+`alert.company_id` no cambia, `alert.property_id` apunta a la de la otra
+empresa y la nota del seguimiento la nombra con su empresa.
+
+Implicaciones para analítica: los indicadores de alertas (contactos, cierres)
+cuentan por `property_alerts.company_id`, no por la empresa de la propiedad,
+así que una alerta de MOYZA con una propiedad de MOES cuenta en MOYZA. Un
+informe que agrupe por la empresa de la **propiedad** de las alertas verá
+alertas de la otra empresa: para "dónde se captó al comprador" usar siempre
+`property_alerts.company_id`. Las alertas con propiedad ya no cumplen siempre
+`alert.company_id == property.company_id`.

@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from app.web.template_env import templates
 
-from sqlalchemy.orm import Session, contains_eager, selectinload
+from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 from sqlalchemy import func, case, or_
 
 from app.core.constants import AlertType, PropertyStatus
@@ -57,6 +57,7 @@ from app.services.alert_duplicate_service import (
     append_note,
 )
 from app.services import buyer_matching
+from app.services.company_service import branding_for
 from app.services import alert_assignment_service as assignment
 from app.services import alert_view
 from app.services import buyer_attention_service
@@ -152,9 +153,13 @@ def effective_alert_statuses(status_filter, q) -> Optional[list]:
     return list(OPEN_ALERT_STATUSES)
 
 
-def _property_filter_values(db: Session, company_id: int,
-                            criteria: Optional[BuyerSearchCriteria] = None) -> dict:
-    """Opciones del formulario del perfil a partir de las propiedades de la empresa.
+def _property_filter_values(db: Session, criteria: Optional[BuyerSearchCriteria] = None) -> dict:
+    """Opciones del formulario del perfil a partir de las propiedades de LAS DOS empresas.
+
+    PLAN_SUGERENCIAS_MULTIEMPRESA.md: las sugerencias del perfil salen de
+    ambas empresas, así que sus opciones también (se puede elegir una
+    población o un tipo que solo tenga la otra). Solo alimenta el formulario
+    del perfil (paso Perfil, Contactado y ficha del comprador); nada más.
 
     - `location`: cascada País → Provincia → Población → Zona
       (PLAN_PERFIL_UBICACION.md): el árbol de `buyer_matching.geo_options`
@@ -163,15 +168,36 @@ def _property_filter_values(db: Session, company_id: int,
     - `property_types` y `business_types`: valores distintos de las propiedades.
     """
     def distinct_values(column):
-        query = scope_properties(db.query(column), company_id).filter(column.isnot(None))
+        query = db.query(column).filter(column.isnot(None))
         return [r[0] for r in query.distinct().order_by(column.asc()).all()]
 
-    tree = buyer_matching.geo_options(db, company_id)
+    tree = buyer_matching.geo_options(db)
     return {
         "location": {"tree": tree, **buyer_matching.geo_choices(tree, criteria)},
         "property_types": distinct_values(Property.property_type),
         "business_types": distinct_values(Property.business_type),
     }
+
+
+def _company_json(company, active_company_id: int) -> dict:
+    """Empresa de una propiedad para el JS del buscador de Propuesta (distintivo)."""
+    return {
+        "id": company.id if company else None,
+        "name": company.name if company else "",
+        "color": branding_for(company).primary_color,
+        "active": company is not None and company.id == active_company_id,
+    }
+
+
+def property_label(prop: Property, alert_company_id: Optional[int]) -> str:
+    """Título de la propiedad para notas y avisos; con su empresa si no es la de la alerta.
+
+    PLAN_SUGERENCIAS_MULTIEMPRESA.md: "Piso en Martos (MOES PREMIUM)". Una
+    propiedad de la misma empresa que la alerta se nombra como siempre.
+    """
+    if prop.company_id != alert_company_id and prop.company is not None:
+        return f"{prop.title} ({prop.company.name})"
+    return prop.title
 
 
 def _page_profiles(db: Session, alerts, with_missing: bool = False):
@@ -180,15 +206,22 @@ def _page_profiles(db: Session, alerts, with_missing: bool = False):
     - Resúmenes: {alert.id: resumen del perfil} para las alertas sin
       propiedad (búsquedas generales), en la columna Propiedad.
     - Sin perfil (solo con `with_missing`, para el admin;
-      PLAN_PERFIL_OBLIGATORIO.md): ids de las alertas abiertas con comprador
-      cuyo perfil no está completo (`buyer_matching.profile_is_complete`).
+      PLAN_PERFIL_OBLIGATORIO.md): ids de las alertas abiertas que exigen
+      perfil (`buyer_matching.profile_required`: Venta con comprador,
+      PLAN_PERFIL_SOLO_VENTA.md) y cuyo perfil no está completo
+      (`buyer_matching.profile_is_complete`). En Alquiler el perfil es
+      opcional: nunca llevan el chip.
 
     El perfil es uno por comprador; se cargan todos los de la página en una
     sola consulta (sin N+1).
     """
+    def counts_as_missing(alert) -> bool:
+        return (with_missing and alert.status in OPEN_ALERT_STATUSES
+                and buyer_matching.profile_required(alert))
+
     buyer_ids = {
         a.buyer_id for a in alerts
-        if a.buyer_id and (a.property_id is None or (with_missing and a.status in OPEN_ALERT_STATUSES))
+        if a.buyer_id and (a.property_id is None or counts_as_missing(a))
     }
     if not buyer_ids:
         return {}, set()
@@ -206,8 +239,7 @@ def _page_profiles(db: Session, alerts, with_missing: bool = False):
             summary = buyer_matching.criteria_summary(criteria)
             if summary:
                 summaries[alert.id] = summary
-        if (with_missing and alert.status in OPEN_ALERT_STATUSES
-                and not buyer_matching.profile_is_complete(criteria)):
+        if counts_as_missing(alert) and not buyer_matching.profile_is_complete(criteria):
             missing.add(alert.id)
     return summaries, missing
 
@@ -313,7 +345,8 @@ def is_alert_locked_for_user(alert: PropertyAlert, current_user, db: Session) ->
     return alert.id in get_locked_alert_ids(agent.id, db, alert.company_id)
 
 
-# Asociar o cambiar la propiedad exige el perfil completo (PLAN_PERFIL_OBLIGATORIO.md)
+# Asociar o cambiar la propiedad exige el perfil completo cuando el perfil es
+# obligatorio (PLAN_PERFIL_OBLIGATORIO.md; solo Venta, PLAN_PERFIL_SOLO_VENTA.md)
 PROFILE_REQUIRED_MESSAGE = "Registra primero el perfil del comprador"
 
 
@@ -325,8 +358,10 @@ def _search_link_denied(alert: PropertyAlert, current_user, db: Session,
     abiertas, solo el agente asignado o el admin, y nunca si la alerta está
     bloqueada por la cola del agente. Desde PLAN_PERFIL_OBLIGATORIO.md el
     origen ya no cuenta (una alerta con referencia también puede cambiar de
-    propiedad) y, con `require_profile` (asociar propiedad, buscador de la
-    Propuesta), el comprador debe tener el perfil completo.
+    propiedad). `require_profile` marca las acciones que piden el perfil
+    (asociar propiedad, buscador de la Propuesta): se exige completo solo si
+    la alerta lo requiere (`buyer_matching.profile_required`: Venta; en
+    Alquiler se asocia sin perfil, PLAN_PERFIL_SOLO_VENTA.md).
     """
     if alert.status not in OPEN_ALERT_STATUSES:
         return "La alerta está cerrada"
@@ -336,7 +371,7 @@ def _search_link_denied(alert: PropertyAlert, current_user, db: Session,
             return "No tienes permisos para esta alerta"
         if is_alert_locked_for_user(alert, current_user, db):
             return ALERT_LOCKED_MESSAGE
-    if require_profile and not buyer_matching.profile_is_complete(_alert_criteria(alert)):
+    if require_profile and _profile_pending(alert):
         return PROFILE_REQUIRED_MESSAGE
     return None
 
@@ -346,12 +381,23 @@ def _alert_criteria(alert: PropertyAlert) -> Optional[BuyerSearchCriteria]:
     return alert.buyer.search_criteria if alert.buyer is not None else None
 
 
-def _profile_applies(alert: PropertyAlert) -> bool:
-    """¿Se le exige perfil a esta alerta? Solo si tiene comprador.
+def _profile_pending(alert: PropertyAlert, business_type: Optional[str] = None) -> bool:
+    """True si la alerta exige perfil (`buyer_matching.profile_required`) y aún no está completo.
+
+    `business_type`: operación pedida en la misma petición (cambio desde el
+    perfil); sin ella, la de la alerta.
+    """
+    return (buyer_matching.profile_required(alert, business_type)
+            and not buyer_matching.profile_is_complete(_alert_criteria(alert)))
+
+
+def _can_hold_profile(alert: PropertyAlert) -> bool:
+    """¿Tiene la alerta dónde guardar un perfil (obligatorio u opcional)? Solo si tiene comprador.
 
     El perfil se guarda en el comprador; una alerta antigua sin comprador
-    (anterior a la tabla de compradores) no tiene dónde guardarlo y queda
-    fuera del requisito para no dejarla sin poder avanzar ni cerrarse.
+    (anterior a la tabla de compradores) no tiene dónde guardarlo: ni pasos ni
+    perfil en el modal, y nunca se le exige (`buyer_matching.profile_required`).
+    Esto NO dice si el perfil es obligatorio (eso es solo `profile_required`).
     """
     return alert.buyer is not None
 
@@ -471,6 +517,17 @@ def _store_alert_profile(db: Session, alert: PropertyAlert, values: dict, now: d
     return criteria
 
 
+def _sync_profile_operation(alert: PropertyAlert, now: datetime) -> Optional[BuyerSearchCriteria]:
+    """Cambio de operación sin datos del perfil (perfil opcional): el perfil
+    guardado, si existe, toma la operación nueva de la alerta para que las
+    sugerencias y el aviso de la Propuesta usen la misma. Sin commit."""
+    criteria = _alert_criteria(alert)
+    if criteria is not None:
+        criteria.business_type = alert.business_type
+        criteria.updated_at = now
+    return criteria
+
+
 @router.get("/alerts", response_class=HTMLResponse)
 async def alerts_page(
     request: Request,
@@ -578,7 +635,9 @@ async def alerts_page(
     alerts = (
         filtered_query
         .options(
-            contains_eager(PropertyAlert.property),
+            # Empresa de la propiedad: distintivo si es de la otra
+            # (PLAN_SUGERENCIAS_MULTIEMPRESA.md), una consulta para la página
+            contains_eager(PropertyAlert.property).selectinload(Property.company),
             contains_eager(PropertyAlert.agent),
             selectinload(PropertyAlert.follow_ups),
         )
@@ -949,11 +1008,15 @@ async def search_properties(
     nunca el propietario. Las propiedades sin captador solo las ve el admin.
 
     Con `alert_id` de una alerta abierta que el usuario puede trabajar y cuyo
-    comprador tiene el perfil completo (paso "Propuesta",
+    comprador tiene el perfil completo, o que no lo exige (Alquiler,
+    PLAN_PERFIL_SOLO_VENTA.md) (paso "Propuesta",
     PLAN_ALERTA_SIN_REFERENCIA.md y PLAN_PERFIL_OBLIGATORIO.md; con o sin
-    referencia): todas las disponibles de la empresa, de cualquier agente
-    (decisión cerrada 3), para asociarlas a esa alerta. En cualquier otro
-    caso, la regla de siempre.
+    referencia): todas las disponibles de cualquier agente (decisión cerrada
+    3) y de LAS DOS empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md), para
+    asociarlas a esa alerta; cada resultado lleva su empresa (`company`:
+    nombre, color y si es la activa) para pintar el distintivo. En cualquier
+    otro caso (modal de creación de alertas con referencia), la regla de
+    siempre: solo la empresa activa y, para el agente, solo sus propiedades.
 
     NOTA: debe declararse antes de /alerts/{alert_id}, o FastAPI intentaría
     resolver "search-properties" como un id y devolvería 422.
@@ -977,7 +1040,7 @@ async def search_properties(
         ) is None:
             link_alert = candidate
 
-    query = scope_properties(db.query(Property), company_id).filter(
+    query = db.query(Property).options(joinedload(Property.agent)).filter(
         Property.status != PropertyStatus.ARCHIVED,
         Property.available_clause(),
         or_(
@@ -986,20 +1049,27 @@ async def search_properties(
             Property.city.ilike(like),
         ),
     )
-    # El agente solo puede crear alertas sobre sus propiedades asignadas, así
-    # que el buscador solo le ofrece esas (esto también excluye las que no
-    # tienen captador, que son solo para el admin, §4-7). Asociar una
-    # propiedad ajena a su búsqueda sí está permitido (decisión cerrada 2).
-    if link_alert is None and not is_admin(request.state.user):
-        own_agent = get_agent_from_user(request.state.user, db)
-        if not own_agent:
-            return JSONResponse(content={"results": []})
-        query = query.filter(Property.agent_id == own_agent.id)
+    if link_alert is None:
+        # Modal de creación: solo la empresa activa (sin cambios)
+        query = scope_properties(query, company_id)
+        # El agente solo puede crear alertas sobre sus propiedades asignadas, así
+        # que el buscador solo le ofrece esas (esto también excluye las que no
+        # tienen captador, que son solo para el admin, §4-7). Asociar una
+        # propiedad ajena a su búsqueda sí está permitido (decisión cerrada 2).
+        if not is_admin(request.state.user):
+            own_agent = get_agent_from_user(request.state.user, db)
+            if not own_agent:
+                return JSONResponse(content={"results": []})
+            query = query.filter(Property.agent_id == own_agent.id)
+    else:
+        # Propuesta de una alerta: las dos empresas, con su empresa cargada
+        query = query.options(selectinload(Property.company))
 
     properties = query.order_by(Property.title.asc()).limit(PROPERTY_SEARCH_LIMIT).all()
 
-    results = [
-        {
+    results = []
+    for p in properties:
+        item = {
             "id": p.id,
             "title": p.title,
             "address": p.address or "",
@@ -1007,8 +1077,9 @@ async def search_properties(
             "agent": p.agent.name if p.agent else "",
             "agent_id": p.agent_id,
         }
-        for p in properties
-    ]
+        if link_alert is not None:
+            item["company"] = _company_json(p.company, company_id)
+        results.append(item)
 
     return JSONResponse(content={"results": results})
 
@@ -1097,6 +1168,26 @@ async def check_existing_buyer(
     return JSONResponse(content={"results": [serialize_buyer(b) for b in buyers]})
 
 
+def _linkable_property(db: Session, property_id: Optional[int]) -> Optional[Property]:
+    """Propiedad que se puede asociar a una alerta desde su Propuesta, de CUALQUIER empresa.
+
+    PLAN_SUGERENCIAS_MULTIEMPRESA.md: única búsqueda por id sin
+    `get_property_in_company`; solo la usan `link_property_to_alert` y el aviso
+    de duplicado de la Propuesta. Devuelve la propiedad si existe (None si
+    no); que no esté archivada y siga disponible lo comprueba
+    `link_property_to_alert`, que da un aviso distinto. La alerta conserva su
+    `company_id`.
+    """
+    if property_id is None:
+        return None
+    return (
+        db.query(Property)
+        .options(selectinload(Property.company))
+        .filter(Property.id == property_id)
+        .first()
+    )
+
+
 # Pasos del detalle de una alerta (PLAN_ALERTA_SIN_REFERENCIA.md; desde
 # PLAN_PERFIL_OBLIGATORIO.md en todas las alertas, con o sin referencia)
 SEARCH_STEPS = (
@@ -1111,7 +1202,8 @@ SEARCH_SUGGESTION_LIMIT = 30
 
 
 def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view: bool,
-                    step: Optional[str], confirm_property: Optional[str], follow_ups, company_id: int) -> dict:
+                    step: Optional[str], confirm_property: Optional[str], follow_ups, company_id: int,
+                    company_filter: Optional[str] = None) -> dict:
     """Contexto de los pasos Contactar → Perfil → Propuesta del detalle de una alerta.
 
     PLAN_PERFIL_OBLIGATORIO.md: en TODAS las alertas (el origen solo es una
@@ -1121,16 +1213,36 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
     completo; si no, Propuesta. Sin perfil completo la Propuesta no sugiere ni
     deja asociar ("Perfil pendiente").
 
+    PLAN_PERFIL_SOLO_VENTA.md: todo lo anterior solo si el perfil es
+    obligatorio (`profile_required`: Venta con comprador). En Alquiler es
+    opcional (`can_propose`): sin perfil, la Propuesta ofrece el buscador
+    manual y deja asociar, el paso por defecto tras la gestión es Propuesta y
+    en lugar del aviso sale una línea discreta "Perfil opcional".
+
     Para el modal de seguimiento (Contactado lleva el perfil dentro) entrega
-    también `profile_complete`, `profile_missing` y las opciones del
-    formulario precargado (`location`: cascada de ubicación; `property_types`).
+    también `profile_complete`, `profile_missing`, `profile_required`,
+    `profile_required_operations` (para que el JS ponga o quite los mínimos
+    si cambia la operación) y las opciones del formulario precargado
+    (`location`: cascada de ubicación; `property_types`).
 
     PLAN_PERFIL_UBICACION.md: `operation_mismatch` avisa en la Propuesta de
     que la propiedad asociada es de otra operación que la que busca el
     comprador (la propiedad se mantiene).
+
+    PLAN_SUGERENCIAS_MULTIEMPRESA.md: las sugerencias, la cascada y los tipos
+    del perfil salen de las DOS empresas; `suggestions_by_company` da el
+    desglose de la cabecera y `company_filter == "active"` deja solo las de
+    la empresa activa (`only_active_company`). La propiedad asociada puede
+    ser de la otra empresa (`property_other_company`): sin enlace "Ver" (su
+    ficha da "no encontrada" fuera de su empresa). `active_company_id` va a
+    las tarjetas para el distintivo.
     """
     criteria = _alert_criteria(alert)
     profile_complete = buyer_matching.profile_is_complete(criteria)
+    profile_required = buyer_matching.profile_required(alert)
+    # Propuesta (sugerencias si hay perfil, buscador y asociar): con el perfil
+    # completo o si la alerta no lo exige (Alquiler, PLAN_PERFIL_SOLO_VENTA.md)
+    can_propose = profile_complete or not profile_required
     ctx = {
         "is_search": alert.is_search,
         "can_manage_search": False,
@@ -1139,9 +1251,11 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
         "step": None,
         "criteria": criteria,
         "criteria_parts": buyer_matching.criteria_parts(criteria),
-        "profile_applies": _profile_applies(alert),
+        "profile_required": profile_required,
+        "profile_required_operations": buyer_matching.profile_required_operations(),
         "profile_complete": profile_complete,
         "profile_missing": buyer_matching.missing_profile_fields(criteria),
+        "can_propose": can_propose,
         "suggestions": [],
         "suggestions_total": 0,
         "suggestion_limit": SEARCH_SUGGESTION_LIMIT,
@@ -1153,6 +1267,10 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
         "location": {},
         "property_types": [],
         "operation_mismatch": None,
+        "active_company_id": company_id,
+        "property_other_company": False,
+        "suggestions_by_company": [],
+        "only_active_company": False,
     }
 
     own_agent = None if admin_view else get_agent_from_user(current_user, db)
@@ -1163,15 +1281,19 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
     # alerta puede tener asociada una propiedad ajena (decisión 2 de
     # PLAN_ALERTA_SIN_REFERENCIA.md, en todas las alertas desde
     # PLAN_PERFIL_OBLIGATORIO.md), o ser una alerta reasignada.
+    # PLAN_SUGERENCIAS_MULTIEMPRESA.md: una propiedad de la otra empresa nunca
+    # se enlaza (fuera de su empresa la ficha es "no encontrada"), ni al admin.
     prop = alert.property
-    if prop is not None and not admin_view:
-        ctx["property_link_allowed"] = own_agent is not None and prop.agent_id == own_agent.id
+    if prop is not None:
+        ctx["property_other_company"] = prop.company_id != company_id
+        if not admin_view:
+            ctx["property_link_allowed"] = own_agent is not None and prop.agent_id == own_agent.id
 
     # Formulario del perfil (paso Perfil y «Contactado» del modal de
     # seguimiento): valores de las propiedades de la empresa, solo si se va a pintar
-    ctx["follow_up_profile"] = ctx["profile_applies"] and alert.status in OPEN_ALERT_STATUSES
+    ctx["follow_up_profile"] = _can_hold_profile(alert) and alert.status in OPEN_ALERT_STATUSES
     if ctx["follow_up_profile"]:
-        ctx.update(_property_filter_values(db, company_id, criteria))
+        ctx.update(_property_filter_values(db, criteria))
 
     # Propiedad asociada de otra operación que la que busca el comprador
     # (p. ej. tras cambiar la operación en el perfil): se avisa en la Propuesta
@@ -1195,35 +1317,48 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
         return ctx
 
     # Pasos en todas las alertas; una con referencia y sin gestión abre en
-    # Contactar con su propiedad visible encima
+    # Contactar con su propiedad visible encima. Perfil por defecto solo si
+    # es obligatorio y falta; en Alquiler sin perfil, Propuesta (buscador)
     if step not in SEARCH_STEP_KEYS:
         if not alert_view.has_follow_up_since_assignment(follow_ups, alert):
             step = "contact"
-        elif not profile_complete:
+        elif not can_propose:
             step = "profile"
         else:
             step = "proposal"
     ctx["show_steps"] = True
     ctx["step"] = step
 
-    # Propuesta: sin perfil completo no hay sugerencias (estado vacío con el
-    # aviso "Perfil pendiente" y enlace al paso Perfil)
+    # Propuesta: las sugerencias salen del perfil completo. Sin él, en Venta
+    # estado vacío con el aviso "Perfil pendiente"; en Alquiler, el buscador
+    # manual (asociar no exige perfil). De las dos empresas
+    # (PLAN_SUGERENCIAS_MULTIEMPRESA.md), con el desglose por empresa; con
+    # `?company=active`, solo las de la activa.
     if step == "proposal" and profile_complete:
-        query = buyer_matching.matching_properties_query(db, criteria, company_id)
-        ctx["suggestions_total"] = query.order_by(None).count()
+        only_active = company_filter == "active"
+        by_company = buyer_matching.matching_summary_by_company(db, criteria, first_company_id=company_id)
+        ctx["suggestions_by_company"] = by_company
+        ctx["only_active_company"] = only_active
+        if only_active:
+            ctx["suggestions_total"] = sum(row["count"] for row in by_company if row["company"].id == company_id)
+        else:
+            ctx["suggestions_total"] = sum(row["count"] for row in by_company)
+        query = buyer_matching.matching_properties_query(db, criteria, company_id if only_active else None)
         ctx["suggestions"] = query.limit(SEARCH_SUGGESTION_LIMIT).all()
         # La propiedad actual se marca "Asociada ahora"; si no encaja con el
         # perfil (o no está entre las primeras), se pinta aparte encima
         ctx["current_in_suggestions"] = any(p.id == alert.property_id for p in ctx["suggestions"])
 
     # Aviso de duplicado al asociar: el comprador ya tiene otra alerta abierta
-    # sobre esa propiedad (lo pide /link-property antes de confirmar)
+    # sobre esa propiedad (lo pide /link-property antes de confirmar). La
+    # propiedad puede ser de la otra empresa (PLAN_SUGERENCIAS_MULTIEMPRESA.md);
+    # los duplicados siguen siendo los de la empresa de la alerta.
     confirm_id = assignment._to_int(confirm_property)
-    if step == "proposal" and profile_complete and confirm_id is not None and alert.buyer_id:
-        target = get_property_in_company(db, confirm_id, company_id)
+    if step == "proposal" and can_propose and confirm_id is not None and alert.buyer_id:
+        target = _linkable_property(db, confirm_id)
         if target is not None:
             others = [
-                a for a in find_duplicate_alerts(db, company_id, alert.buyer_id, target.id)["open"]
+                a for a in find_duplicate_alerts(db, alert.company_id, alert.buyer_id, target.id)["open"]
                 if a.id != alert.id
             ]
             if others:
@@ -1238,6 +1373,7 @@ async def alert_detail(
     request: Request,
     step: Optional[str] = Query(default=None),
     confirm_property: Optional[str] = Query(default=None),
+    company: Optional[str] = Query(default=None),
     db: Session = Depends(get_db)
 ):
     """Detalle de una alerta con historial de seguimientos.
@@ -1250,7 +1386,8 @@ async def alert_detail(
     PLAN_ALERTA_SIN_REFERENCIA.md y PLAN_PERFIL_OBLIGATORIO.md: cualquier
     alerta (con o sin referencia) se trabaja en tres pasos (`step`):
     Contactar, Perfil y Propuesta. `confirm_property` pinta el aviso de
-    duplicado al asociar.
+    duplicado al asociar. `company=active` deja en la Propuesta solo las
+    sugerencias de la empresa activa (PLAN_SUGERENCIAS_MULTIEMPRESA.md).
     """
 
     current_user = request.state.user
@@ -1310,7 +1447,7 @@ async def alert_detail(
 
     company_id = get_active_company(request).id
     search_ctx = _search_context(db, alert, current_user, admin_view, step, confirm_property,
-                                 follow_ups, company_id)
+                                 follow_ups, company_id, company_filter=company)
 
     # Plazo en horas hábiles (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.1): la regla
     # que gobierna la alerta, vencida (banner "Venció el …") o aún no ("Vence el …").
@@ -1682,6 +1819,12 @@ async def save_alert_search_profile(
     PLAN_PERFIL_UBICACION.md: guarda también país y provincia, y la operación
     elegida en el perfil; si cambia, cambia la de la alerta (abierta) y queda
     en la nota del mismo seguimiento ("Operación: Venta → Alquiler").
+
+    PLAN_PERFIL_SOLO_VENTA.md: los mínimos se exigen si el perfil es
+    obligatorio con la operación pedida (`buyer_matching.profile_required`:
+    Venta) o si se envía algún dato. En Alquiler sin ningún dato: si solo
+    cambia la operación, se registra PERFIL_GUARDADO con la línea de la
+    operación (el perfil no se toca); si tampoco, no se guarda nada (aviso).
     """
     current_user = request.state.user
     company_id = get_active_company(request).id
@@ -1708,19 +1851,32 @@ async def save_alert_search_profile(
         min_bedrooms=min_bedrooms, max_bedrooms=max_bedrooms, min_bathrooms=min_bathrooms, notes=notes,
     )
 
-    # Mínimos del perfil (validación en servidor aunque el formulario ya los pida)
-    missing = _missing_in_profile_form(alert, values)
-    if missing:
-        response = RedirectResponse(url=_profile_step_url(alert_id), status_code=302)
-        set_flash(response, "error",
-                  f"Faltan datos del perfil: {buyer_matching.missing_profile_text(missing)}")
-        return response
-
-    # Operación elegida en el perfil (si cambia, cambia la de la alerta)
+    # Operación elegida en el perfil (si cambia, cambia la de la alerta). Se lee
+    # antes que los mínimos: la obligatoriedad va con la operación pedida
+    # (PLAN_PERFIL_SOLO_VENTA.md: Alquiler → Venta exige el perfil en esta misma petición)
     new_operation, operation_error = _operation_change(alert, values)
     if operation_error:
         response = RedirectResponse(url=_profile_step_url(alert_id), status_code=302)
         set_flash(response, "error", operation_error)
+        return response
+
+    # Mínimos del perfil (validación en servidor aunque el formulario ya los pida):
+    # siempre si el perfil es obligatorio (Venta); en Alquiler, solo si se ha
+    # enviado algún dato (un perfil opcional, si se registra, va completo)
+    profile_sent = _profile_values_present(values)
+    if profile_sent or buyer_matching.profile_required(alert, new_operation):
+        missing = _missing_in_profile_form(alert, values)
+        if missing:
+            response = RedirectResponse(url=_profile_step_url(alert_id), status_code=302)
+            set_flash(response, "error",
+                      f"Faltan datos del perfil: {buyer_matching.missing_profile_text(missing)}")
+            return response
+    elif not new_operation:
+        # Perfil opcional sin ningún dato ni cambio de operación: nada que guardar
+        response = RedirectResponse(url=f"/alerts/{alert_id}?step=proposal#propuesta", status_code=302)
+        set_flash(response, "info",
+                  f"No se ha guardado nada: el perfil de {buyer.name} está vacío y es opcional"
+                  + (f" en {alert.business_type.lower()}" if alert.business_type else ""))
         return response
 
     # Primera vez que el perfil queda completo = Contactado (decisión 5)
@@ -1729,12 +1885,21 @@ async def save_alert_search_profile(
     try:
         now = datetime.utcnow()
         operation_line = _apply_operation_change(alert, new_operation)
-        criteria = _store_alert_profile(db, alert, values, now)
+        if profile_sent:
+            criteria = _store_alert_profile(db, alert, values, now)
+            action_type = FollowUpActionType.CONTACTADO if first_profile else FollowUpActionType.PERFIL_GUARDADO
+            note = _join_note(operation_line, buyer_matching.profile_note(criteria))
+        else:
+            # Solo cambia la operación (p. ej. Venta → Alquiler sin perfil): el
+            # perfil no se toca, salvo su operación si ya existía
+            criteria = _sync_profile_operation(alert, now)
+            action_type = FollowUpActionType.PERFIL_GUARDADO
+            note = operation_line
 
         db.add(AlertFollowUp(
             alert_id=alert.id,
-            action_type=FollowUpActionType.CONTACTADO if first_profile else FollowUpActionType.PERFIL_GUARDADO,
-            notes=_join_note(operation_line, buyer_matching.profile_note(criteria)),
+            action_type=action_type,
+            notes=note,
             created_at=now,
             created_by=current_user.id,
         ))
@@ -1751,8 +1916,13 @@ async def save_alert_search_profile(
         set_flash(response, "error", "Ocurrió un error al guardar el perfil")
         return response
 
-    total = buyer_matching.matching_properties_query(db, criteria, company_id).order_by(None).count()
     response = RedirectResponse(url=f"/alerts/{alert_id}?step=proposal", status_code=302)
+    if not profile_sent:
+        set_flash(response, "success",
+                  f"La alerta pasa a {new_operation}; el perfil de {buyer.name} queda como estaba")
+        return response
+    # Sugerencias de las dos empresas, como en la Propuesta (PLAN_SUGERENCIAS_MULTIEMPRESA.md)
+    total = sum(row["count"] for row in buyer_matching.matching_summary_by_company(db, criteria))
     set_flash(
         response,
         "success",
@@ -1778,15 +1948,25 @@ async def link_property_to_alert(
     PLAN_PERFIL_OBLIGATORIO.md: cualquier alerta, con o sin referencia (el
     origen ya no cuenta), y solo si el comprador tiene el perfil completo
     ("Registra primero el perfil del comprador" → paso Perfil).
+    PLAN_PERFIL_SOLO_VENTA.md: el perfil se exige solo si la alerta lo
+    requiere (`buyer_matching.profile_required`: Venta); en Alquiler se
+    asocia sin perfil.
 
     PLAN_ALERTA_SIN_REFERENCIA.md: una sola alerta (decisión 1); el agente
     que atiende la conserva aunque la propiedad sea de otro agente (decisión
-    2: no se toca `agent_id`). La propiedad debe ser de la empresa y estar
-    disponible. Si el comprador ya tiene otra alerta abierta sobre esa
-    propiedad, se pide confirmación (``confirm_duplicate``) y se deja nota.
-    Registra un seguimiento PROPIEDAD_ASOCIADA ("Propiedad asociada: X" o
-    "Cambio de propiedad: de A a B"), que cuenta como gestión pero no avanza
-    la etapa.
+    2: no se toca `agent_id`). La propiedad debe existir, no estar archivada
+    y estar disponible. Si el comprador ya tiene otra alerta abierta sobre esa
+    propiedad (en la empresa de la alerta), se pide confirmación
+    (``confirm_duplicate``) y se deja nota. Registra un seguimiento
+    PROPIEDAD_ASOCIADA ("Propiedad asociada: X" o "Cambio de propiedad: de A
+    a B"), que cuenta como gestión pero no avanza la etapa.
+
+    PLAN_SUGERENCIAS_MULTIEMPRESA.md: la propiedad puede ser de la OTRA
+    empresa (se busca sin `get_property_in_company`, ver
+    `_linkable_property`). `alert.company_id` NO cambia: la alerta sigue en la
+    empresa donde se captó al comprador. Las notas y avisos nombran la empresa
+    de la propiedad cuando no es la de la alerta ("Piso en Martos (MOES
+    PREMIUM)").
     """
     current_user = request.state.user
     company_id = get_active_company(request).id
@@ -1802,27 +1982,32 @@ async def link_property_to_alert(
     if denied:
         return _search_denied_response(alert_id, denied)
 
-    property_item = get_property_in_company(db, property_id, company_id) if property_id else None
+    # Cualquier empresa (PLAN_SUGERENCIAS_MULTIEMPRESA.md); la alerta ya está
+    # comprobada en la empresa activa y su company_id no se toca
+    property_item = _linkable_property(db, property_id) if property_id else None
     if property_item is None:
         response = RedirectResponse(url=f"{detail_url}?step=proposal", status_code=302)
         set_flash(response, "error", "Propiedad no encontrada")
         return response
 
+    label = property_label(property_item, alert.company_id)
+
     if not property_item.is_available or property_item.status == PropertyStatus.ARCHIVED:
         response = RedirectResponse(url=f"{detail_url}?step=proposal", status_code=302)
-        set_flash(response, "error", f"{property_item.title} no está disponible")
+        set_flash(response, "error", f"{label} no está disponible")
         return response
 
     if alert.property_id == property_item.id:
         response = RedirectResponse(url=detail_url, status_code=302)
-        set_flash(response, "info", f"{property_item.title} ya está asociada a esta alerta")
+        set_flash(response, "info", f"{label} ya está asociada a esta alerta")
         return response
 
-    # Otra alerta abierta del mismo comprador sobre esa propiedad (de cualquier agente)
+    # Otra alerta abierta del mismo comprador sobre esa propiedad (de cualquier
+    # agente). Duplicados por la empresa de la alerta, como siempre.
     duplicate = None
     if alert.buyer_id:
         others = [
-            a for a in find_duplicate_alerts(db, company_id, alert.buyer_id, property_item.id)["open"]
+            a for a in find_duplicate_alerts(db, alert.company_id, alert.buyer_id, property_item.id)["open"]
             if a.id != alert.id
         ]
         if others:
@@ -1836,7 +2021,7 @@ async def link_property_to_alert(
                 set_flash(
                     response,
                     "warning",
-                    f"{alert.lead_name} ya tiene una alerta abierta sobre {property_item.title} "
+                    f"{alert.lead_name} ya tiene una alerta abierta sobre {label} "
                     f"(#{duplicate.id}, {fecha}). No se ha asociado: confírmalo si quieres asociarla igualmente."
                 )
                 return response
@@ -1847,13 +2032,14 @@ async def link_property_to_alert(
         if duplicate is not None:
             alert.message = append_note(alert.message, linked_duplicate_note(duplicate))
 
+        # Solo la propiedad: alert.company_id se queda como estaba
         alert.property = property_item
         alert.property_linked_at = now
 
         if previous is not None:
-            note = f"Cambio de propiedad: de {previous.title} a {property_item.title}"
+            note = f"Cambio de propiedad: de {property_label(previous, alert.company_id)} a {label}"
         else:
-            note = f"Propiedad asociada: {property_item.title}"
+            note = f"Propiedad asociada: {label}"
         db.add(AlertFollowUp(
             alert_id=alert.id,
             action_type=FollowUpActionType.PROPIEDAD_ASOCIADA,
@@ -1877,9 +2063,9 @@ async def link_property_to_alert(
 
     response = RedirectResponse(url=detail_url, status_code=302)
     if previous is not None:
-        set_flash(response, "success", f"Propiedad cambiada: {alert.lead_name} ahora tiene asociada {property_item.title}")
+        set_flash(response, "success", f"Propiedad cambiada: {alert.lead_name} ahora tiene asociada {label}")
     else:
-        set_flash(response, "success", f"{property_item.title} asociada a la búsqueda de {alert.lead_name}")
+        set_flash(response, "success", f"{label} asociada a la búsqueda de {alert.lead_name}")
     return response
 
 
@@ -2033,8 +2219,15 @@ async def add_follow_up(
       de la alerta y va en la nota de ese mismo seguimiento.
     - Sin respuesta y los cierres negativos se registran sin perfil.
 
-    Una alerta sin comprador no tiene dónde guardar el perfil y queda fuera
-    del requisito (ver `_profile_applies`).
+    PLAN_PERFIL_SOLO_VENTA.md: el perfil solo es obligatorio si la alerta lo
+    requiere (`buyer_matching.profile_required`: Venta con comprador). En
+    Alquiler las etapas avanzadas no se bloquean y en Contactado los campos
+    del perfil son opcionales: si llegan, deben cumplir los mínimos y se
+    guardan igual (un solo CONTACTADO). La obligatoriedad de Contactado se
+    evalúa con la operación pedida en el mismo formulario.
+
+    Una alerta sin comprador no tiene dónde guardar el perfil: nunca se le
+    exige y no lleva el perfil en Contactado (ver `_can_hold_profile`).
     """
 
     current_user = request.state.user
@@ -2076,13 +2269,12 @@ async def add_follow_up(
         set_flash(response, "error", "Debes escribir una nota al cerrar la alerta")
         return response
 
-    # Perfil del comprador (PLAN_PERFIL_OBLIGATORIO.md)
-    profile_applies = _profile_applies(alert)
-    profile_complete = buyer_matching.profile_is_complete(_alert_criteria(alert))
+    # Perfil del comprador (PLAN_PERFIL_OBLIGATORIO.md), obligatorio solo si
+    # la alerta lo requiere (buyer_matching.profile_required: Venta con
+    # comprador; PLAN_PERFIL_SOLO_VENTA.md)
 
-    # Etapas avanzadas: exigen el perfil completo
-    if (profile_applies and action_type in FollowUpActionType.PROFILE_REQUIRED_STAGES
-            and not profile_complete):
+    # Etapas avanzadas: exigen el perfil completo si es obligatorio
+    if action_type in FollowUpActionType.PROFILE_REQUIRED_STAGES and _profile_pending(alert):
         stage_label = dict(FollowUpActionType.ordered_stages()).get(action_type, action_type)
         response = RedirectResponse(url=_profile_step_url(alert_id), status_code=302)
         set_flash(
@@ -2092,16 +2284,29 @@ async def add_follow_up(
         )
         return response
 
-    # Contactado: el perfil viaja en el mismo formulario
+    # Contactado: el perfil (y la operación) viajan en el mismo formulario
     profile_values = None
-    if profile_applies and action_type == FollowUpActionType.CONTACTADO:
+    new_operation = None
+    if _can_hold_profile(alert) and action_type == FollowUpActionType.CONTACTADO:
         values = _profile_values(await request.form(), notes_field="profile_notes")
+
+        # Operación elegida en el perfil (si cambia, cambia la de la alerta). Se
+        # lee antes que los mínimos: la obligatoriedad va con la operación pedida
+        new_operation, operation_error = _operation_change(alert, values)
+        if operation_error:
+            response = RedirectResponse(url=_profile_step_url(alert_id), status_code=302)
+            set_flash(response, "error", operation_error)
+            return response
+
         if _profile_values_present(values):
+            # Con datos: deben cumplir los mínimos (también si el perfil es opcional)
             missing = _missing_in_profile_form(alert, values)
+            profile_values = values
         else:
-            # Sin campos: vale solo si el perfil ya estaba completo (no se toca)
-            missing = [] if profile_complete else buyer_matching.missing_profile_fields(_alert_criteria(alert))
-            values = None
+            # Sin datos: vale si el perfil ya estaba completo (no se toca) o no
+            # es obligatorio con la operación pedida (Alquiler: sin perfil)
+            missing = (buyer_matching.missing_profile_fields(_alert_criteria(alert))
+                       if _profile_pending(alert, new_operation) else [])
         if missing:
             response = RedirectResponse(url=_profile_step_url(alert_id), status_code=302)
             set_flash(
@@ -2110,16 +2315,6 @@ async def add_follow_up(
                 "Para registrar «Contactado» completa el perfil del comprador. Falta: "
                 + buyer_matching.missing_profile_text(missing),
             )
-            return response
-        profile_values = values
-
-    # Operación elegida en el perfil de «Contactado» (si cambia, cambia la de la alerta)
-    new_operation = None
-    if profile_values is not None:
-        new_operation, operation_error = _operation_change(alert, profile_values)
-        if operation_error:
-            response = RedirectResponse(url=_profile_step_url(alert_id), status_code=302)
-            set_flash(response, "error", operation_error)
             return response
 
     try:
@@ -2132,11 +2327,17 @@ async def add_follow_up(
                 pass
 
         # Contactado con perfil: se guarda el perfil y su resumen va en la
-        # nota del mismo seguimiento (uno solo, sin PERFIL_GUARDADO aparte)
+        # nota del mismo seguimiento (uno solo, sin PERFIL_GUARDADO aparte).
+        # El cambio de operación va en esa misma nota, también sin perfil.
+        operation_line = _apply_operation_change(alert, new_operation)
+        profile_line = None
         if profile_values is not None:
-            operation_line = _apply_operation_change(alert, new_operation)
             criteria = _store_alert_profile(db, alert, profile_values, datetime.utcnow())
-            notes = _join_note(notes, operation_line, buyer_matching.profile_note(criteria))
+            profile_line = buyer_matching.profile_note(criteria)
+        elif new_operation:
+            _sync_profile_operation(alert, datetime.utcnow())
+        if operation_line or profile_line:
+            notes = _join_note(notes, operation_line, profile_line)
 
         follow_up = AlertFollowUp(
             alert_id=alert_id,
@@ -2176,6 +2377,8 @@ async def add_follow_up(
         response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=302)
         if profile_values is not None:
             set_flash(response, "success", f"«Contactado» registrado con el perfil de {alert.buyer.name}")
+        elif new_operation:
+            set_flash(response, "success", f"Seguimiento agregado correctamente. La alerta pasa a {new_operation}")
         else:
             set_flash(response, "success", "Seguimiento agregado correctamente")
         return response
@@ -2475,14 +2678,15 @@ async def buyer_detail(
     criteria = buyer.search_criteria
 
     # Propiedades compatibles (solo si hay perfil). Servicio compartido con el
-    # paso "Propuesta" de las alertas sin referencia; sin filtros de m².
+    # paso "Propuesta" de las alertas; sin filtros de m². De las dos empresas
+    # (PLAN_SUGERENCIAS_MULTIEMPRESA.md), cada tarjeta con su empresa.
     matching_properties = []
     if criteria:
-        matching_properties = buyer_matching.matching_properties(db, criteria, company.id)
+        matching_properties = buyer_matching.matching_properties(db, criteria)
 
     # Valores disponibles en la BD para los selectores (cascada de ubicación,
     # PLAN_PERFIL_UBICACION.md, con el estado inicial del perfil guardado)
-    filter_values = _property_filter_values(db, company.id, criteria)
+    filter_values = _property_filter_values(db, criteria)
     property_types = filter_values["property_types"]
     business_types = filter_values["business_types"]
 
@@ -2514,8 +2718,9 @@ async def buyer_detail(
             locked_alert_ids = get_locked_alert_ids(own_agent.id, db, company.id)
     buyer_alerts = (
         buyer_alerts_query
-        # La propiedad se pinta en cada fila: en la misma consulta (puede faltar)
-        .options(selectinload(PropertyAlert.property))
+        # La propiedad se pinta en cada fila: en la misma consulta (puede faltar),
+        # con su empresa para el distintivo si es de la otra (sin N+1)
+        .options(selectinload(PropertyAlert.property).selectinload(Property.company))
         .order_by(date_order.desc(), PropertyAlert.id.desc())
         .all()
     )
@@ -2530,6 +2735,8 @@ async def buyer_detail(
             "buyer": buyer,
             "criteria": criteria,
             "matching_properties": matching_properties,
+            # Distintivo de empresa en las tarjetas y en la columna Propiedad
+            "active_company_id": company.id,
             # Resumen del perfil para las búsquedas sin propiedad de la pestaña Alertas
             "criteria_summary": buyer_matching.criteria_summary(criteria),
             "criteria_parts": buyer_matching.criteria_parts(criteria),
@@ -2542,6 +2749,9 @@ async def buyer_detail(
             "location": filter_values["location"],
             "property_types": property_types,
             "business_types": business_types,
+            # Operaciones con perfil obligatorio (PLAN_PERFIL_SOLO_VENTA.md): el
+            # formulario pone o quita los mínimos al cambiar la operación
+            "profile_required_operations": buyer_matching.profile_required_operations(),
             "tab": tab,
             "AlertStatus": AlertStatus,
             "AlertPriority": AlertPriority,
@@ -2627,7 +2837,12 @@ async def save_search_criteria(
     PLAN_PERFIL_UBICACION.md: mismos mínimos que el perfil de la alerta (tipo,
     precio máximo y ubicación; `buyer_matching.missing_profile_fields`), con
     país y provincia de la cascada. Aquí no hay alerta: la operación se edita
-    como siempre y no se registra ningún seguimiento."""
+    como siempre y no se registra ningún seguimiento.
+
+    PLAN_PERFIL_SOLO_VENTA.md: los mínimos solo se exigen si la operación
+    enviada es la que los requiere
+    (`buyer_matching.profile_required_for_business_type`: Venta). En Alquiler
+    se guarda lo que llegue."""
 
     current_user = request.state.user
 
@@ -2675,8 +2890,11 @@ async def save_search_criteria(
         agent_id=agent_id,
     )
 
-    # Mínimos del perfil, evaluados sobre un perfil temporal con el mismo parseo
-    missing = buyer_matching.missing_profile_fields(buyer_matching.apply_profile(BuyerSearchCriteria(), **profile))
+    # Mínimos del perfil, evaluados sobre un perfil temporal con el mismo parseo;
+    # solo si la operación enviada los exige (Venta; PLAN_PERFIL_SOLO_VENTA.md)
+    missing = []
+    if buyer_matching.profile_required_for_business_type(business_type):
+        missing = buyer_matching.missing_profile_fields(buyer_matching.apply_profile(BuyerSearchCriteria(), **profile))
     if missing:
         response = RedirectResponse(url=f"/buyers/{buyer_id}?tab=criteria", status_code=302)
         set_flash(response, "error",

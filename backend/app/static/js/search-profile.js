@@ -27,6 +27,18 @@
  * guardia de doble envío de ui.js (`form[data-once]`).
  *
  * El servidor lo valida igualmente (buyer_matching.missing_profile_fields).
+ *
+ * Perfil obligatorio solo en Venta (PLAN_PERFIL_SOLO_VENTA.md). El bloque del
+ * perfil es `[data-search-profile]` y trae la regla del servidor:
+ *   - `data-required-operations`: JSON con las operaciones que exigen perfil
+ *     (buyer_matching.profile_required_operations); los mínimos siguen al
+ *     select de operación. Sin él, `data-profile-required` = obligatorio fijo.
+ *   - `data-minimums-if-filled`: perfil opcional que, si se rellena algún dato
+ *     (ni país ni operación cuentan), debe ir completo.
+ * Al cambiar la operación o los datos se ponen o quitan `required` y el
+ * asterisco de los campos `[data-profile-min]` (tipo y precio máximo) y de la
+ * ubicación (`[data-profile-mark]`); el mínimo de ubicación solo se comprueba
+ * mientras los mínimos se exigen.
  */
 (function () {
     'use strict';
@@ -191,10 +203,103 @@
         initAll();
     }
 
+    // ------------------------------------- mínimos según operación y datos
+    // (PLAN_PERFIL_SOLO_VENTA.md). La regla viene del servidor: aquí no se
+    // compara con ninguna operación concreta.
+
+    // Campos que cuentan como "datos del perfil" (mismo criterio que
+    // _profile_values_present en routes/alerts.py: ni país ni operación)
+    var VALUE_NAMES = ['property_type', 'min_price', 'max_price', 'min_bedrooms', 'max_bedrooms', 'min_bathrooms', 'province'];
+
+    function requiredOperations(root) {
+        var raw = root.getAttribute('data-required-operations');
+        if (raw === null) return null;
+        try { return JSON.parse(raw) || []; } catch (err) { return []; }
+    }
+
+    function hasAnyValue(root) {
+        var names = VALUE_NAMES.concat([root.getAttribute('data-notes-name') || 'notes']);
+        for (var i = 0; i < names.length; i++) {
+            var field = root.querySelector('[name="' + names[i] + '"]');
+            if (field && !field.disabled && String(field.value || '').trim()) return true;
+        }
+        // Poblaciones o zonas concretas (con "Todas" van deshabilitadas y no cuentan)
+        return root.querySelector('input[type="checkbox"][name]:checked:not(:disabled)') !== null;
+    }
+
+    // ¿Se exigen ahora los mínimos? Obligatorio (fijo o por la operación elegida)
+    // o, si el perfil es opcional con `data-minimums-if-filled`, en cuanto hay datos
+    function minimumsEnforced(root) {
+        if (!root) return true;
+        var ops = requiredOperations(root);
+        var required;
+        if (ops !== null) {
+            var operation = root.querySelector('select[name="business_type"]');
+            required = !!operation && ops.indexOf(operation.value) !== -1;
+        } else {
+            required = root.hasAttribute('data-profile-required');
+        }
+        return required || (root.hasAttribute('data-minimums-if-filled') && hasAnyValue(root));
+    }
+
+    // Asterisco del label de un campo (lo crea si el servidor lo pintó sin él)
+    function setMark(root, field, on) {
+        var label = field.id ? root.querySelector('label[for="' + field.id + '"]') : null;
+        if (!label) return;
+        var mark = label.querySelector('.text-red-500');
+        if (!mark && on) {
+            label.appendChild(document.createTextNode(' '));
+            mark = document.createElement('span');
+            mark.className = 'text-red-500';
+            mark.setAttribute('aria-hidden', 'true');
+            mark.textContent = '*';
+            label.appendChild(mark);
+        }
+        if (mark) mark.classList.toggle('hidden', !on);
+    }
+
+    function syncMinimums(root) {
+        var on = minimumsEnforced(root);
+        Array.prototype.slice.call(root.querySelectorAll('[data-profile-min]')).forEach(function (field) {
+            field.required = on;
+            setMark(root, field, on);
+        });
+        Array.prototype.slice.call(root.querySelectorAll('[data-profile-mark]')).forEach(function (mark) {
+            mark.classList.toggle('hidden', !on);
+        });
+        if (!on) {
+            Array.prototype.slice.call(root.querySelectorAll('[data-places-required]')).forEach(function (block) {
+                showError(block, false);
+            });
+        }
+    }
+
+    function syncAll() {
+        var roots = document.querySelectorAll('[data-search-profile]');
+        for (var i = 0; i < roots.length; i++) syncMinimums(roots[i]);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', syncAll);
+    } else {
+        syncAll();
+    }
+
+    // Cambiar la operación o rellenar/vaciar un dato pone o quita los mínimos
+    ['change', 'input'].forEach(function (type) {
+        document.addEventListener(type, function (e) {
+            var target = e.target;
+            if (!target || !target.closest) return;
+            var root = target.closest('[data-search-profile]');
+            if (root) syncMinimums(root);
+        });
+    });
+
     // ------------------------------------------------------- mínimo de ubicación
 
     function isActive(block) {
-        return !block.closest('fieldset[disabled]');
+        if (block.closest('fieldset[disabled]')) return false;
+        return minimumsEnforced(block.closest('[data-search-profile]'));
     }
 
     function errorFor(block) {

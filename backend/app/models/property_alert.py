@@ -45,9 +45,11 @@ class PropertyAlert(Base):
     )
 
     # Empresa de la alerta. Antes se heredaba de la propiedad; ahora es propia
-    # porque la propiedad puede faltar. En las alertas con propiedad coincide
-    # con `property.company_id` (backfill de la migración y relleno automático
-    # al crear, ver `_fill_company_id`).
+    # porque la propiedad puede faltar. Al crear con propiedad coincide con
+    # `property.company_id` (backfill de la migración y relleno automático, ver
+    # `_fill_company_id`), pero NO siempre después: desde la Propuesta se puede
+    # asociar una propiedad de la otra empresa y la alerta conserva su empresa
+    # (PLAN_SUGERENCIAS_MULTIEMPRESA.md).
     company_id = Column(
         Integer,
         ForeignKey("companies.id"),

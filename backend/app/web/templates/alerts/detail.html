@@ -17,8 +17,9 @@
                     <div class="flex items-start justify-between gap-3 mb-4">
                         <h2 class="text-xl font-bold text-gray-800">Propiedad</h2>
                         {# Cambiar la propiedad (cualquier alerta, PLAN_PERFIL_OBLIGATORIO.md): abierta,
-                           agente asignado o admin, y solo con el perfil del comprador completo #}
-                        {% if can_manage_search and profile_complete and alert.property %}
+                           agente asignado o admin, y con el perfil del comprador completo si es
+                           obligatorio (`can_propose`; en Alquiler no, PLAN_PERFIL_SOLO_VENTA.md) #}
+                        {% if can_manage_search and can_propose and alert.property %}
                         <a href="/alerts/{{ alert.id }}?step=proposal#propuesta"
                            class="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Cambiar propiedad</a>
                         {% endif %}
@@ -26,13 +27,21 @@
                     {% if alert.property %}
                     <div class="space-y-2">
                         <div>
-                            {% if property_link_allowed %}
+                            {# Propiedad de la otra empresa (PLAN_SUGERENCIAS_MULTIEMPRESA.md): distintivo y
+                               sin enlace (fuera de su empresa la ficha es "no encontrada") #}
+                            {% if property_link_allowed and not property_other_company %}
                             <a href="/properties/{{ alert.property.id }}"
                                class="text-blue-600 hover:underline font-semibold text-base">
                                 {{ alert.property.title }}
                             </a>
                             {% else %}
                             <p class="text-gray-900 font-semibold text-base">{{ alert.property.title }}</p>
+                            {% endif %}
+                            {% if property_other_company %}
+                            <p class="mt-1 flex flex-wrap items-center gap-2">
+                                {{ ui.company_badge(alert.property.company) }}
+                                {% if property_link_allowed %}<span class="text-xs text-gray-500">Cambia de empresa para ver la ficha</span>{% endif %}
+                            </p>
                             {% endif %}
                         </div>
 
@@ -479,16 +488,20 @@
         {% if follow_up_profile %}
         {# «Contactado» lleva dentro el perfil del comprador (PLAN_PERFIL_OBLIGATORIO.md):
            obligatorio si aún no está completo; si ya lo está, sale precargado para editarlo.
+           Solo obligatorio si `profile_required` (Venta; PLAN_PERFIL_SOLO_VENTA.md): en
+           Alquiler los campos son opcionales, pero si se rellenan van con los mínimos.
+           Sin perfil completo, los mínimos siguen a la operación elegida en el select.
            Desactivado (no se envía ni se valida) con cualquier otra etapa. #}
         <fieldset id="followUpProfile" class="hidden rounded-xl border border-gray-200 p-4" disabled>
             <legend class="px-1 text-sm font-semibold text-gray-900">Perfil del comprador</legend>
             <p class="text-xs text-gray-500 mb-4">
-                {% if profile_complete %}Su perfil guardado; cámbialo si te ha contado algo nuevo.{% else %}Datos mínimos: tipo, precio máximo y ubicación (provincia, población o zona).{% endif %}
+                {% if profile_complete %}Su perfil guardado; cámbialo si te ha contado algo nuevo.{% elif profile_required %}Datos mínimos: tipo, precio máximo y ubicación (provincia, población o zona).{% else %}Opcional{{ (" en " ~ (alert.business_type | lower)) if alert.business_type else "" }}: si lo rellenas, incluye tipo, precio máximo y ubicación (provincia, población o zona).{% endif %}
             </p>
             {{ search_profile_fields(criteria, location, property_types,
                                      alert_operation=(alert.business_type or ""),
-                                     prefix="fu", required=(not profile_complete), notes_name="profile_notes",
-                                     type_empty="Selecciona…") }}
+                                     prefix="fu", notes_name="profile_notes", type_empty="Selecciona…",
+                                     required_operations=(none if profile_complete else profile_required_operations),
+                                     minimums_if_filled=True) }}
         </fieldset>
         {% endif %}
 
@@ -511,10 +524,11 @@
 <script src="/static/js/search-profile.js"></script>
 <script>
 const CLOSING_STAGES = new Set({{ FollowUpActionType.CLOSING_STAGES | list | sort | tojson }});
-// Perfil obligatorio (PLAN_PERFIL_OBLIGATORIO.md): etapas que lo exigen y estado del comprador
+// Perfil obligatorio (PLAN_PERFIL_OBLIGATORIO.md): etapas que lo exigen y estado del comprador.
+// Solo bloquea si el perfil es obligatorio (`profile_required`: Venta; PLAN_PERFIL_SOLO_VENTA.md)
 const PROFILE_REQUIRED_STAGES = new Set({{ FollowUpActionType.PROFILE_REQUIRED_STAGES | list | sort | tojson }});
 const PROFILE_STAGE = {{ FollowUpActionType.CONTACTADO | tojson }};
-const PROFILE_BLOCKS_STAGES = {{ (true if (follow_up_profile and not profile_complete) else false) | tojson }};
+const PROFILE_BLOCKS_STAGES = {{ (true if (follow_up_profile and profile_required and not profile_complete) else false) | tojson }};
 
 function openFollowUpModal() {
     UI.openModal('followUpModal');

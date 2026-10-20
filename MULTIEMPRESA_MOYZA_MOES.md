@@ -50,9 +50,12 @@ editan desde la interfaz. Se pueden eliminar en una migración futura.
 - La cola secuencial de alertas de un agente es por empresa.
 - Los recordatorios de compradores se envían por agente y empresa.
 - Un agente no puede cambiar sus propias empresas; solo el admin.
-- Única excepción al aislamiento: en `/properties?tab=other_company` todos los
-  roles ven, en solo lectura, las propiedades activas y disponibles de la otra
-  empresa (sin propietario ni enlace al detalle); nada más de ella se expone.
+- Excepciones al aislamiento (lista cerrada, detalle en la sección 16): en
+  `/properties?tab=other_company` todos los roles ven, en solo lectura, las
+  propiedades activas y disponibles de la otra empresa (sin propietario ni
+  enlace al detalle); y las sugerencias del perfil del comprador salen de las
+  dos empresas, con distintivo, y se pueden asociar a la alerta. Nada más de
+  la otra empresa se expone.
 
 ## 3. Despliegue en producción
 
@@ -553,4 +556,49 @@ en crudo en el código anterior.
 ```bash
 # Tests (servicio y canales con base de datos; rutas en SQLite en memoria o contra la app levantada)
 docker exec moyza_backend python -m pytest tests/test_buyer_attention_service.py tests/test_buyer_attention_channels.py tests/test_alert_search.py -q
+```
+
+## 16. Excepciones: qué cruza empresas (2026-10-20)
+
+Detalle en `PLAN_SUGERENCIAS_MULTIEMPRESA.md`. Las propiedades **sugeridas**
+por el perfil del comprador salen de **las dos empresas**, no solo de la
+activa, y cada una lleva el distintivo de su empresa (badge neutro con el
+punto de `companies.primary_color`, macro `ui.company_badge`). Es una
+excepción consciente y acotada. Lo **único** que cruza:
+
+| Qué | Dónde | Código |
+|---|---|---|
+| Sugerencias del perfil | Paso Propuesta de la alerta y pestaña "Propiedades compatibles" de la ficha del comprador | `buyer_matching.matching_properties(_query)` sin `company_id` (con él: filtro "Solo {empresa}", `?company=active`); desglose `matching_summary_by_company` ("12 propiedades sugeridas · 8 MOYZA · 4 MOES PREMIUM") |
+| Opciones del perfil | Cascada País → Provincia → Población → Zona y tipos de inmueble | `buyer_matching.geo_options(db)` y `_property_filter_values(db, criteria)` en `routes/alerts.py` |
+| Buscador manual de la Propuesta | "¿No está en la lista?" / "Buscar una propiedad" | `/alerts/search-properties` **solo con `alert_id`** de una alerta de la empresa activa que el usuario puede trabajar; cada resultado lleva `company` |
+| Asociar / cambiar propiedad | `/alerts/{id}/link-property` y el aviso de duplicado | `_linkable_property` (sin `get_property_in_company`); exige no archivada y disponible |
+
+Reglas:
+
+- `alert.company_id` **no cambia** al asociar una propiedad de la otra
+  empresa: la alerta sigue en la empresa donde se captó al comprador (listado,
+  cola, métricas, recordatorios y reasignación siguen yendo por ella). El
+  seguimiento `PROPIEDAD_ASOCIADA` nombra la empresa cuando no es la de la
+  alerta: "Propiedad asociada: Piso en Martos (MOES PREMIUM)".
+- Duplicados al asociar (`find_duplicate_alerts`): por la empresa de la alerta.
+- Enlace "Ver" a la ficha: solo si la propiedad es de la empresa activa y
+  (admin o propiedad del propio agente). Si es de la otra y el rol la podría
+  ver, "Cambia de empresa para ver la ficha".
+- La tarjeta de la propiedad asociada (detalle de la alerta) y la columna
+  Propiedad de `/alerts` y de la ficha del comprador muestran el distintivo
+  cuando la propiedad no es de la empresa activa.
+- En "Propiedades compatibles" de la ficha del comprador, una propiedad de la
+  otra empresa no ofrece "Crear alerta" (el alta con referencia sigue
+  limitada): se asocia desde la alerta.
+
+**No cruza** (sigue limitado a la empresa activa): el modal de creación de
+alertas con referencia y su buscador (`/alerts/search-properties` sin
+`alert_id`), `/alerts/create`, la ficha de propiedad (`/properties/{id}` da
+"no encontrada"), visitas, informes, métricas y listados de propiedades.
+
+Sin migración ni variables nuevas: desplegar el código y reiniciar.
+
+```bash
+# Tests (rutas y servicios en SQLite en memoria)
+docker exec moyza_backend python -m pytest tests/test_sugerencias_multiempresa.py tests/test_alert_search.py -q
 ```

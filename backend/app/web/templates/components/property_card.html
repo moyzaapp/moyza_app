@@ -7,17 +7,24 @@
 
   Uso:
     {% from "components/property_card.html" import property_card %}
-    {% call property_card(prop, show_link=True, current=False) %}
+    {% call property_card(prop, show_link=True, current=False, active_company_id=active_company_id) %}
         …acción de la tarjeta (botón "Asociar a esta alerta", "Crear alerta")…
     {% endcall %}
 
-  - show_link: enlace "Ver" a la ficha de la propiedad. El agente solo enlaza a
-    las suyas (la ficha incluye datos del propietario).
+  - show_link: el rol permite ver la ficha (admin, o el agente sobre las suyas:
+    la ficha incluye datos del propietario).
   - current: la propiedad ya asociada a la alerta ("Asociada ahora").
+  - active_company_id (PLAN_SUGERENCIAS_MULTIEMPRESA.md): las sugerencias salen de
+    las dos empresas. Con él, la tarjeta lleva el distintivo de su empresa
+    (`ui.company_badge`, necesita `prop.company` cargado) y el enlace "Ver" solo sale
+    si la propiedad es de la empresa activa; si es de la otra y el rol la podría ver,
+    en su lugar "Cambia de empresa para ver la ficha" (fuera de su empresa la ficha
+    da "no encontrada"). Sin él, como antes (sin distintivo).
 #}
 {% import "components/ui_macros.html" as ui %}
 
-{% macro property_card(prop, show_link=False, current=False) -%}
+{% macro property_card(prop, show_link=False, current=False, active_company_id=None) -%}
+{% set other_company = active_company_id is not none and prop.company_id != active_company_id %}
 <article class="bg-white rounded-2xl border {{ 'border-blue-300 ring-2 ring-blue-500/30' if current else 'border-gray-200' }} flex flex-col overflow-hidden">
     <div class="p-4 flex-1 space-y-3">
         <div class="flex items-start justify-between gap-2">
@@ -25,7 +32,12 @@
             {% if prop.business_type %}<span class="shrink-0">{{ ui.status_badge("business", prop.business_type, dot=False) }}</span>{% endif %}
         </div>
 
-        {% if current %}{{ ui.badge("Asociada ahora", "blue", dot=True) }}{% endif %}
+        {% if current or active_company_id is not none %}
+        <p class="flex flex-wrap items-center gap-2">
+            {% if active_company_id is not none %}{{ ui.company_badge(prop.company) }}{% endif %}
+            {% if current %}{{ ui.badge("Asociada ahora", "blue", dot=True) }}{% endif %}
+        </p>
+        {% endif %}
 
         {% set place = [prop.address, prop.city, prop.zona] | select | join(" · ") %}
         {% if place %}
@@ -44,7 +56,9 @@
 
         <div class="flex items-center justify-between gap-2">
             <span class="text-lg font-bold text-gray-900 tabular-nums">{{ prop.price | eur }}</span>
-            {% if show_link %}
+            {% if show_link and other_company %}
+            <span class="text-xs text-gray-500 text-right">Cambia de empresa para ver la ficha</span>
+            {% elif show_link %}
             <a href="/properties/{{ prop.id }}" class="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Ver</a>
             {% endif %}
         </div>
