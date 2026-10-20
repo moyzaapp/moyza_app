@@ -8,6 +8,19 @@
   (`profile_complete`, de buyer_matching.profile_is_complete) se avisa con
   "Perfil pendiente" en Contactar y Propuesta, y la Propuesta no sugiere ni
   deja asociar. Con perfil completo, en su lugar, el resumen en chips y "Editar".
+
+  Solo en Venta (PLAN_PERFIL_SOLO_VENTA.md): `profile_required` viene de
+  buyer_matching.profile_required (aquí no se mira la operación). Si no es
+  obligatorio (Alquiler), en vez del aviso sale una línea discreta "Perfil
+  opcional" con enlace al paso Perfil, el paso Perfil es opcional (mínimos solo
+  si se rellena algo) y la Propuesta (`can_propose`) ofrece el buscador manual
+  aunque no haya perfil; las sugerencias siguen saliendo solo con perfil completo.
+
+  Dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md): las sugerencias y el buscador manual
+  salen de MOYZA y MOES PREMIUM; cada tarjeta y cada resultado lleva el distintivo de su
+  empresa (`ui.company_badge`), la cabecera el desglose (`suggestions_by_company`) y un
+  enlace "Solo {empresa activa}" (`?company=active`, `only_active_company`). Una
+  propiedad de la otra empresa no enlaza a su ficha.
 #}
 {% import "components/ui_macros.html" as ui %}
 {% from "components/search_profile_form.html" import search_profile_fields %}
@@ -16,7 +29,11 @@
 {% for key, label in search_steps %}{% set _ = step_items.append((key, label, "/alerts/" ~ alert.id ~ "?step=" ~ key ~ "#propuesta", none)) %}{% endfor %}
 {% set profile_url = "/alerts/" ~ alert.id ~ "?step=profile#propuesta" %}
 
-{# Estado del perfil en Contactar y Propuesta: aviso ámbar o resumen con "Editar" #}
+{# "en alquiler": la operación de la alerta, solo para el texto #}
+{% set optional_where = (" en " ~ (alert.business_type | lower)) if alert.business_type else "" %}
+
+{# Estado del perfil en Contactar y Propuesta: resumen con "Editar", aviso ámbar
+   (obligatorio y pendiente) o línea discreta (opcional y sin perfil completo) #}
 {% macro profile_status() -%}
 {% if profile_complete %}
 <div class="flex flex-wrap items-center gap-2">
@@ -26,6 +43,11 @@
     {% endfor %}
     <a href="{{ profile_url }}" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Editar</a>
 </div>
+{% elif not profile_required %}
+<p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-500">
+    <span>Perfil opcional{{ optional_where }}: si lo registras verás propiedades sugeridas.</span>
+    <a href="{{ profile_url }}" class="font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Registrar perfil</a>
+</p>
 {% else %}
 {% set pending_text = "Cuando hables con el comprador, registra su perfil en el seguimiento Contactado." ~ ((" Falta: " ~ (profile_missing | join(", ")) ~ ".") if criteria else "") %}
 {% call ui.banner("Perfil pendiente", "amber", text=pending_text) %}
@@ -98,22 +120,30 @@
         {% elif step == "profile" %}
         <form method="POST" action="/alerts/{{ alert.id }}/search-profile" data-once data-loading-text="Guardando…">
             <div class="mb-5 space-y-1">
+                {% if profile_required %}
                 <p class="text-sm font-medium text-gray-900">Datos mínimos: tipo, precio máximo y ubicación (provincia, población o zona)</p>
+                {% else %}
+                <p class="text-sm font-medium text-gray-900">Opcional{{ optional_where }}: si lo registras verás propiedades sugeridas</p>
+                <p class="text-sm text-gray-500">Si lo rellenas, incluye tipo, precio máximo y ubicación (provincia, población o zona).</p>
+                {% endif %}
                 <p class="text-sm text-gray-500">
                     Pregúntale qué busca{% if criteria %}; sale su perfil guardado, cámbialo si hace falta{% endif %}.
                     {% if profile_complete %}Al guardar queda registrado «Perfil guardado» con los cambios.{% else %}Al guardar se registra el seguimiento «Contactado» con estos datos.{% endif %}
                 </p>
             </div>
+            {# Mínimos según la operación elegida (si la cambia a una que lo exige, pasa a
+               obligatorio) y, si es opcional, en cuanto rellena algún dato #}
             {{ search_profile_fields(criteria, location, property_types,
-                                     alert_operation=(alert.business_type or ""), prefix="sp", required=True) }}
+                                     alert_operation=(alert.business_type or ""), prefix="sp",
+                                     required_operations=profile_required_operations, minimums_if_filled=True) }}
             <div class="mt-6 flex justify-end">
                 {{ ui.button("Guardar perfil y ver propiedades", "primary", type="submit", full_mobile=True) }}
             </div>
         </form>
 
         {# ------------------------------------------------------------ 3. Propuesta #}
-        {% elif not profile_complete %}
-        {# Sin perfil completo no hay propuesta: ni sugerencias ni buscador (asociar exige el perfil) #}
+        {% elif not can_propose %}
+        {# Perfil obligatorio y sin completar: no hay propuesta, ni sugerencias ni buscador (asociar exige el perfil) #}
         <div class="space-y-5">
             {{ operation_warning() }}
             {{ profile_status() }}
@@ -144,20 +174,35 @@
             {# Propiedad actual (p. ej. la de una alerta con referencia) que no sale entre las sugeridas #}
             {% if alert.property and not current_in_suggestions %}
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {{ property_card(alert.property, show_link=property_link_allowed, current=True) }}
+                {{ property_card(alert.property, show_link=property_link_allowed, current=True, active_company_id=active_company_id) }}
             </div>
             {% endif %}
 
+            {# Sugerencias: solo con perfil completo. Perfil opcional sin completar
+               (Alquiler): directamente el buscador #}
+            {% if profile_complete %}
+            {# Desglose por empresa y filtro "Solo {empresa activa}" (PLAN_SUGERENCIAS_MULTIEMPRESA.md):
+               "12 propiedades sugeridas · 8 MOYZA · 4 MOES PREMIUM"; el enlace solo si hay de más de una #}
+            {% set proposal_url = "/alerts/" ~ alert.id ~ "?step=proposal" %}
+            {% set active_name = active_company.name if active_company else "" %}
             {% if suggestions %}
-            <p class="text-sm text-gray-500">
-                {{ suggestions_total }} {{ "propiedad sugerida" if suggestions_total == 1 else "propiedades sugeridas" }} de la empresa, de cualquier agente
-                {% if suggestions_total > suggestions | length %} · se muestran las {{ suggestions | length }} más baratas; afina el perfil para ver otras{% endif %}
-            </p>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <p class="text-sm text-gray-500">
+                    {{ suggestions_total }} {{ "propiedad sugerida" if suggestions_total == 1 else "propiedades sugeridas" }}{% if only_active_company %} de {{ active_name }}{% else %}{% for row in suggestions_by_company %} · {{ row.count }} {{ row.company.name }}{% endfor %}{% endif %} · de cualquier agente
+                    {% if suggestions_total > suggestions | length %} · se muestran las {{ suggestions | length }} más baratas; afina el perfil para ver otras{% endif %}
+                </p>
+                {% if only_active_company %}
+                <a href="{{ proposal_url }}#propuesta" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Ver las de todas las empresas</a>
+                {% elif suggestions_by_company | length > 1 %}
+                <a href="{{ proposal_url }}&amp;company=active#propuesta" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Solo {{ active_name }}</a>
+                {% endif %}
+            </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {% for prop in suggestions %}
                 {% set is_current = alert.property_id == prop.id %}
-                {# Sin enlace "Ver" a la ficha de una propiedad de otro agente (datos del propietario) #}
-                {% call property_card(prop, show_link=(is_admin or prop.agent_id == own_agent_id), current=is_current) %}
+                {# Sin enlace "Ver" a la ficha de una propiedad de otro agente (datos del propietario)
+                   ni de la otra empresa (la tarjeta lo resuelve con active_company_id) #}
+                {% call property_card(prop, show_link=(is_admin or prop.agent_id == own_agent_id), current=is_current, active_company_id=active_company_id) %}
                     {% if not is_current %}
                     <form method="POST" action="/alerts/{{ alert.id }}/link-property" data-once data-loading-text="Asociando…">
                         <input type="hidden" name="property_id" value="{{ prop.id }}">
@@ -167,6 +212,12 @@
                 {% endcall %}
                 {% endfor %}
             </div>
+            {% elif only_active_company %}
+            <div class="rounded-2xl border border-gray-200">
+                {% call ui.empty_state("No hay propiedades de " ~ active_name ~ " que encajen con su perfil", "Las de las otras empresas siguen disponibles.") %}
+                {{ ui.button("Ver las de todas las empresas", "secondary", href=proposal_url ~ "#propuesta") }}
+                {% endcall %}
+            </div>
             {% else %}
             <div class="rounded-2xl border border-gray-200">
                 {% call ui.empty_state("No hay propiedades que encajen con su perfil", "Prueba a ampliar el precio o las zonas.") %}
@@ -174,11 +225,14 @@
                 {% endcall %}
             </div>
             {% endif %}
+            {% endif %}
 
-            <!-- ¿No está en la lista? Todas las disponibles de la empresa -->
-            <div class="pt-5 border-t border-gray-200">
-                <h3 class="text-sm font-semibold text-gray-900">¿No está en la lista?</h3>
-                <p class="text-xs text-gray-500 mt-1">Busca por título o dirección entre todas las propiedades disponibles de la empresa.</p>
+            {# Buscador: todas las disponibles de las dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md).
+               Con perfil, "¿No está en la lista?" bajo las sugerencias; con perfil opcional sin
+               completar, el modo de proponer #}
+            <div{% if profile_complete %} class="pt-5 border-t border-gray-200"{% endif %}>
+                <h3 class="text-sm font-semibold text-gray-900">{{ "¿No está en la lista?" if profile_complete else "Buscar una propiedad" }}</h3>
+                <p class="text-xs text-gray-500 mt-1">Busca por título o dirección entre todas las propiedades disponibles de las dos empresas.</p>
                 <div class="relative mt-3">
                     <label for="linkPropertySearch" class="sr-only">Buscar propiedad para asociar</label>
                     <input type="search" id="linkPropertySearch" autocomplete="off"
@@ -196,6 +250,7 @@
                         <div class="min-w-0 text-sm">
                             <p class="font-medium text-gray-900" id="linkPropertyTitle"></p>
                             <p class="text-xs text-gray-600" id="linkPropertyMeta"></p>
+                            <p class="mt-1" id="linkPropertyCompany"></p>
                         </div>
                         <button type="button" id="linkPropertyClear" aria-label="Quitar"
                             class="w-9 h-9 -mr-2 -my-1 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-blue-100 flex items-center justify-center shrink-0">
@@ -211,7 +266,9 @@
 
         <script>
         // Buscador "¿No está en la lista?": /alerts/search-properties con alert_id
-        // devuelve todas las disponibles de la empresa para esta búsqueda.
+        // devuelve todas las disponibles de las dos empresas para esta búsqueda,
+        // cada una con su empresa (`company`: name, color, active) para el
+        // distintivo (mismo HTML que ui.company_badge; PLAN_SUGERENCIAS_MULTIEMPRESA.md).
         (function () {
             var input = document.getElementById('linkPropertySearch');
             if (!input) return;
@@ -220,6 +277,7 @@
             var hidden = document.getElementById('linkPropertyId');
             var title = document.getElementById('linkPropertyTitle');
             var meta = document.getElementById('linkPropertyMeta');
+            var companySlot = document.getElementById('linkPropertyCompany');
             var alertId = {{ alert.id | tojson }};
             var timer = null;
             var items = [];
@@ -244,6 +302,24 @@
                 list.classList.remove('hidden');
                 items = [];
                 input.setAttribute('aria-expanded', 'true');
+            }
+
+            // Distintivo de empresa: badge neutro con el punto del color de la empresa
+            function companyBadge(company) {
+                var badge = document.createElement('span');
+                badge.className = 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-700';
+                badge.title = 'Propiedad de ' + company.name;
+                var dot = document.createElement('span');
+                dot.className = 'w-1.5 h-1.5 rounded-full shrink-0';
+                dot.style.backgroundColor = company.color || '#000000';
+                dot.setAttribute('aria-hidden', 'true');
+                badge.appendChild(dot);
+                var sr = document.createElement('span');
+                sr.className = 'sr-only';
+                sr.textContent = 'Empresa: ';
+                badge.appendChild(sr);
+                badge.appendChild(document.createTextNode(company.name));
+                return badge;
             }
 
             function render(results) {
@@ -273,6 +349,12 @@
                     a.className = 'text-xs text-gray-500';
                     a.textContent = p.agent ? 'Agente: ' + p.agent : 'Sin agente captador';
                     li.appendChild(a);
+                    if (p.company && p.company.name) {
+                        var c = document.createElement('p');
+                        c.className = 'mt-1';
+                        c.appendChild(companyBadge(p.company));
+                        li.appendChild(c);
+                    }
                     list.appendChild(li);
                 });
                 list.classList.remove('hidden');
@@ -295,6 +377,8 @@
                 hidden.value = p.id;
                 title.textContent = p.title;
                 meta.textContent = [p.address, p.city, p.agent ? 'Agente: ' + p.agent : ''].filter(Boolean).join(' · ');
+                companySlot.textContent = '';
+                if (p.company && p.company.name) companySlot.appendChild(companyBadge(p.company));
                 form.classList.remove('hidden');
                 input.value = '';
                 hide();

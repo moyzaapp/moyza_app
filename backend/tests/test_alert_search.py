@@ -413,11 +413,12 @@ def test_guardar_perfil_desde_la_alerta(env):
     response = _save_profile(env, env.users["ana"], alert)
     assert response.status_code == 302
     assert response.headers["location"] == f"/alerts/{alert.id}?step=proposal"
-    # Piso Centro (120.000, 2 dorm) y Piso Bea (140.000, 3 dorm, de Bea) encajan.
+    # Piso Centro (120.000, 2 dorm), Piso Bea (140.000, 3 dorm, de Bea) y Piso MOES
+    # (de la otra empresa: PLAN_SUGERENCIAS_MULTIEMPRESA.md) encajan.
     # El perfil antiguo no estaba completo: primera vez = Contactado (PLAN_PERFIL_OBLIGATORIO.md)
     assert _flash(response) == {
         "category": "success",
-        "message": "Perfil de Juan Comprador guardado y registrado como «Contactado»: 2 propiedades sugeridas",
+        "message": "Perfil de Juan Comprador guardado y registrado como «Contactado»: 3 propiedades sugeridas",
     }
 
     stored = _reload(env, alert)
@@ -543,9 +544,12 @@ def test_sugerencias_sin_m2_de_la_empresa_y_de_cualquier_agente(env):
     criteria = BuyerSearchCriteria(buyer_id=env.buyer.id, business_type="Venta", max_price=200000,
                                    min_m2=300, max_m2=310)
     titles = [p.title for p in matching_properties(env.db, criteria, env.moyza.id)]
-    # Sin filtro de m², de Ana y de Bea, ordenadas por precio, sin la de MOES
+    # Sin filtro de m², de Ana y de Bea, ordenadas por precio; con empresa, solo esa
+    # ("Solo {empresa}", PLAN_SUGERENCIAS_MULTIEMPRESA.md)
     assert titles == ["Piso Centro", "Piso Bea"]
     assert [p.title for p in matching_properties(env.db, criteria, env.moes.id)] == ["Piso MOES"]
+    # Sin empresa: las dos (PLAN_SUGERENCIAS_MULTIEMPRESA.md), por precio y sin agrupar
+    assert [p.title for p in matching_properties(env.db, criteria)] == ["Piso Centro", "Piso MOES", "Piso Bea"]
 
 
 def test_buscador_con_alert_id_devuelve_toda_la_empresa(env):
@@ -564,7 +568,8 @@ def test_buscador_con_alert_id_devuelve_toda_la_empresa(env):
 
     _complete_profile(env)
     assert titles(env.users["ana"]) == ["Piso Centro"]                      # regla de siempre
-    assert titles(env.users["ana"], str(alert.id)) == ["Piso Bea", "Piso Centro"]
+    # Con alert_id: las dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md)
+    assert titles(env.users["ana"], str(alert.id)) == ["Piso Bea", "Piso Centro", "Piso MOES"]
     assert titles(env.users["bea"], str(alert.id)) == ["Piso Bea"]          # no es su búsqueda
 
 
@@ -594,9 +599,11 @@ def test_asociar_y_cambiar_propiedad(env):
     notes = sorted(f.notes for f in stored.follow_ups if f.action_type == FollowUpActionType.PROPIEDAD_ASOCIADA)
     assert "Cambio de propiedad: de Piso Bea a Piso Centro" in notes
 
-    # Otra empresa: no se puede asociar
+    # Otra empresa: se puede asociar (PLAN_SUGERENCIAS_MULTIEMPRESA.md); la alerta
+    # sigue en MOYZA. Detalle en tests/test_sugerencias_multiempresa.py
     response = _link(env, env.users["ana"], alert, "moes")
-    assert _flash(response) == {"category": "error", "message": "Propiedad no encontrada"}
+    assert _flash(response)["category"] == "success"
+    assert _reload(env, alert).company_id == env.moyza.id
 
 
 def test_asociar_duplicado_exige_confirmacion(env):
@@ -716,7 +723,8 @@ def test_detalle_tres_pasos_perfil_sin_m2_sugerencias_y_cambio(env):
     _save_profile(env, env.users["ana"], alert)
     response, html = _detail(env, env.users["ana"], alert)
     assert response.context["step"] == "proposal"
-    assert [p.title for p in response.context["suggestions"]] == ["Piso Centro", "Piso Bea"]
+    # De las dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md)
+    assert [p.title for p in response.context["suggestions"]] == ["Piso Centro", "Piso MOES", "Piso Bea"]
     assert html.count("Asociar a esta alerta") >= 2
     assert "Agente de la propiedad: Agente Bea" in html
     # Sin enlace "Ver" a la ficha de la propiedad de Bea; sí a la suya
@@ -764,8 +772,10 @@ def test_ficha_del_comprador_sin_m2_y_con_busqueda(env):
         assert response.status_code == 200
         assert 'name="min_m2"' not in html and "m²" not in html
         assert "Búsqueda general" in html
-        # El perfil con m² antiguo ya no filtra: las tres de Venta de MOYZA
-        assert [p.title for p in response.context["matching_properties"]] == ["Piso Centro", "Piso Bea", "Casa Cara"]
+        # El perfil con m² antiguo ya no filtra: las tres de Venta de MOYZA y la de MOES
+        # (PLAN_SUGERENCIAS_MULTIEMPRESA.md)
+        assert [p.title for p in response.context["matching_properties"]] == [
+            "Piso Centro", "Piso MOES", "Piso Bea", "Casa Cara"]
 
 
 # ---------------------------------------------------------------------------

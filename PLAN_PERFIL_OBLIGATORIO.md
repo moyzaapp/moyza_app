@@ -2,6 +2,12 @@
 
 Fecha: 2026-10-19. Rama: `63-agregar-moes`.
 
+> **2026-10-20, `PLAN_PERFIL_SOLO_VENTA.md`**: todo lo "obligatorio" de este
+> plan aplica **solo a las alertas de Venta**. En Alquiler el perfil es
+> opcional (no bloquea etapas, ni la Propuesta, ni asociar propiedad; si se
+> rellena, con los mínimos). Fuente única: `buyer_matching.profile_required`.
+> Ver `docs/DECISIONES_ALERTAS_BUSQUEDA.md` §7.
+
 ## Contexto
 
 Hoy los pasos **Contactar → Perfil → Propuesta**, la asociación de propiedad y

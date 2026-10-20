@@ -10,6 +10,13 @@ Punto único para restringir consultas a la empresa activa. Reglas:
 
 Se usan EXISTS (`.has()` / `.any()`) en lugar de JOIN para que el filtro
 se pueda añadir a cualquier consulta sin chocar con joins ya existentes.
+
+Excepciones conscientes (lista cerrada en MULTIEMPRESA_MOYZA_MOES.md §16,
+PLAN_SUGERENCIAS_MULTIEMPRESA.md): las sugerencias del perfil del comprador
+(`buyer_matching.matching_properties` sin empresa), las opciones del perfil
+(`geo_options`, tipos), el buscador de la Propuesta con `alert_id` y asociar
+una propiedad a una alerta (`routes/alerts.py::_linkable_property`) NO pasan
+por estos filtros de propiedades. No añadir más sin decisión explícita.
 """
 from sqlalchemy import or_
 from sqlalchemy.orm import Session

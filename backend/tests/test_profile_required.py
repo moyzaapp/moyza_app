@@ -273,7 +273,8 @@ def test_paso_perfil_primera_vez_contactado_y_despues_perfil_guardado(env):
     assert _actions(env, alert) == ["CONTACTADO"]
 
     response = _save_profile(env, env.users["ana"], alert, form=dict(CONTACT_PROFILE, max_price="160000"))
-    assert _flash(response)["message"] == "Perfil de Juan Comprador guardado: 2 propiedades sugeridas"
+    # Piso Centro, Piso Bea y Piso MOES (dos empresas, PLAN_SUGERENCIAS_MULTIEMPRESA.md)
+    assert _flash(response)["message"] == "Perfil de Juan Comprador guardado: 3 propiedades sugeridas"
     assert _actions(env, alert) == ["CONTACTADO", "PERFIL_GUARDADO"]
     assert float(_criteria(env).max_price) == 160000
 
@@ -338,7 +339,7 @@ def test_buscador_de_la_propuesta_en_alerta_con_referencia(env):
 
     assert titles() == ["Piso Centro"]                # sin perfil: solo las suyas
     _complete_profile(env)
-    assert titles() == ["Piso Bea", "Piso Centro"]    # con perfil: toda la empresa
+    assert titles() == ["Piso Bea", "Piso Centro", "Piso MOES"]    # con perfil: las dos empresas
 
 
 # ---------------------------------------------------------------------------
@@ -405,7 +406,8 @@ def test_detalle_con_referencia_tras_contactado_con_perfil(env):
     assert "Perfil pendiente" not in html and ">Editar</a>" in html
     # "Cambiar propiedad" y sugerencias: la actual marcada, la de Bea para asociar
     assert "Cambiar propiedad" in html
-    assert [p.title for p in ctx["suggestions"]] == ["Piso Centro", "Piso Bea"]
+    # De las dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md)
+    assert [p.title for p in ctx["suggestions"]] == ["Piso Centro", "Piso MOES", "Piso Bea"]
     assert ctx["current_in_suggestions"] is True
     assert "Asociada ahora" in html and html.count("Asociar a esta alerta") >= 1
     assert "¿No está en la lista?" in html

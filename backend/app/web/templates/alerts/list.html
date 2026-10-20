@@ -264,9 +264,11 @@
                                     {% else %}
                                     <td class="px-6 py-4 text-sm text-gray-700">
                                         {% if alert.property %}
-                                        <div class="flex flex-col">
+                                        <div class="flex flex-col items-start">
                                             <span class="font-medium">{{ alert.property.title }}</span>
                                             <span class="text-xs text-gray-500">{{ (alert.property.address or '').split(',')[0] }}</span>
+                                            {# Propiedad de la otra empresa asociada desde la Propuesta (PLAN_SUGERENCIAS_MULTIEMPRESA.md) #}
+                                            {% if active_company and alert.property.company_id != active_company.id %}{{ ui.company_badge(alert.property.company, extra="mt-1") }}{% endif %}
                                         </div>
                                         {% else %}
                                         {# Alerta sin referencia (búsqueda general) aún sin propiedad (PLAN_ALERTA_SIN_REFERENCIA.md) #}
@@ -319,7 +321,8 @@
                                         <span class="text-gray-400 text-xs">Sin iniciar</span>
                                         {% endif %}
                                         {# Admin: alerta abierta cuyo comprador aún no tiene el perfil mínimo
-                                           (PLAN_PERFIL_OBLIGATORIO.md); no podrá pasar de Contactado #}
+                                           (PLAN_PERFIL_OBLIGATORIO.md); no podrá pasar de Contactado.
+                                           Solo las que lo exigen (Venta; PLAN_PERFIL_SOLO_VENTA.md, _page_profiles) #}
                                         {% if alert.id in profile_missing_ids %}
                                         <div class="mt-2">{{ ui.badge("Sin perfil", "gray", extra="whitespace-nowrap") }}</div>
                                         {% endif %}

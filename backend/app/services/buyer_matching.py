@@ -9,12 +9,22 @@ PLAN_PERFIL_OBLIGATORIO.md también las creadas con referencia):
   o al menos una población o una zona; PLAN_PERFIL_UBICACION.md, decisión 4).
   La usan las rutas (bloqueo de etapas, Contactado, Propuesta, asociar
   propiedad, ficha del comprador), las plantillas y los tests.
+- `profile_required` / `profile_required_for_business_type`: ÚNICA
+  definición de "hace falta el perfil" (PLAN_PERFIL_SOLO_VENTA.md): solo en
+  Venta y con comprador; en Alquiler el perfil es opcional (si existe, sugiere
+  propiedades, pero no bloquea nada).
 - `geo_options` / `geo_choices`: datos de la cascada País → Provincia →
   Población → Zona (PLAN_PERFIL_UBICACION.md) a partir de las propiedades de
-  la empresa, en una sola consulta; la provincia se deduce del CP.
+  las dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md), en una sola consulta;
+  la provincia se deduce del CP.
 
-- `matching_properties`: propiedades activas y disponibles de la empresa,
-  de cualquier agente, que cumplen el perfil. Ordenadas por precio ascendente.
+- `matching_properties`: propiedades activas y disponibles, de cualquier
+  agente y de las DOS empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md: excepción
+  consciente al aislamiento, solo para las sugerencias del perfil; con
+  `company_id`, solo las de esa empresa: filtro "Solo {empresa}"), que cumplen
+  el perfil. Ordenadas por precio ascendente, sin agrupar por empresa; la
+  empresa de cada una se carga en la misma tanda (badge sin N+1).
+  `matching_summary_by_company`: desglose por empresa para la cabecera.
   La superficie (m²) ya no filtra: salió del perfil en toda la app (decisión
   cerrada 5); las columnas `min_m2` / `max_m2` se conservan sin usarse.
 - `apply_profile`: vuelca los campos del formulario del perfil en el
@@ -27,11 +37,12 @@ from datetime import datetime
 from typing import Iterable, Optional
 
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core import geo
-from app.core.constants import PropertyStatus
+from app.core.constants import BusinessType, PropertyStatus
 from app.models.buyer_search_criteria import BuyerSearchCriteria
+from app.models.company import Company
 from app.models.property import Property
 from app.services.company_scope import scope_properties
 from app.web.template_env import eur
@@ -94,6 +105,40 @@ def missing_profile_text(missing: Iterable[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# ¿Hace falta el perfil? (PLAN_PERFIL_SOLO_VENTA.md)
+# ---------------------------------------------------------------------------
+
+def profile_required_for_business_type(business_type) -> bool:
+    """El perfil es obligatorio solo para la operación Venta (Alquiler o vacío: opcional).
+
+    ÚNICO sitio que compara la operación con Venta; lo usan `profile_required`
+    (alertas) y la ficha del comprador (allí no hay alerta, solo la operación
+    elegida en el formulario).
+    """
+    return business_type == BusinessType.VENTA
+
+
+def profile_required(alert, business_type: Optional[str] = None) -> bool:
+    """El perfil es obligatorio solo para alertas de Venta con comprador.
+
+    Alquiler (y cualquier otro valor) → opcional. Sin comprador no hay dónde
+    guardarlo. `profile_is_complete` dice si el perfil está completo; esta
+    función dice si hace falta. ÚNICA fuente de verdad para rutas, plantillas
+    (vía contexto), JS (vía `profile_required_operations`) y tests.
+
+    `business_type`: operación que se está pidiendo en la misma petición (el
+    perfil de la alerta puede cambiarla, PLAN_PERFIL_UBICACION.md); sin ella,
+    la de la alerta. Así la obligatoriedad cambia con la operación.
+    """
+    return alert.buyer_id is not None and profile_required_for_business_type(business_type or alert.business_type)
+
+
+def profile_required_operations() -> list:
+    """Operaciones con perfil obligatorio, en el orden de los selects (para el JS del formulario)."""
+    return [bt for bt in BusinessType.values() if profile_required_for_business_type(bt)]
+
+
+# ---------------------------------------------------------------------------
 # Propiedades compatibles
 # ---------------------------------------------------------------------------
 
@@ -118,23 +163,21 @@ def province_clause(province: str):
     return func.trim(Property.cod_postal).like(prefix + "___")
 
 
-def matching_properties_query(db: Session, criteria: BuyerSearchCriteria, company_id: int):
-    """Consulta de propiedades activas y disponibles de la empresa que cumplen el perfil.
+def _matching_filters(query, criteria: BuyerSearchCriteria, company_id: Optional[int] = None):
+    """Filtros del perfil sobre una consulta de `Property` (sin opciones de carga ni orden).
 
-    De cualquier agente (decisión cerrada 3). Las propiedades sin captador
-    quedan fuera, como hasta ahora en la ficha del comprador. El agente de
-    cada propiedad se carga en la misma consulta (las tarjetas lo muestran).
+    Propiedades activas y disponibles, de cualquier agente (decisión cerrada
+    3), con captador (las que no lo tienen quedan fuera, como siempre en la
+    ficha del comprador). De las dos empresas salvo que se pida `company_id`
+    (PLAN_SUGERENCIAS_MULTIEMPRESA.md).
     """
-    query = scope_properties(
-        db.query(Property)
-        .options(joinedload(Property.agent))
-        .filter(
-            Property.status == PropertyStatus.ACTIVE,
-            Property.available_clause(),
-            Property.agent_id.isnot(None),
-        ),
-        company_id,
+    query = query.filter(
+        Property.status == PropertyStatus.ACTIVE,
+        Property.available_clause(),
+        Property.agent_id.isnot(None),
     )
+    if company_id is not None:
+        query = scope_properties(query, company_id)
 
     # Ubicación en cascada (PLAN_PERFIL_UBICACION.md): país (vacío = España),
     # provincia por prefijo del CP (implica España) y, solo si no están
@@ -161,17 +204,55 @@ def matching_properties_query(db: Session, criteria: BuyerSearchCriteria, compan
         query = query.filter(Property.num_dormitorios <= criteria.max_bedrooms)
     if criteria.min_bathrooms is not None:
         query = query.filter(Property.num_banos_aseos >= criteria.min_bathrooms)
+    return query
 
+
+def matching_properties_query(db: Session, criteria: BuyerSearchCriteria, company_id: Optional[int] = None):
+    """Consulta de propiedades activas y disponibles que cumplen el perfil.
+
+    PLAN_SUGERENCIAS_MULTIEMPRESA.md: de las DOS empresas (las sugerencias son
+    la única excepción al aislamiento); con `company_id`, solo las de esa
+    empresa (filtro "Solo {empresa activa}"). De cualquier agente (decisión
+    cerrada 3). El agente (JOIN) y la empresa (una consulta más para todas,
+    `selectinload`) se cargan en la misma tanda: las tarjetas pintan ambos.
+    Orden por precio ascendente, sin agrupar por empresa.
+    """
+    query = _matching_filters(
+        db.query(Property).options(joinedload(Property.agent), selectinload(Property.company)),
+        criteria,
+        company_id,
+    )
     return query.order_by(Property.price.asc(), Property.id.asc())
 
 
-def matching_properties(db: Session, criteria: BuyerSearchCriteria, company_id: int,
+def matching_properties(db: Session, criteria: BuyerSearchCriteria, company_id: Optional[int] = None,
                         limit: Optional[int] = None) -> list:
-    """Lista de propiedades compatibles (todas, o las primeras `limit`)."""
+    """Lista de propiedades compatibles (todas, o las primeras `limit`); ver `matching_properties_query`."""
     query = matching_properties_query(db, criteria, company_id)
     if limit:
         query = query.limit(limit)
     return query.all()
+
+
+def matching_summary_by_company(db: Session, criteria: BuyerSearchCriteria,
+                                first_company_id: Optional[int] = None) -> list:
+    """Desglose de las sugerencias por empresa: `[{"company": Company, "count": n}, …]`.
+
+    Una consulta agrupada (más la de las empresas). Solo empresas con alguna
+    sugerencia; primero `first_company_id` (la activa) y después por nombre.
+    La suma de `count` es el total de sugerencias de las dos empresas
+    ("12 sugerencias · 8 MOYZA · 4 MOES PREMIUM").
+    """
+    counts = dict(
+        _matching_filters(db.query(Property.company_id, func.count(Property.id)), criteria)
+        .group_by(Property.company_id)
+        .all()
+    )
+    if not counts:
+        return []
+    companies = db.query(Company).filter(Company.id.in_(counts)).all()
+    companies.sort(key=lambda c: (c.id != first_company_id, geo.sort_key(c.name or ""), c.id))
+    return [{"company": c, "count": counts[c.id]} for c in companies]
 
 
 # ---------------------------------------------------------------------------
@@ -183,26 +264,27 @@ def _sorted(values) -> list:
     return sorted(values, key=lambda value: (geo.sort_key(value), value))
 
 
-def geo_options(db: Session, company_id: int) -> dict:
-    """Árbol `{país: {provincia: {población: [zonas]}}}` de las propiedades de la empresa.
+def geo_options(db: Session, company_id: Optional[int] = None) -> dict:
+    """Árbol `{país: {provincia: {población: [zonas]}}}` de las propiedades.
 
-    Propiedades no archivadas de la empresa activa (de cualquier agente), en
-    UNA consulta `DISTINCT (pais, cod_postal, city, zona)`. País vacío (o
+    Propiedades no archivadas de las DOS empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md:
+    se puede elegir una población donde solo tenga inmuebles la otra, porque
+    las sugerencias salen de ambas); con `company_id`, solo las de esa
+    empresa. De cualquier agente, en UNA consulta
+    `DISTINCT (pais, cod_postal, city, zona)`. País vacío (o
     variante de España) = "España"; provincia deducida del CP
     (`geo.provincia_for`); las poblaciones de propiedades sin CP válido van
     bajo "Sin provincia" (última, y no es una provincia elegible). Sin
     población no hay dónde colgar la zona: esas filas no entran. España va
     primero; el resto, en orden alfabético sin acentos.
     """
-    rows = (
-        scope_properties(
-            db.query(Property.pais, Property.cod_postal, Property.city, Property.zona)
-            .filter(Property.status != PropertyStatus.ARCHIVED),
-            company_id,
-        )
-        .distinct()
-        .all()
+    query = (
+        db.query(Property.pais, Property.cod_postal, Property.city, Property.zona)
+        .filter(Property.status != PropertyStatus.ARCHIVED)
     )
+    if company_id is not None:
+        query = scope_properties(query, company_id)
+    rows = query.distinct().all()
 
     tree: dict = {}
     for pais, cod_postal, city, zona in rows:

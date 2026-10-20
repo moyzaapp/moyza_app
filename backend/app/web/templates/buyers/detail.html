@@ -137,9 +137,14 @@
                         <p class="text-sm text-gray-500 mt-1">Ubicación, tipo, habitaciones, baños, precio e imprescindibles</p>
                     </header>
                     <div class="p-4 sm:p-6">
-                        {# Mismos mínimos que en la alerta (PLAN_PERFIL_UBICACION.md); aquí no se registra seguimiento #}
-                        <p class="text-sm font-medium text-gray-900 mb-4">Datos mínimos: tipo, precio máximo y ubicación (provincia, población o zona)</p>
-                        {% call search_profile_fields(criteria, location, property_types, prefix="bc", required=True) %}
+                        {# Mismos mínimos que en la alerta (PLAN_PERFIL_UBICACION.md); aquí no se registra seguimiento.
+                           Solo obligatorios con las operaciones que lo exigen (Venta; PLAN_PERFIL_SOLO_VENTA.md):
+                           al cambiar la operación el JS pone o quita los asteriscos #}
+                        <p class="text-sm font-medium text-gray-900">Datos mínimos: tipo, precio máximo y ubicación (provincia, población o zona)</p>
+                        {% set optional_operations = BusinessType.values() | reject("in", profile_required_operations) | list %}
+                        <p class="text-sm text-gray-500 mb-4">Obligatorios en {{ profile_required_operations | join(" y ") | lower }}{% if optional_operations %}; en {{ optional_operations | join(" y ") | lower }}, opcionales{% endif %}.</p>
+                        {% call search_profile_fields(criteria, location, property_types, prefix="bc",
+                                                      required_operations=profile_required_operations) %}
                         <div class="sm:max-w-sm">
                             {% if is_admin %}
                             {% set agent_options = [] %}
@@ -207,11 +212,19 @@
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {% for prop in matching_properties %}
                 {% set own_property = is_admin or (own_agent and prop.agent_id == own_agent.id) %}
-                {# El detalle incluye datos del propietario: el agente solo enlaza a sus propias propiedades #}
-                {% call property_card(prop, show_link=own_property) %}
+                {% set other_company = prop.company_id != active_company_id %}
+                {# El detalle incluye datos del propietario: el agente solo enlaza a sus propias propiedades.
+                   De las dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md): distintivo en cada tarjeta y,
+                   si es de la otra, sin "Ver" (la tarjeta lo resuelve con active_company_id) #}
+                {% call property_card(prop, show_link=own_property, active_company_id=active_company_id) %}
                     {# Crear alerta: admin sobre cualquier propiedad; el agente solo sobre las suyas
-                       (el backend lo exige también) #}
-                    {% if own_property %}
+                       (el backend lo exige también). Una de la otra empresa no: el alta con
+                       referencia sigue limitada a la empresa activa; se asocia desde la alerta #}
+                    {% if other_company %}
+                    <p class="w-full rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-500 text-center">
+                        De otra empresa: para proponerla, asóciala desde la alerta del comprador
+                    </p>
+                    {% elif own_property %}
                     <button type="button"
                         data-prop-id="{{ prop.id }}"
                         data-prop-agent-id="{{ prop.agent_id or '' }}"
@@ -278,9 +291,11 @@
                                     {% else %}
                                     <td class="px-6 py-4 text-sm text-gray-700">
                                         {% if alert.property %}
-                                        <div class="flex flex-col">
+                                        <div class="flex flex-col items-start">
                                             <span class="font-medium">{{ alert.property.title }}</span>
                                             <span class="text-xs text-gray-500">{{ alert.property.address or '' }}</span>
+                                            {# Propiedad de la otra empresa (PLAN_SUGERENCIAS_MULTIEMPRESA.md) #}
+                                            {% if alert.property.company_id != active_company_id %}{{ ui.company_badge(alert.property.company, extra="mt-1") }}{% endif %}
                                         </div>
                                         {% else %}
                                         {# Alerta sin referencia (búsqueda general) aún sin propiedad #}
