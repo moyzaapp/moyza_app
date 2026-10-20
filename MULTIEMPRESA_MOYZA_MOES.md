@@ -394,6 +394,9 @@ docker exec moyza_backend python -m pytest tests/test_phone.py tests/test_buyer_
 
 ## 12. Avisos de compradores en horas hábiles (Jaén) y "sin avance"
 
+> **Ajustado el 2026-10-19** (sección 15): R2 "sin avance" eliminada; nueva R3
+> "volver a llamar" tras «Sin respuesta». R1 y el calendario hábil se mantienen.
+
 Detalle en `PLAN_ALERTAS_DIAS_HABILES.md` (decisiones en su §4). Los avisos de
 compradores pasan a contar **horas hábiles**: lunes a viernes, sin festivos
 nacionales, de Andalucía (con los traslados al lunes) ni locales de Jaén
@@ -491,3 +494,63 @@ descarga igual. Cada finalización deja una fila `SKIPPED` en
 Para reactivarlo: `VISIT_SHEET_WHATSAPP_ENABLED=true` en el `.env` y reiniciar.
 No hay cambios de código ni de base de datos. Los envíos de informes a
 propietarios no se ven afectados.
+
+## 15. Recordatorio "volver a llamar" tras «Sin respuesta» y menos etapas (2026-10-19)
+
+Detalle en `PLAN_RECORDATORIO_SIN_RESPUESTA.md`. Ajusta la sección 12:
+
+- **R1 · Sin gestión** se mantiene igual (48 h hábiles sin ninguna gestión
+  real, aviso al cruzar y cada 2 días hábiles).
+- **R2 · Sin avance de Primera llamada**: eliminada.
+- **R3 · Volver a llamar** (nueva, con prioridad): si el último seguimiento
+  real es «Sin respuesta», a las **24 h hábiles** se avisa al agente; un aviso
+  por intento, **máximo 3**; el tercero pide cerrar la alerta como «Sin
+  interés». A partir del cuarto «Sin respuesta» la alerta vuelve a R1 (48 h
+  hábiles). Una alerta solo cae en una regla a la vez.
+- Formulario de seguimiento: ya **no ofrece "Primera llamada" ni
+  "Calificado"** (y un POST con esos valores se rechaza). Los registros
+  antiguos se siguen viendo con su etiqueta y color. Guardar el perfil de
+  búsqueda desde la alerta crea un seguimiento **"Perfil guardado"** (antes
+  "Calificado"): cuenta como gestión, no avanza la etapa.
+
+**Cambios que nota el equipo el día del despliegue (avisar antes):**
+
+1. La **campana** cambia de contenido: desaparece "Comprador sin avanzar" y
+   aparece "Vuelve a llamar · {comprador}" (intento N de 3). Las de "sin
+   avance" que quedaran sin leer se marcan leídas con la migración.
+2. El **email diario** (08:00 Madrid, días hábiles) pasa a tener las secciones
+   "Pendientes de volver a llamar" y "Sin gestión" (desaparece "Sin avance de
+   etapa"). Sigue sin haber email para el admin y ningún WhatsApp.
+3. Nuevo job **horario solo in-app** (`notify_buyer_callbacks`, minuto 15,
+   hora de Madrid) para que el aviso "volver a llamar" llegue a la campana al
+   vencer el plazo y no al día siguiente. No envía emails.
+4. Inicio: "N pendientes de volver a llamar · M sin gestión" (agente y admin);
+   `/alerts`: badge "Volver a llamar · intento N de 3" (rojo el tercero) o
+   "Sin gestión"; detalle con "Venció el …".
+
+Despliegue (migración **solo de datos**, sin cambios de esquema):
+
+```bash
+docker exec moyza_backend alembic upgrade head      # z9a0b1c2d3e4: marca leídas las buyer_stage_stall
+docker restart moyza_backend
+```
+
+Variables:
+
+- `BUYER_STAGE_STALL_HOURS`: **desaparece** (si está en el `.env`, quitarla;
+  ya no se lee).
+- `BUYER_CALLBACK_HOURS` (24, nueva): horas hábiles tras «Sin respuesta».
+- `BUYER_CALLBACK_MAX_ATTEMPTS` (3, nueva): intentos que avisan.
+- Sin cambios: `BUYER_REMINDER_HOURS` (48), `BUYER_REMINDER_REPEAT_BUSINESS_DAYS`
+  (2), `BUYER_REMINDER_HOUR` (8), `BUYER_REMINDER_ENABLED` (true; apaga también
+  el job horario).
+
+Rollback: desplegar el código anterior y reiniciar. La migración no tiene
+downgrade útil (las notificaciones marcadas leídas se quedan leídas). Los
+seguimientos "Perfil guardado" creados mientras tanto se verían con su código
+en crudo en el código anterior.
+
+```bash
+# Tests (servicio y canales con base de datos; rutas en SQLite en memoria o contra la app levantada)
+docker exec moyza_backend python -m pytest tests/test_buyer_attention_service.py tests/test_buyer_attention_channels.py tests/test_alert_search.py -q
+```

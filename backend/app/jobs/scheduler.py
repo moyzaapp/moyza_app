@@ -13,6 +13,7 @@ from app.db.session import SessionLocal
 from app.models.property import Property
 from app.services.report_job_service import ReportJobService
 from app.services.performance_report_service import PerformanceReportService
+from app.services.buyer_reminder_service import run_buyer_callback_notifications
 from app.services.buyer_reminder_service import run_buyer_reminders
 from app.services.gmail_service import GmailService
 
@@ -91,8 +92,9 @@ def send_buyer_reminders(now: datetime = None, gmail_service=None):
     """Compradores que requieren atención (PLAN_ALERTAS_DIAS_HABILES.md §2.3).
 
     08:00 de Madrid, lunes a viernes; el servicio además se salta los
-    festivos de Jaén. Un email por agente y empresa (secciones "Sin gestión" y
-    "Sin avance de etapa") y, en la misma pasada, los avisos in-app.
+    festivos de Jaén. Un email por agente y empresa (secciones "Pendientes de
+    volver a llamar" y "Sin gestión", PLAN_RECORDATORIO_SIN_RESPUESTA.md) y,
+    en la misma pasada, los avisos in-app.
 
     `now` (UTC) y `gmail_service` se inyectan en los tests y en las pruebas con
     fecha simulada (un GmailService falso para no enviar correos reales).
@@ -116,6 +118,24 @@ def send_buyer_reminders(now: datetime = None, gmail_service=None):
         )
     except Exception as e:
         logger.error(f"Error en send_buyer_reminders: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+def notify_buyer_callbacks(now: datetime = None):
+    """Avisos in-app «volver a llamar» (R3) en cuanto vencen; cada hora, sin email.
+
+    PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.2: el plazo de 24 h hábiles vence a
+    cualquier hora; el job diario de las 08:00 solo lo recogería al día
+    siguiente. Un aviso por intento (deduplicado). Devuelve el resumen.
+    """
+    if not settings.BUYER_REMINDER_ENABLED:
+        return None
+    db = SessionLocal()
+    try:
+        return run_buyer_callback_notifications(db, now=now)
+    except Exception as e:
+        logger.error(f"Error en notify_buyer_callbacks: {e}", exc_info=True)
     finally:
         db.close()
 
@@ -305,6 +325,17 @@ def start_scheduler():
         minute=0,
         timezone="Europe/Madrid",
         id="send_buyer_reminders",
+        replace_existing=True
+    )
+
+    # Avisos in-app «volver a llamar» (R3): cada hora, en cuanto vence el plazo
+    scheduler.add_job(
+        notify_buyer_callbacks,
+        "cron",
+        hour="*",
+        minute=15,
+        timezone="Europe/Madrid",
+        id="notify_buyer_callbacks",
         replace_existing=True
     )
 

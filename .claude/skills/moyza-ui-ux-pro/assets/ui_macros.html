@@ -137,10 +137,11 @@
       o, sin formulario, un <div class="p-6"> y un <footer class="{{ ui.modal_footer_class }}">.
 #}
 {% set _modal_sizes = { "md": "sm:max-w-md", "lg": "sm:max-w-lg", "xl": "sm:max-w-xl", "2xl": "sm:max-w-2xl", "3xl": "sm:max-w-3xl", "4xl": "sm:max-w-4xl" } %}
-{% set modal_footer_class = "sticky bottom-0 z-10 flex flex-col-reverse sm:flex-row sm:justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 sm:rounded-b-2xl pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-4" %}
+{% set modal_footer_class = "sticky bottom-0 z-10 flex flex-col-reverse sm:flex-row sm:justify-end gap-3 px-4 sm:px-6 py-4 border-t border-gray-200 bg-gray-50 sm:rounded-b-2xl pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-4" %}
 
 {% macro modal(id, title, size="lg", subtitle=None, subtitle_id=None) -%}
-<div id="{{ id }}" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="{{ id }}Title" aria-hidden="true">
+{# !mt-0: si el modal cae dentro de un contenedor space-y-*, ese margen desplazaría el fixed inset-0 #}
+<div id="{{ id }}" class="fixed inset-0 z-50 hidden !mt-0" role="dialog" aria-modal="true" aria-labelledby="{{ id }}Title" aria-hidden="true">
     <div class="absolute inset-0 bg-gray-900/50" data-modal-close></div>
     <div class="relative h-full flex items-end sm:items-center justify-center sm:p-4">
         {# max-height en línea: vh como fallback y dvh (alto real con teclado/barras) donde exista #}
@@ -149,7 +150,7 @@
             <div class="sm:hidden flex justify-center pt-2.5 shrink-0" aria-hidden="true">
                 <span class="h-1.5 w-10 rounded-full bg-gray-300"></span>
             </div>
-            <header class="shrink-0 flex items-start justify-between gap-3 px-6 py-4 border-b border-gray-200">
+            <header class="shrink-0 flex items-start justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
                 <div class="min-w-0">
                     <h2 id="{{ id }}Title" class="text-lg font-bold text-gray-900">{{ title }}</h2>
                     {% if subtitle %}<p {% if subtitle_id %}id="{{ subtitle_id }}"{% endif %} class="text-sm text-gray-500 mt-0.5">{{ subtitle }}</p>{% endif %}
@@ -246,6 +247,86 @@
 </div>
 {% endset %}
 {% if colspan %}<tr><td colspan="{{ colspan }}">{{ inner }}</td></tr>{% else %}{{ inner }}{% endif %}
+{%- endmacro %}
+
+{# ---------------------------------------------------------------- Paginación #}
+{#
+  Paginación en servidor. `p` es el dict de `paginate_params` (routes/alerts.py):
+  page, per_page, total, pages, start, end, has_prev, has_next.
+  `query` es `request.query_params`: los macros se importan sin contexto, así que
+  hay que pasarlo. Los enlaces conservan TODA la query string (también los
+  parámetros multivalor como `status_filter`) y solo sustituyen `param`.
+  `anchor` (opcional) añade `#ancla` para volver a la tabla tras recargar.
+  Uso:
+    {{ ui.pagination_summary(alert_pagination, "alertas") }}      ← encima de la tabla
+    {{ ui.pagination(alert_pagination, request.query_params, param="page", label="alertas") }}
+#}
+{% macro pagination_summary(p, label="resultados") -%}
+{% if p.total %}Mostrando <span class="font-medium text-gray-900 tabular-nums">{{ p.start }}–{{ p.end }}</span> de <span class="font-medium text-gray-900 tabular-nums">{{ p.total }}</span> {{ label }}{% else %}Sin resultados{% endif %}
+{%- endmacro %}
+
+{% macro _page_href(query, param, number, anchor=None) -%}
+?{{ (((query.multi_items() if query else []) | rejectattr("0", "equalto", param) | list) + [(param, number)]) | urlencode }}{% if anchor %}#{{ anchor }}{% endif %}
+{%- endmacro %}
+
+{% set _page_btn = "inline-flex items-center justify-center gap-1.5 h-10 min-w-[2.5rem] px-3 rounded-xl border text-sm font-medium tabular-nums transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20" %}
+{% set _page_idle = "bg-white border-gray-300 text-gray-700 hover:bg-gray-50" %}
+{% set _page_current = "bg-gray-900 border-gray-900 text-white" %}
+{% set _page_disabled = "bg-white border-gray-200 text-gray-400 cursor-not-allowed" %}
+
+{% macro pagination(p, query, param="page", label="resultados", anchor=None) -%}
+<nav aria-label="Paginación de {{ label }}" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-6 py-3 border-t border-gray-200 text-sm text-gray-500">
+    <p>{{ pagination_summary(p, label) }}</p>
+    {% if p.pages > 1 %}
+    {% set lo = [p.page - 2, 1] | max %}
+    {% set hi = [p.page + 2, p.pages] | min %}
+    <div class="flex items-center justify-between sm:justify-end gap-2">
+        {% if p.has_prev %}
+        <a href="{{ _page_href(query, param, p.page - 1, anchor) }}" rel="prev" class="{{ _page_btn }} {{ _page_idle }}">
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
+            Anterior
+        </a>
+        {% else %}
+        <a role="link" aria-disabled="true" class="{{ _page_btn }} {{ _page_disabled }}">
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
+            Anterior
+        </a>
+        {% endif %}
+
+        {# Móvil: solo la posición; escritorio: primera, …, actual ±2, …, última #}
+        <span class="sm:hidden text-sm text-gray-700">Página <span class="font-medium text-gray-900 tabular-nums">{{ p.page }}</span> de <span class="tabular-nums">{{ p.pages }}</span></span>
+        <div class="hidden sm:flex items-center gap-1">
+            {% if lo > 1 %}
+            <a href="{{ _page_href(query, param, 1, anchor) }}" class="{{ _page_btn }} {{ _page_idle }}" aria-label="Página 1">1</a>
+            {% if lo > 2 %}<span class="px-1 text-gray-500" aria-hidden="true">…</span>{% endif %}
+            {% endif %}
+            {% for number in range(lo, hi + 1) %}
+            {% if number == p.page %}
+            <a href="{{ _page_href(query, param, number, anchor) }}" class="{{ _page_btn }} {{ _page_current }}" aria-current="page" aria-label="Página {{ number }}">{{ number }}</a>
+            {% else %}
+            <a href="{{ _page_href(query, param, number, anchor) }}" class="{{ _page_btn }} {{ _page_idle }}" aria-label="Página {{ number }}">{{ number }}</a>
+            {% endif %}
+            {% endfor %}
+            {% if hi < p.pages %}
+            {% if hi < p.pages - 1 %}<span class="px-1 text-gray-500" aria-hidden="true">…</span>{% endif %}
+            <a href="{{ _page_href(query, param, p.pages, anchor) }}" class="{{ _page_btn }} {{ _page_idle }}" aria-label="Página {{ p.pages }}">{{ p.pages }}</a>
+            {% endif %}
+        </div>
+
+        {% if p.has_next %}
+        <a href="{{ _page_href(query, param, p.page + 1, anchor) }}" rel="next" class="{{ _page_btn }} {{ _page_idle }}">
+            Siguiente
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+        </a>
+        {% else %}
+        <a role="link" aria-disabled="true" class="{{ _page_btn }} {{ _page_disabled }}">
+            Siguiente
+            <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+        </a>
+        {% endif %}
+    </div>
+    {% endif %}
+</nav>
 {%- endmacro %}
 
 {# ---------------------------------------------------------------- Cabecera de página #}

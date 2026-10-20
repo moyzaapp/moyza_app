@@ -178,12 +178,26 @@ def test_agente_aterriza_en_su_inicio_sin_errores(setup, company):
     assert "Cumplimiento del equipo" not in text
 
 
-def test_periodos_del_agente(setup):
+def test_semana_y_mes_a_la_vez_sin_selector(setup):
+    """PLAN_INICIO_SEMANA_MES.md: los dos períodos se ven siempre; los
+    parámetros antiguos de período se ignoran sin romper."""
     client = Client(OWNER_EMAIL, "MOYZA")
+    status, body, _ = client.get("/dashboard")
+    assert status == 200
+    text = _text(body)
+    assert "Esta semana" in text and "Este mes" in text
+    assert "period_type=WEEKLY\"" not in body or "Ver histórico" in text
     for query in ("period_type=MONTHLY", "period_type=YEARLY", "period_type=WEEKLY&period_start=2026-01-07",
                   "period_type=XXX&period_start=basura"):
-        status, _, _ = client.get(f"/dashboard?{query}")
+        status, body, _ = client.get(f"/dashboard?{query}")
         assert status == 200, query
+        assert "Esta semana" in _text(body) and "Este mes" in _text(body), query
+
+    # Admin: KPIs de semana y mes, y la tabla de siempre (semana en curso) ordenable
+    status, body, _ = Client(ADMIN_EMAIL, "MOYZA").get("/dashboard")
+    assert status == 200
+    assert "js-sortable" in body and 'data-sort-key="global"' in body and 'data-sort-key="captaciones_crm"' in body
+    assert "Cumplimiento del equipo" in _text(body)
 
 
 def test_usuario_sin_ficha_de_agente_ve_aviso(setup):

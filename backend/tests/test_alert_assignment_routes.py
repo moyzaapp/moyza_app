@@ -511,7 +511,7 @@ def test_agente_solo_moes_recibe_alerta_moyza(data):
     assert f"{TAG} DEFECTO" not in body and f"{TAG} OTRO CON MOTIVO" not in body
     assert moyza_view.get(f"/alerts/{alert.id}")[0] == 200
     status, _, headers = moyza_view.post(f"/alerts/{alert.id}/follow-up", {
-        "action_type": "PRIMERA_LLAMADA", "notes": "Llamada desde MOES",
+        "action_type": "CONTACTADO", "notes": "Llamada desde MOES",
     })
     assert _flash(headers).get("category") == "success"
     assert f"Te han asignado un comprador: {name}" in moyza_view.get("/dashboard")[1]

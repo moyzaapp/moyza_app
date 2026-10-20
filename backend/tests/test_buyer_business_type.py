@@ -155,18 +155,20 @@ def test_edicion_de_criterios_exige_operacion(db):
     name = f"{TAG} EDICION"
     client.post("/buyers/create", {"name": name})
     buyer = _buyers(db, name)[0]
-    client.post(f"/buyers/{buyer.id}/search-criteria", {"business_type": "Venta"})
+    # Mínimos del perfil también en la ficha (PLAN_PERFIL_UBICACION.md): tipo, precio máximo y ubicación
+    minimums = {"property_type": "Piso", "max_price": "150000", "country": "España", "province": "Jaén"}
+    client.post(f"/buyers/{buyer.id}/search-criteria", {"business_type": "Venta", **minimums})
     db.expire_all()
     assert buyer.search_criteria.business_type == "Venta"
 
-    status, headers = client.post(f"/buyers/{buyer.id}/search-criteria", {"business_type": ""})
+    status, headers = client.post(f"/buyers/{buyer.id}/search-criteria", {"business_type": "", **minimums})
     assert status == 302
     assert headers.get("location") == f"/buyers/{buyer.id}?tab=criteria"
     assert "Venta o Alquiler" in _flash(headers)
     db.expire_all()
     assert buyer.search_criteria.business_type == "Venta"
 
-    status, headers = client.post(f"/buyers/{buyer.id}/search-criteria", {"business_type": "Alquiler"})
+    status, headers = client.post(f"/buyers/{buyer.id}/search-criteria", {"business_type": "Alquiler", **minimums})
     assert status == 302
     assert headers.get("location") == f"/buyers/{buyer.id}?tab=matches"
     db.expire_all()

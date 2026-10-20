@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "components/ui_macros.html" as ui %}
 {% from "alerts/assign_fields.html" import assign_fields with context %}
+{% from "components/search_profile_form.html" import search_profile_fields %}
 {# Qué trata la alerta: la propiedad o, sin ella, la búsqueda general (PLAN_ALERTA_SIN_REFERENCIA.md) #}
 {% set alert_subject = alert.property.title if alert.property else ("Búsqueda general" ~ (" · " ~ alert.business_type if alert.business_type else "")) %}
 
@@ -8,116 +9,20 @@
 
 {% block content %}
 
-<div class="flex-1 p-4 sm:p-6 lg:p-8">
-
-    <div class="max-w-5xl mx-auto">
-
-        <!-- Header con botón volver -->
-        <div class="flex items-center gap-4 mb-6">
-            <a href="/alerts" class="text-gray-600 hover:text-gray-800">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
-                </svg>
-            </a>
-            <div>
-                <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">Detalle de Alerta</h1>
-                {% if alert.property %}
-                <p class="text-gray-600 mt-1">{{ alert.lead_name }} - {{ alert.property.title }}</p>
-                {% else %}
-                <p class="flex flex-wrap items-center gap-2 text-gray-600 mt-1">
-                    <span>{{ alert.lead_name }}</span>
-                    {{ ui.badge("Búsqueda general", "gray") }}
-                    {% if alert.business_type %}{{ ui.status_badge("business", alert.business_type, dot=False) }}{% endif %}
-                </p>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-            <!-- Información de la Alerta -->
-            <div class="lg:col-span-2 space-y-6">
-
-                {% if show_steps %}
-                {% include "alerts/_search_steps.html" %}
-                {% endif %}
-
-                <!-- Datos del Interesado -->
-                <div class="bg-white rounded-xl border border-gray-200 p-6">
-                    <h2 class="text-xl font-bold text-gray-800 mb-4">Información del Interesado</h2>
-
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                            <label class="text-sm text-gray-600">Nombre</label>
-                            <p class="text-gray-800 font-medium">{{ alert.lead_name }}</p>
-                        </div>
-
-                        {% if alert.lead_phone %}
-                        {% set lead_whatsapp_url = alert.lead_phone | whatsapp_url %}
-                        <div>
-                            <label class="text-sm text-gray-600">Teléfono</label>
-                            <div class="flex flex-col sm:flex-row sm:items-center gap-2 text-gray-800 font-medium">
-                                <a href="{{ alert.lead_phone | tel_href }}" class="text-blue-600 hover:underline">
-                                    {{ alert.lead_phone | phone_display }}
-                                </a>
-                                {# Chat de WhatsApp (PLAN_WHATSAPP_ALERTA.md): solo si el número es utilizable #}
-                                {% if lead_whatsapp_url %}
-                                {% set whatsapp_attrs %}target="_blank" rel="noopener noreferrer" aria-label="Abrir chat de WhatsApp con {{ alert.lead_name }}"{% endset %}
-                                {% call ui.button("WhatsApp", "secondary", href=lead_whatsapp_url, attrs=whatsapp_attrs, full_mobile=True) %}
-                                <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z"/></svg>
-                                {% endcall %}
-                                {% endif %}
-                            </div>
-                        </div>
-                        {% endif %}
-
-                        {% if alert.lead_email %}
-                        <div>
-                            <label class="text-sm text-gray-600">Email</label>
-                            <p class="text-gray-800 font-medium">
-                                <a href="mailto:{{ alert.lead_email }}" class="text-blue-600 hover:underline">
-                                    {{ alert.lead_email }}
-                                </a>
-                            </p>
-                        </div>
-                        {% endif %}
-
-                        {% if alert.source %}
-                        <div>
-                            <label class="text-sm text-gray-600">Origen</label>
-                            <p class="text-gray-800 font-medium">{{ alert.source }}</p>
-                        </div>
-                        {% endif %}
-
-                        {% if alert.alert_type %}
-                        <div>
-                            <label class="text-sm text-gray-600">Tipo</label>
-                            <p class="text-gray-800 font-medium">
-                                {{ alert_type_labels.get(alert.alert_type, alert.alert_type) }}
-                            </p>
-                        </div>
-                        {% endif %}
-                    </div>
-
-                    {% if alert.message %}
-                    <div class="mt-4 pt-4 border-t border-gray-200">
-                        <label class="text-sm text-gray-600">Mensaje / Notas Iniciales</label>
-                        <p class="text-gray-800 mt-1">{{ alert.message }}</p>
-                    </div>
-                    {% endif %}
-                </div>
-
+{# Tarjeta de la propiedad (o de la búsqueda general sin propiedad). Con propiedad va
+   arriba, antes de los pasos; sin ella, tras los datos del interesado. #}
+{% set property_section_html %}
                 <!-- Datos de la Propiedad (o de la búsqueda general sin propiedad) -->
                 <div class="bg-white rounded-xl border border-gray-200 p-6">
                     <div class="flex items-start justify-between gap-3 mb-4">
                         <h2 class="text-xl font-bold text-gray-800">Propiedad</h2>
-                        {# Cambiar la propiedad de una búsqueda: solo origen 'search', abierta, agente asignado o admin #}
-                        {% if is_search and can_manage_search and alert.property and not show_steps %}
+                        {# Cambiar la propiedad (cualquier alerta, PLAN_PERFIL_OBLIGATORIO.md): abierta,
+                           agente asignado o admin, y solo con el perfil del comprador completo #}
+                        {% if can_manage_search and profile_complete and alert.property %}
                         <a href="/alerts/{{ alert.id }}?step=proposal#propuesta"
                            class="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Cambiar propiedad</a>
                         {% endif %}
                     </div>
-
                     {% if alert.property %}
                     <div class="space-y-2">
                         <div>
@@ -143,9 +48,11 @@
                         </div>
                         {% endif %}
 
-                        {% if is_search %}
+                        {# Origen solo como etiqueta. Si la propiedad se asoció o cambió desde la
+                           Propuesta, cuándo y, si es de otro agente, de quién (PLAN_PERFIL_OBLIGATORIO.md) #}
+                        {% if is_search or alert.property_linked_at %}
                         <p class="text-xs text-gray-500">
-                            Búsqueda general{% if alert.property_linked_at %} · propiedad asociada el {{ alert.property_linked_at | madrid_dt('%d/%m/%Y %H:%M') }}{% endif %}{% if alert.property.agent and alert.property.agent_id != alert.agent_id %} · agente de la propiedad: {{ alert.property.agent.name }}{% endif %}
+                            {{ "Búsqueda general" if is_search else "Con referencia" }}{% if alert.property_linked_at %} · propiedad {{ "asociada" if is_search else "cambiada" }} el {{ alert.property_linked_at | madrid_dt('%d/%m/%Y %H:%M') }}{% if alert.property.agent and alert.property.agent_id != alert.agent_id %} · agente de la propiedad: {{ alert.property.agent.name }}{% endif %}{% endif %}
                         </p>
                         {% endif %}
                     </div>
@@ -223,6 +130,113 @@
                     </div>
                     {% endif %}
                 </div>
+{% endset %}
+
+<div class="flex-1 p-4 sm:p-6 lg:p-8">
+
+    <div class="max-w-5xl mx-auto">
+
+        <!-- Header con botón volver -->
+        <div class="flex items-center gap-4 mb-6">
+            <a href="/alerts" class="text-gray-600 hover:text-gray-800">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                </svg>
+            </a>
+            <div>
+                <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">Detalle de Alerta</h1>
+                {% if alert.property %}
+                <p class="text-gray-600 mt-1">{{ alert.lead_name }} - {{ alert.property.title }}</p>
+                {% else %}
+                <p class="flex flex-wrap items-center gap-2 text-gray-600 mt-1">
+                    <span>{{ alert.lead_name }}</span>
+                    {{ ui.badge("Búsqueda general", "gray") }}
+                    {% if alert.business_type %}{{ ui.status_badge("business", alert.business_type, dot=False) }}{% endif %}
+                </p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- Información de la Alerta -->
+            <div class="lg:col-span-2 space-y-6">
+
+                {# Alerta con propiedad (con referencia o ya asociada): la tarjeta de la
+                   propiedad va arriba, antes de los pasos (PLAN_PERFIL_OBLIGATORIO.md) #}
+                {% if alert.property %}{{ property_section_html }}{% endif %}
+
+                {% if show_steps %}
+                {% include "alerts/_search_steps.html" %}
+                {% endif %}
+
+                <!-- Datos del Interesado -->
+                <div class="bg-white rounded-xl border border-gray-200 p-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">Información del Interesado</h2>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-sm text-gray-600">Nombre</label>
+                            <p class="text-gray-800 font-medium">{{ alert.lead_name }}</p>
+                        </div>
+
+                        {% if alert.lead_phone %}
+                        {% set lead_whatsapp_url = alert.lead_phone | whatsapp_url %}
+                        <div>
+                            <label class="text-sm text-gray-600">Teléfono</label>
+                            <div class="flex flex-col sm:flex-row sm:items-center gap-2 text-gray-800 font-medium">
+                                <a href="{{ alert.lead_phone | tel_href }}" class="text-blue-600 hover:underline">
+                                    {{ alert.lead_phone | phone_display }}
+                                </a>
+                                {# Chat de WhatsApp (PLAN_WHATSAPP_ALERTA.md): solo si el número es utilizable #}
+                                {% if lead_whatsapp_url %}
+                                {% set whatsapp_attrs %}target="_blank" rel="noopener noreferrer" aria-label="Abrir chat de WhatsApp con {{ alert.lead_name }}"{% endset %}
+                                {% call ui.button("WhatsApp", "secondary", href=lead_whatsapp_url, attrs=whatsapp_attrs, full_mobile=True) %}
+                                <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z"/></svg>
+                                {% endcall %}
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if alert.lead_email %}
+                        <div>
+                            <label class="text-sm text-gray-600">Email</label>
+                            <p class="text-gray-800 font-medium">
+                                <a href="mailto:{{ alert.lead_email }}" class="text-blue-600 hover:underline">
+                                    {{ alert.lead_email }}
+                                </a>
+                            </p>
+                        </div>
+                        {% endif %}
+
+                        {% if alert.source %}
+                        <div>
+                            <label class="text-sm text-gray-600">Origen</label>
+                            <p class="text-gray-800 font-medium">{{ alert.source }}</p>
+                        </div>
+                        {% endif %}
+
+                        {% if alert.alert_type %}
+                        <div>
+                            <label class="text-sm text-gray-600">Tipo</label>
+                            <p class="text-gray-800 font-medium">
+                                {{ alert_type_labels.get(alert.alert_type, alert.alert_type) }}
+                            </p>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    {% if alert.message %}
+                    <div class="mt-4 pt-4 border-t border-gray-200">
+                        <label class="text-sm text-gray-600">Mensaje / Notas Iniciales</label>
+                        <p class="text-gray-800 mt-1">{{ alert.message }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                {# Sin propiedad (búsqueda general): la tarjeta sigue en su sitio, tras el interesado #}
+                {% if not alert.property %}{{ property_section_html }}{% endif %}
 
                 <!-- Historial de Seguimientos (el agente recibe solo los suyos desde la asignación) -->
                 <div class="bg-white rounded-xl border border-gray-200 p-6">
@@ -245,7 +259,8 @@
                             </div>
 
                             {% if follow_up.notes %}
-                            <p class="text-gray-700 text-sm">{{ follow_up.notes }}</p>
+                            {# pre-line: «Contactado» lleva la nota del agente y, en otra línea, el resumen del perfil #}
+                            <p class="text-gray-700 text-sm whitespace-pre-line">{{ follow_up.notes }}</p>
                             {% endif %}
 
                             {% if follow_up.next_action_date %}
@@ -290,19 +305,25 @@
                             {% endif %}
                         </div>
 
-                        {# Plazos en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md): lo vencido en
-                           un aviso ámbar y lo que aún no ha vencido con su fecha #}
+                        {# Plazo en horas hábiles (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.2): la regla
+                           vencida en un aviso (ámbar; rojo el tercer intento) o, si aún no
+                           ha vencido, su fecha #}
                         {% if attention %}
-                        {{ ui.banner(attention.badge, "amber",
-                                     text="Venció el " ~ attention.due_label ~ ". "
-                                          ~ ("Registra un seguimiento; también vale «Sin respuesta» si no contesta." if attention.rule == RULE_NO_ACTION
-                                             else "Registra el avance de etapa cuando consigas hablar con el comprador.")) }}
+                        {% if attention.rule == RULE_CALLBACK %}
+                        {{ ui.banner(attention.badge, attention.tone,
+                                     text="Sin respuesta desde el " ~ attention.since_label ~ ". Venció el " ~ attention.due_label ~ ". "
+                                          ~ ("Tercer intento: si no contesta, cierra la alerta como «Sin interés»." if attention.is_last_attempt
+                                             else "Vuelve a llamar y registra el seguimiento.")) }}
+                        {% else %}
+                        {{ ui.banner(attention.badge, attention.tone,
+                                     text="Venció el " ~ attention.due_label ~ ". Registra un seguimiento; también vale «Sin respuesta» si no contesta.") }}
+                        {% endif %}
                         {% endif %}
                         {% for clock in upcoming_clocks %}
                         <div>
-                            <p class="text-sm text-gray-600">{{ "Plazo de gestión" if clock.rule == RULE_NO_ACTION else "Plazo para pasar de " ~ clock.stage_label }}</p>
+                            <p class="text-sm text-gray-600">{{ ("Volver a llamar · " ~ clock.attempt_label) if clock.rule == RULE_CALLBACK else "Plazo de gestión" }}</p>
                             <p class="text-gray-800 text-sm">Vence el {{ clock.due_label }}</p>
-                            <p class="text-xs text-gray-500">{{ (clock.threshold_hours // 24) }} días hábiles; sin contar fines de semana ni festivos de Jaén</p>
+                            <p class="text-xs text-gray-500">{{ clock.threshold_hours // 24 }} {{ 'día hábil' if clock.threshold_hours // 24 == 1 else 'días hábiles' }}; sin contar fines de semana ni festivos de Jaén</p>
                         </div>
                         {% endfor %}
 
@@ -431,7 +452,8 @@
 {% endif %}
 
 <!-- Modal Agregar Seguimiento -->
-{% call ui.modal("followUpModal", "Agregar seguimiento", size="lg", subtitle=alert.lead_name ~ " · " ~ alert_subject) %}
+{# xl: con «Contactado» el modal lleva el perfil del comprador (formulario medio) #}
+{% call ui.modal("followUpModal", "Agregar seguimiento", size=("xl" if follow_up_profile else "lg"), subtitle=alert.lead_name ~ " · " ~ alert_subject) %}
 <form method="POST" action="/alerts/{{ alert.id }}/follow-up" data-once>
     <div class="p-6 space-y-4">
         <div>
@@ -449,7 +471,26 @@
                 </optgroup>
             </select>
             <p id="followUpActionHelp" class="text-xs text-gray-500 mt-1">Las opciones de cierre completan la alerta automáticamente.</p>
+            {# Etapa avanzada sin perfil (PLAN_PERFIL_OBLIGATORIO.md): no se deshabilita la opción;
+               se avisa aquí y se desactiva Guardar. El servidor lo valida igualmente. #}
+            <p id="followUpProfileBlocked" class="hidden text-xs text-red-600 mt-1" role="alert">Primero registra el perfil con Contactado</p>
         </div>
+
+        {% if follow_up_profile %}
+        {# «Contactado» lleva dentro el perfil del comprador (PLAN_PERFIL_OBLIGATORIO.md):
+           obligatorio si aún no está completo; si ya lo está, sale precargado para editarlo.
+           Desactivado (no se envía ni se valida) con cualquier otra etapa. #}
+        <fieldset id="followUpProfile" class="hidden rounded-xl border border-gray-200 p-4" disabled>
+            <legend class="px-1 text-sm font-semibold text-gray-900">Perfil del comprador</legend>
+            <p class="text-xs text-gray-500 mb-4">
+                {% if profile_complete %}Su perfil guardado; cámbialo si te ha contado algo nuevo.{% else %}Datos mínimos: tipo, precio máximo y ubicación (provincia, población o zona).{% endif %}
+            </p>
+            {{ search_profile_fields(criteria, location, property_types,
+                                     alert_operation=(alert.business_type or ""),
+                                     prefix="fu", required=(not profile_complete), notes_name="profile_notes",
+                                     type_empty="Selecciona…") }}
+        </fieldset>
+        {% endif %}
 
         <div>
             <label for="followUpNotes" class="block text-sm font-medium text-gray-700 mb-1">
@@ -463,12 +504,17 @@
         {{ ui.field("next_action_date", "Fecha de la próxima acción", type="datetime-local", optional_label=True, id="followUpNextDate") }}
     </div>
 
-    {{ ui.modal_footer(submit_label="Guardar seguimiento") }}
+    {{ ui.modal_footer(submit_label="Guardar seguimiento", submit_id="followUpSubmit") }}
 </form>
 {% endcall %}
 
+<script src="/static/js/search-profile.js"></script>
 <script>
-const CLOSING_STAGES = new Set(['CERRADO', 'SIN_INTERES', 'SIN_SOLVENCIA_ECONOMICA']);
+const CLOSING_STAGES = new Set({{ FollowUpActionType.CLOSING_STAGES | list | sort | tojson }});
+// Perfil obligatorio (PLAN_PERFIL_OBLIGATORIO.md): etapas que lo exigen y estado del comprador
+const PROFILE_REQUIRED_STAGES = new Set({{ FollowUpActionType.PROFILE_REQUIRED_STAGES | list | sort | tojson }});
+const PROFILE_STAGE = {{ FollowUpActionType.CONTACTADO | tojson }};
+const PROFILE_BLOCKS_STAGES = {{ (true if (follow_up_profile and not profile_complete) else false) | tojson }};
 
 function openFollowUpModal() {
     UI.openModal('followUpModal');
@@ -484,6 +530,9 @@ function closeFollowUpModal() {
     const required = document.getElementById('notesRequired');
     const hint = document.getElementById('notesHint');
     const form = document.querySelector('#followUpModal form');
+    const profile = document.getElementById('followUpProfile');
+    const blocked = document.getElementById('followUpProfileBlocked');
+    const submit = document.getElementById('followUpSubmit');
 
     if (!select || !notes || !form) return;
 
@@ -494,8 +543,28 @@ function closeFollowUpModal() {
         hint.classList.toggle('hidden', !isClosing);
     }
 
-    select.addEventListener('change', updateNotesState);
+    // «Contactado» despliega el perfil; las etapas avanzadas sin perfil avisan y no se guardan
+    function updateProfileState() {
+        if (profile) {
+            const isContact = select.value === PROFILE_STAGE;
+            profile.disabled = !isContact;
+            profile.classList.toggle('hidden', !isContact);
+        }
+        const isBlocked = PROFILE_BLOCKS_STAGES && PROFILE_REQUIRED_STAGES.has(select.value);
+        if (blocked) blocked.classList.toggle('hidden', !isBlocked);
+        if (submit) {
+            submit.disabled = isBlocked;
+            submit.title = isBlocked ? 'Primero registra el perfil con Contactado' : '';
+        }
+        select.setAttribute('aria-describedby', isBlocked ? 'followUpActionHelp followUpProfileBlocked' : 'followUpActionHelp');
+    }
+
+    select.addEventListener('change', function () {
+        updateNotesState();
+        updateProfileState();
+    });
     updateNotesState();
+    updateProfileState();
 })();
 </script>
 

@@ -137,10 +137,11 @@
       o, sin formulario, un <div class="p-6"> y un <footer class="{{ ui.modal_footer_class }}">.
 #}
 {% set _modal_sizes = { "md": "sm:max-w-md", "lg": "sm:max-w-lg", "xl": "sm:max-w-xl", "2xl": "sm:max-w-2xl", "3xl": "sm:max-w-3xl", "4xl": "sm:max-w-4xl" } %}
-{% set modal_footer_class = "sticky bottom-0 z-10 flex flex-col-reverse sm:flex-row sm:justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 sm:rounded-b-2xl pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-4" %}
+{% set modal_footer_class = "sticky bottom-0 z-10 flex flex-col-reverse sm:flex-row sm:justify-end gap-3 px-4 sm:px-6 py-4 border-t border-gray-200 bg-gray-50 sm:rounded-b-2xl pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-4" %}
 
 {% macro modal(id, title, size="lg", subtitle=None, subtitle_id=None) -%}
-<div id="{{ id }}" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="{{ id }}Title" aria-hidden="true">
+{# !mt-0: si el modal cae dentro de un contenedor space-y-*, ese margen desplazaría el fixed inset-0 #}
+<div id="{{ id }}" class="fixed inset-0 z-50 hidden !mt-0" role="dialog" aria-modal="true" aria-labelledby="{{ id }}Title" aria-hidden="true">
     <div class="absolute inset-0 bg-gray-900/50" data-modal-close></div>
     <div class="relative h-full flex items-end sm:items-center justify-center sm:p-4">
         {# max-height en línea: vh como fallback y dvh (alto real con teclado/barras) donde exista #}
@@ -149,7 +150,7 @@
             <div class="sm:hidden flex justify-center pt-2.5 shrink-0" aria-hidden="true">
                 <span class="h-1.5 w-10 rounded-full bg-gray-300"></span>
             </div>
-            <header class="shrink-0 flex items-start justify-between gap-3 px-6 py-4 border-b border-gray-200">
+            <header class="shrink-0 flex items-start justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
                 <div class="min-w-0">
                     <h2 id="{{ id }}Title" class="text-lg font-bold text-gray-900">{{ title }}</h2>
                     {% if subtitle %}<p {% if subtitle_id %}id="{{ subtitle_id }}"{% endif %} class="text-sm text-gray-500 mt-0.5">{{ subtitle }}</p>{% endif %}

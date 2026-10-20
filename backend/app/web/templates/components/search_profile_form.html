@@ -1,75 +1,131 @@
 {#
   Perfil de búsqueda del comprador (PLAN_ALERTA_SIN_REFERENCIA.md).
 
-  Lo usan la ficha del comprador (buyers/detail.html) y el paso "Perfil" del
-  detalle de una alerta sin referencia (alerts/detail.html). Sin superficie
-  (m²): salió del perfil en toda la app (decisión cerrada 5).
+  Lo usan la ficha del comprador (buyers/detail.html), el paso "Perfil" del
+  detalle de una alerta y el seguimiento «Contactado» del modal de seguimiento
+  (alerts/detail.html, PLAN_PERFIL_OBLIGATORIO.md). Sin superficie (m²): salió
+  del perfil en toda la app (decisión cerrada 5).
+
+  Ubicación en cascada (PLAN_PERFIL_UBICACION.md): País y Provincia como
+  desplegables; Población y Zona como listas de casillas con "Todas", cada
+  nivel filtrado por el anterior. La provincia de una propiedad se deduce de
+  su código postal. El servidor pinta el estado inicial (`location`, de
+  `_property_filter_values` en routes/alerts.py) y /static/js/search-profile.js
+  rellena los niveles al cambiar, con el árbol incrustado como JSON
+  (`<script type="application/json" id="geoData-{prefix}">`). "Todas" marca y
+  deshabilita las demás casillas: no se envían y la lista queda vacía (= Todas).
 
   Uso (dentro de un <form>):
     {% from "components/search_profile_form.html" import search_profile_fields %}
-    {{ search_profile_fields(criteria, zones, cities, property_types, prefix="bc") }}
-    {{ search_profile_fields(criteria, zones, cities, property_types, business_type_fixed=alert.business_type, prefix="sp") }}
+    {{ search_profile_fields(criteria, location, property_types, prefix="bc", required=True) }}
+    {{ search_profile_fields(criteria, location, property_types, alert_operation=alert.business_type, prefix="sp", required=True) }}
 
-  - business_type_fixed: la operación viene de la alerta y se muestra como texto
-    (el servidor usa la de la alerta). Sin ella, select obligatorio Venta / Alquiler.
+  - location: dict de `_property_filter_values(...)["location"]` (árbol + estado inicial).
+  - alert_operation: operación de la alerta. El select de operación sale
+    precargado con ella y avisa de que cambiarla cambia la de la alerta. Sin
+    ella (ficha del comprador), precargado con la del perfil.
+  - required: marca los mínimos del perfil (PLAN_PERFIL_OBLIGATORIO.md, decisión 4,
+    con la ubicación de PLAN_PERFIL_UBICACION.md): tipo de inmueble y precio
+    máximo con `required`, y "provincia, o al menos una población o zona" con
+    `data-places-required` (lo valida /static/js/search-profile.js al enviar; el
+    servidor lo valida igualmente con buyer_matching.missing_profile_fields).
+  - notes_name: nombre del campo "Imprescindibles" (en el modal de seguimiento
+    `notes` ya es la nota del seguimiento, allí va como `profile_notes`).
+  - type_empty: texto de la opción vacía del tipo (por defecto "Selecciona…" si es
+    obligatorio y "Cualquier tipo" si no). En la alerta el tipo es un mínimo, así
+    que al editar un perfil completo se pasa "Selecciona…" aunque no sea `required`.
   - caller(): campos extra al final (p. ej. "Agente responsable" en la ficha).
 #}
 {% import "components/ui_macros.html" as ui %}
 
-{% macro _places(name, legend, values, selected, empty_text) -%}
+{# Lista de casillas con "Todas" (Población o Zona). Con "Todas" marcada, las demás
+   salen marcadas y deshabilitadas: no se envían y la lista guardada queda vacía (= Todas). #}
+{% macro _geo_list(kind, legend, values, selected, all_checked, prefix, empty_text) -%}
 <fieldset>
     <legend class="block text-sm font-medium text-gray-700 mb-2">{{ legend }}</legend>
-    {% if values %}
-    <div class="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+    <div id="{{ prefix }}{{ kind | capitalize }}List" class="flex flex-wrap gap-2 max-h-48 overflow-y-auto" data-geo-list="{{ kind }}">
+        <label class="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-900 cursor-pointer hover:bg-gray-50">
+            <input type="checkbox" data-geo-all {% if all_checked %}checked{% endif %}
+                class="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900/30">
+            Todas
+        </label>
         {% for value in values %}
         <label class="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50">
-            <input type="checkbox" name="{{ name }}" value="{{ value }}"
-                {% if selected and value in selected %}checked{% endif %}
+            <input type="checkbox" name="{{ kind }}" value="{{ value }}"
+                {% if all_checked or value in selected %}checked{% endif %}
+                {% if all_checked %}disabled{% endif %}
                 class="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900/30">
             {{ value }}
         </label>
         {% endfor %}
     </div>
-    {% else %}
-    <p class="text-sm text-gray-500">{{ empty_text }}</p>
-    {% endif %}
+    <p class="text-sm text-gray-500 mt-2 {% if values %}hidden{% endif %}" data-geo-empty>{{ empty_text }}</p>
 </fieldset>
 {%- endmacro %}
 
-{% macro search_profile_fields(criteria=None, zones=[], cities=[], property_types=[], business_type_fixed=None, prefix="sp") -%}
+{% macro _location(loc, prefix, required) -%}
+{% set countries = loc.countries or [] %}
+{% set single_country = countries | length == 1 %}
+{% set country_options = [] %}
+{% for country in countries %}{% set _ = country_options.append((country, country)) %}{% endfor %}
+{% set province_options = [] %}
+{% for province in loc.provinces or [] %}{% set _ = province_options.append((province, province)) %}{% endfor %}
+<div class="space-y-4" data-geo-cascade data-geo-source="geoData-{{ prefix }}" data-no-province="{{ loc.no_province or 'Sin provincia' }}"
+     {% if required %}data-places-required data-places-error="{{ prefix }}PlacesError"{% endif %}>
+    <script type="application/json" id="geoData-{{ prefix }}">{{ (loc.tree or {}) | tojson }}</script>
+    <p id="{{ prefix }}PlacesHelp" class="text-xs text-gray-500">
+        {% if required %}Ubicación <span class="text-red-500" aria-hidden="true">*</span> · elige la provincia, o al menos una población o zona{% else %}Ubicación · provincia, poblaciones y zonas{% endif %}
+    </p>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {# Con un solo país, preseleccionado y fijo (el desplegable deshabilitado no se envía: va oculto) #}
+        {{ ui.select("country", "País", country_options, value=loc.country,
+                     empty=(none if single_country else "Todos los países"),
+                     attrs=('data-geo="country"' ~ (' disabled' if single_country else '')), id=prefix ~ "Country") }}
+        {% if single_country %}<input type="hidden" name="country" value="{{ loc.country }}" data-geo="country-fixed">{% endif %}
+        {{ ui.select("province", "Provincia", province_options, value=loc.province,
+                     empty="Todas las provincias", attrs='data-geo="province"', id=prefix ~ "Province",
+                     help="Según el código postal de las propiedades") }}
+    </div>
+    {{ _geo_list("cities", "Población", loc.cities or [], loc.selected_cities or [], loc.cities_all, prefix,
+                 "No hay poblaciones en esta provincia") }}
+    {{ _geo_list("zones", "Zona", loc.zones or [], loc.selected_zones or [], loc.zones_all, prefix,
+                 "Las poblaciones elegidas no tienen zonas registradas") }}
+    {% if required %}
+    <p id="{{ prefix }}PlacesError" class="hidden text-xs text-red-600" role="alert">Elige la provincia, o al menos una población o zona</p>
+    {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro search_profile_fields(criteria=None, location={}, property_types=[], alert_operation=None, prefix="sp", required=False, notes_name="notes", type_empty=None) -%}
 {% set c = criteria %}
 {% set type_options = [] %}
 {% for pt in property_types %}{% set _ = type_options.append((pt, pt)) %}{% endfor %}
 <div class="space-y-5">
-    {{ _places("zones", "Zonas", zones, c.zones if c else none, "No hay zonas registradas en las propiedades") }}
-    {{ _places("cities", "Ciudades", cities, c.cities if c else none, "No hay ciudades registradas en las propiedades") }}
+    {{ _location(location, prefix, required) }}
 
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {{ ui.select("property_type", "Tipo de inmueble", type_options,
-                     value=(c.property_type if c else none), empty="Cualquier tipo", id=prefix ~ "PropertyType") }}
+                     value=(c.property_type if c else none), required=required,
+                     empty=(type_empty or ("Selecciona…" if required else "Cualquier tipo")), id=prefix ~ "PropertyType") }}
 
-        {% if business_type_fixed %}
-        <div>
-            <p class="block text-sm font-medium text-gray-700 mb-1">Operación</p>
-            <p class="flex items-center gap-2 min-h-[2.5rem] text-sm text-gray-500">
-                {{ ui.status_badge("business", business_type_fixed, dot=False) }}
-                <span>La de la alerta</span>
-            </p>
-        </div>
-        {% else %}
-        {% set current_bt = c.business_type if c else none %}
+        {# Operación: en la alerta, precargada con la de la alerta y editable (si cambia,
+           cambia la de la alerta; PLAN_PERFIL_UBICACION.md); en la ficha, la del perfil #}
+        {% set current_bt = alert_operation if alert_operation else (c.business_type if c else none) %}
         <div>
             <label for="{{ prefix }}BusinessType" class="block text-sm font-medium text-gray-700 mb-1">
                 Operación <span class="text-red-500" aria-hidden="true">*</span>
             </label>
-            <select name="business_type" id="{{ prefix }}BusinessType" required class="{{ ui.input_class }}">
+            <select name="business_type" id="{{ prefix }}BusinessType" required class="{{ ui.input_class }}"
+                {% if alert_operation is not none %}aria-describedby="{{ prefix }}BusinessTypeHelp"{% endif %}>
                 <option value="" disabled {% if current_bt not in BusinessType.values() %}selected{% endif %}>Selecciona…</option>
                 {% for bt in BusinessType.values() %}
                 <option value="{{ bt }}" {% if current_bt == bt %}selected{% endif %}>{{ bt }}</option>
                 {% endfor %}
             </select>
+            {% if alert_operation is not none %}
+            <p id="{{ prefix }}BusinessTypeHelp" class="text-xs text-gray-500 mt-1">Si la cambias, cambia la operación de la alerta</p>
+            {% endif %}
         </div>
-        {% endif %}
 
         <div class="grid grid-cols-2 gap-3">
             {{ ui.field("min_bedrooms", "Dormitorios mín.", type="number",
@@ -88,13 +144,13 @@
             {{ ui.field("min_price", "Precio mín. (€)", type="number",
                         value=((c.min_price | int) if c and c.min_price is not none else ""),
                         placeholder="–", attrs='min="0" step="1000" inputmode="numeric"', id=prefix ~ "MinPrice") }}
-            {{ ui.field("max_price", "Precio máx. (€)", type="number",
+            {{ ui.field("max_price", "Precio máx. (€)", type="number", required=required,
                         value=((c.max_price | int) if c and c.max_price is not none else ""),
                         placeholder="–", attrs='min="0" step="1000" inputmode="numeric"', id=prefix ~ "MaxPrice") }}
         </div>
     </div>
 
-    {{ ui.field("notes", "Imprescindibles", type="textarea", value=(c.notes if c and c.notes else ""),
+    {{ ui.field(notes_name, "Imprescindibles", type="textarea", value=(c.notes if c and c.notes else ""),
                 placeholder="Ej: planta baja, terraza, ascensor, sin reformar…", id=prefix ~ "Notes") }}
 
     {% if caller %}{{ caller() }}{% endif %}

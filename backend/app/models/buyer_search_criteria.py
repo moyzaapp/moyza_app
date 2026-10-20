@@ -25,7 +25,13 @@ class BuyerSearchCriteria(Base):
         nullable=True
     )
 
-    # Ubicación (listas JSON de valores de las propiedades existentes)
+    # Ubicación en cascada País → Provincia → Población → Zona
+    # (PLAN_PERFIL_UBICACION.md). País y provincia son un solo valor; la
+    # provincia de una propiedad se deduce de su código postal (app/core/geo.py).
+    # Poblaciones y zonas son listas JSON de valores de las propiedades
+    # existentes; lista vacía (o nula) = "Todas".
+    country = Column(String, nullable=True)    # "España"
+    province = Column(String, nullable=True)   # "Jaén"
     zones = Column(JSON, nullable=True)   # ["Eixample", "Gràcia", ...]
     cities = Column(JSON, nullable=True)  # ["Barcelona", "Hospitalet", ...]
 

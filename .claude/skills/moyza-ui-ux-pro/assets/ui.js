@@ -176,6 +176,118 @@ window.UI = (function () {
         }, 8000);
     });
 
+    // ---- Tablas ordenables por columna ------------------------------------
+    //
+    // <table class="js-sortable" data-table-id="teamTable">
+    //   <th data-sort-type="number|text" data-sort-key="capt" [data-sort-col="3"]>…</th>
+    //   <td data-sort-value="42">…</td>
+    //
+    // Primer clic: números de mayor a menor, texto de A a Z. Las celdas sin
+    // valor (data-sort-value vacío) van siempre al final. Con data-table-id el
+    // último orden se recuerda en el navegador. data-sort-col solo hace falta
+    // cuando la cabecera tiene varias filas (colspan/rowspan) y cellIndex no
+    // coincide con la columna real.
+
+    function sortableTables(root) {
+        (root || document).querySelectorAll('table.js-sortable').forEach(initSortable);
+    }
+
+    function initSortable(table) {
+        if (table.dataset.sortReady) return;
+        table.dataset.sortReady = '1';
+        var tbody = table.tBodies[0];
+        if (!tbody) return;
+        var headers = Array.prototype.slice.call(table.querySelectorAll('thead th[data-sort-type]'));
+        var storeKey = table.dataset.tableId ? 'sort:' + table.dataset.tableId : null;
+
+        function colOf(th) {
+            return th.dataset.sortCol !== undefined ? parseInt(th.dataset.sortCol, 10) : th.cellIndex;
+        }
+
+        function setIndicator(th, dir) {
+            var ind = th.querySelector('.sort-indicator');
+            if (!ind) return;
+            ind.textContent = dir === 'asc' ? '↑' : dir === 'desc' ? '↓' : '↕';
+            ind.classList.toggle('text-gray-400', !dir);
+            ind.classList.toggle('text-gray-900', !!dir);
+        }
+
+        function apply(th, dir) {
+            var col = colOf(th);
+            var type = th.dataset.sortType;
+            headers.forEach(function (h) {
+                delete h.dataset.sortDir;
+                h.setAttribute('aria-sort', 'none');
+                setIndicator(h, null);
+            });
+            th.dataset.sortDir = dir;
+            th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+            setIndicator(th, dir);
+
+            var rows = Array.prototype.filter.call(tbody.rows, function (row) {
+                return row.cells.length > col && !row.hasAttribute('data-no-sort');
+            });
+            rows.sort(function (a, b) {
+                var va = a.cells[col].dataset.sortValue || '';
+                var vb = b.cells[col].dataset.sortValue || '';
+                if (va === '' && vb === '') return 0;
+                if (va === '') return 1;
+                if (vb === '') return -1;
+                var cmp = type === 'number'
+                    ? parseFloat(va) - parseFloat(vb)
+                    : va.localeCompare(vb, 'es', { numeric: true, sensitivity: 'base' });
+                return dir === 'asc' ? cmp : -cmp;
+            });
+            rows.forEach(function (row) { tbody.appendChild(row); });
+
+            if (storeKey) {
+                try { window.localStorage.setItem(storeKey, JSON.stringify({ key: th.dataset.sortKey || String(col), dir: dir })); } catch (e) { /* sin almacenamiento */ }
+            }
+        }
+
+        function toggle(th) {
+            var type = th.dataset.sortType;
+            var dir = th.dataset.sortDir === 'asc' ? 'desc'
+                    : th.dataset.sortDir === 'desc' ? 'asc'
+                    : (type === 'number' ? 'desc' : 'asc');
+            apply(th, dir);
+        }
+
+        headers.forEach(function (th) {
+            th.classList.add('cursor-pointer', 'select-none', 'hover:text-gray-900');
+            th.setAttribute('aria-sort', 'none');
+            th.tabIndex = 0;
+            if (!th.querySelector('.sort-indicator')) {
+                var ind = document.createElement('span');
+                ind.className = 'sort-indicator ml-1 text-gray-400';
+                ind.setAttribute('aria-hidden', 'true');
+                ind.textContent = '↕';
+                th.appendChild(ind);
+            }
+            th.addEventListener('click', function () { toggle(th); });
+            th.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(th); }
+            });
+        });
+
+        // Reaplicar el último orden elegido en este navegador
+        if (storeKey) {
+            try {
+                var saved = JSON.parse(window.localStorage.getItem(storeKey) || 'null');
+                if (saved && saved.key) {
+                    var match = headers.filter(function (h) { return (h.dataset.sortKey || String(colOf(h))) === saved.key; })[0];
+                    if (match) apply(match, saved.dir === 'asc' ? 'asc' : 'desc');
+                }
+            } catch (e) { /* ignorar */ }
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () { sortableTables(document); });
+    } else {
+        sortableTables(document);
+    }
+
     // ---- Utilidades -------------------------------------------------------
 
     function escapeHtml(text) {
@@ -189,6 +301,7 @@ window.UI = (function () {
         closeModal: closeModal,
         closeTop: closeTop,
         isOpen: isOpen,
+        sortableTables: sortableTables,
         escapeHtml: escapeHtml
     };
 })();

@@ -166,6 +166,23 @@ PROFILE = {
 }
 
 
+def _complete_profile(env, buyer=None, **fields):
+    """Perfil mínimo completo ya guardado (p. ej. desde la ficha del comprador).
+
+    PLAN_PERFIL_OBLIGATORIO.md: asociar o cambiar propiedad exige el perfil
+    completo (tipo + precio máximo + ubicación: provincia, población o zona;
+    PLAN_PERFIL_UBICACION.md).
+    """
+    from app.models.buyer_search_criteria import BuyerSearchCriteria
+    buyer = buyer or env.buyer
+    data = dict(property_type="Piso", max_price=200000, zones=["Centro"], business_type="Venta")
+    data.update(fields)
+    criteria = BuyerSearchCriteria(buyer_id=buyer.id, **data)
+    env.db.add(criteria)
+    env.db.commit()
+    return criteria
+
+
 def _save_profile(env, user, alert, form=None):
     from app.web.routes.alerts import save_alert_search_profile
     form = dict(PROFILE if form is None else form)
@@ -208,6 +225,43 @@ def test_propiedad_asociada_es_gestion_que_no_avanza_etapa():
     assert FollowUpActionType.stage_badge_color(action) == "bg-blue-100 text-blue-700"
     # Solo lo escribe /link-property: el formulario de seguimiento no lo admite
     assert not FollowUpActionType.is_valid(action)
+
+
+def test_perfil_guardado_es_gestion_que_no_avanza_etapa():
+    action = FollowUpActionType.PERFIL_GUARDADO
+    assert action in FollowUpActionType.REPEATABLE_ACTIONS
+    assert action not in FollowUpActionType.SYSTEM_ACTIONS
+    assert FollowUpActionType.labels()[action] == "Perfil guardado"
+    assert FollowUpActionType.stage_badge_color(action) == "bg-blue-100 text-blue-700"
+    # Solo lo escribe el guardado del perfil: el formulario no lo ofrece ni lo admite
+    assert not FollowUpActionType.is_valid(action)
+    assert action not in dict(FollowUpActionType.ordered_stages())
+    # Gestión real para la cola y el cierre (alert_view)
+    from app.services import alert_view
+    follow_up = SimpleNamespace(action_type=action, created_at=T0 + timedelta(hours=1))
+    assert alert_view.is_real_follow_up(follow_up)
+    alert = SimpleNamespace(assigned_at=T0, created_at=T0)
+    assert alert_view.has_follow_up_since_assignment([follow_up], alert)
+
+
+def test_etapas_heredadas_fuera_del_formulario_pero_con_etiqueta_y_orden():
+    """PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.3: Primera llamada y Calificado."""
+    order = FollowUpActionType.STAGE_ORDER
+    form = dict(FollowUpActionType.ordered_stages())
+    for legacy in ("PRIMERA_LLAMADA", "CALIFICADO"):
+        assert legacy in FollowUpActionType.LEGACY_STAGES
+        assert legacy not in form
+        assert not FollowUpActionType.is_valid(legacy)
+    assert FollowUpActionType.labels()["PRIMERA_LLAMADA"] == "Primera Llamada"
+    assert FollowUpActionType.labels()["CALIFICADO"] == "Calificado"
+    assert FollowUpActionType.stage_badge_color("CALIFICADO") == "bg-indigo-100 text-indigo-700"
+    assert [v for v, _ in FollowUpActionType.progression_stages()] == [
+        "SIN_RESPUESTA", "CONTACTADO", "VISITA_PROGRAMADA", "OFERTA"]
+    # Orden coherente para los historiales antiguos
+    assert order["SIN_RESPUESTA"] < order["PRIMERA_LLAMADA"] < order["CONTACTADO"] == order["CALIFICADO"]
+    assert order["CONTACTADO"] < order["VISITA_PROGRAMADA"] < order["OFERTA"] < order["CERRADO"]
+    for value in ("SIN_RESPUESTA", "CONTACTADO", "VISITA_PROGRAMADA", "OFERTA", "CERRADO", "SIN_INTERES"):
+        assert FollowUpActionType.is_valid(value)
 
 
 def test_resumen_del_perfil():
@@ -359,9 +413,12 @@ def test_guardar_perfil_desde_la_alerta(env):
     response = _save_profile(env, env.users["ana"], alert)
     assert response.status_code == 302
     assert response.headers["location"] == f"/alerts/{alert.id}?step=proposal"
-    # Piso Centro (120.000, 2 dorm) y Piso Bea (140.000, 3 dorm, de Bea) encajan
-    assert _flash(response) == {"category": "success",
-                                "message": "Perfil de Juan Comprador guardado: 2 propiedades sugeridas"}
+    # Piso Centro (120.000, 2 dorm) y Piso Bea (140.000, 3 dorm, de Bea) encajan.
+    # El perfil antiguo no estaba completo: primera vez = Contactado (PLAN_PERFIL_OBLIGATORIO.md)
+    assert _flash(response) == {
+        "category": "success",
+        "message": "Perfil de Juan Comprador guardado y registrado como «Contactado»: 2 propiedades sugeridas",
+    }
 
     stored = _reload(env, alert)
     criteria = env.db.query(BuyerSearchCriteria).filter_by(buyer_id=env.buyer.id).one()
@@ -372,10 +429,14 @@ def test_guardar_perfil_desde_la_alerta(env):
     assert float(criteria.max_price) == 150000 and criteria.notes == "Con terraza"
     assert float(criteria.min_m2) == 300
 
-    follow_ups = [f for f in stored.follow_ups if f.action_type == FollowUpActionType.CALIFICADO]
-    assert len(follow_ups) == 1
-    assert follow_ups[0].notes.startswith("Perfil de búsqueda: Piso · Centro, Jaen · 2-3 dorm")
-    assert "Imprescindibles: Con terraza" in follow_ups[0].notes
+    # Ya no CALIFICADO (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.3). La primera vez que
+    # el perfil queda completo es «Contactado»; las ediciones, «Perfil guardado»
+    # (PLAN_PERFIL_OBLIGATORIO.md, decisión 5). Un solo seguimiento.
+    assert not [f for f in stored.follow_ups if f.action_type == FollowUpActionType.CALIFICADO]
+    assert [f.action_type for f in stored.follow_ups] == [FollowUpActionType.CONTACTADO]
+    note = stored.follow_ups[0].notes
+    assert note.startswith("Perfil de búsqueda: Piso · Centro, Jaen · 2-3 dorm")
+    assert "Imprescindibles: Con terraza" in note
     assert stored.status == AlertStatus.IN_PROGRESS
 
     # Cuenta como gestión: desbloquea la cola
@@ -397,6 +458,78 @@ def test_perfil_rechazado_a_otro_agente_y_con_alerta_bloqueada(env):
     assert _flash(response) == {"category": "warning", "message": LOCKED_TEXT}
     assert env.db.query(BuyerSearchCriteria).count() == 0
     assert _reload(env, alert).follow_ups == []
+
+
+def _add_follow_up(env, user, alert, action_type, notes=None, form=None):
+    """POST /alerts/{id}/follow-up; `form`: campos del perfil (Contactado)."""
+    from app.web.routes.alerts import add_follow_up
+    body = dict(form or {})
+    body.update(action_type=action_type, notes=notes or "")
+    request = _request(env, user, f"/alerts/{alert.id}/follow-up", "POST", form=body)
+    return asyncio.run(add_follow_up(alert.id, request, action_type=action_type, notes=notes,
+                                     next_action_date=None, db=env.db))
+
+
+# Perfil mínimo tal como lo envía el modal de seguimiento al elegir «Contactado»
+CONTACT_PROFILE = {"zones": ["Centro"], "property_type": "Piso", "max_price": "150000"}
+
+
+def test_formulario_rechaza_etapas_heredadas(env):
+    alert = _property_alert(env, "ana", "ana")
+    for legacy, label in (("PRIMERA_LLAMADA", "Primera Llamada"), ("CALIFICADO", "Calificado")):
+        response = _add_follow_up(env, env.users["ana"], alert, legacy)
+        assert response.headers["location"] == f"/alerts/{alert.id}"
+        assert _flash(response) == {"category": "error",
+                                    "message": f"«{label}» ya no se registra como seguimiento. Elige otra etapa."}
+    assert _reload(env, alert).follow_ups == []
+    # Las propias del sistema tampoco se admiten por el formulario
+    response = _add_follow_up(env, env.users["ana"], alert, FollowUpActionType.PERFIL_GUARDADO)
+    assert _flash(response) == {"category": "error", "message": "Tipo de acción no válido"}
+
+    # Contactado lleva el perfil dentro (PLAN_PERFIL_OBLIGATORIO.md)
+    response = _add_follow_up(env, env.users["ana"], alert, "CONTACTADO", form=CONTACT_PROFILE)
+    assert _flash(response)["category"] == "success"
+    assert [f.action_type for f in _reload(env, alert).follow_ups] == ["CONTACTADO"]
+
+
+def test_historial_antiguo_se_pinta_y_el_select_no_ofrece_heredadas(env):
+    from app.models.alert_follow_up import AlertFollowUp
+
+    alert = _property_alert(env, "ana", "ana")
+    for i, action in enumerate(("PRIMERA_LLAMADA", "CALIFICADO", "PERFIL_GUARDADO")):
+        env.db.add(AlertFollowUp(alert_id=alert.id, action_type=action, created_by=env.users["ana"].id,
+                                 created_at=T0 + timedelta(hours=i + 1)))
+    env.db.commit()
+
+    response, html = _detail(env, env.admin, alert)
+    assert response.status_code == 200
+    assert "Primera Llamada" in html and "Calificado" in html and "Perfil guardado" in html
+    assert "bg-indigo-100 text-indigo-700" in html
+    assert 'value="PRIMERA_LLAMADA"' not in html and 'value="CALIFICADO"' not in html
+    assert 'value="PERFIL_GUARDADO"' not in html
+    assert '<option value="SIN_RESPUESTA">' in html and '<option value="CONTACTADO">' in html
+    # El JS de notas obligatorias conoce los cuatro cierres
+    assert '"NO_APTO_PROPIETARIO"' in html
+
+
+def test_perfil_guardado_no_avanza_la_etapa_del_listado(env):
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.web.routes.alerts import alerts_page
+
+    alert = _search_alert(env, "ana")
+    env.db.add(AlertFollowUp(alert_id=alert.id, action_type="CONTACTADO", created_by=env.users["ana"].id,
+                             created_at=T0 + timedelta(hours=1)))
+    env.db.commit()
+    # Perfil ya completo: guardarlo otra vez es una edición («Perfil guardado»)
+    _complete_profile(env)
+    assert _save_profile(env, env.users["ana"], alert).status_code == 302
+    assert [f.action_type for f in _reload(env, alert).follow_ups].count("PERFIL_GUARDADO") == 1
+
+    response = asyncio.run(alerts_page(
+        _request(env, env.users["ana"], "/alerts"), q="", status_filter=[], agent_id=None,
+        page=None, per_page=None, b_q="", b_page=None, db=env.db,
+    ))
+    assert response.context["alert_stages"][alert.id]["value"] == "CONTACTADO"
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +559,10 @@ def test_buscador_con_alert_id_devuelve_toda_la_empresa(env):
         response = asyncio.run(search_properties(request, q="Piso", alert_id=alert_id, db=env.db))
         return sorted(r["title"] for r in json.loads(response.body)["results"])
 
+    # Sin perfil completo no se puede asociar: regla de siempre (PLAN_PERFIL_OBLIGATORIO.md)
+    assert titles(env.users["ana"], str(alert.id)) == ["Piso Centro"]
+
+    _complete_profile(env)
     assert titles(env.users["ana"]) == ["Piso Centro"]                      # regla de siempre
     assert titles(env.users["ana"], str(alert.id)) == ["Piso Bea", "Piso Centro"]
     assert titles(env.users["bea"], str(alert.id)) == ["Piso Bea"]          # no es su búsqueda
@@ -437,6 +574,7 @@ def test_buscador_con_alert_id_devuelve_toda_la_empresa(env):
 
 def test_asociar_y_cambiar_propiedad(env):
     alert = _search_alert(env, "ana")
+    _complete_profile(env)
 
     response = _link(env, env.users["ana"], alert, "bea")
     assert response.headers["location"] == f"/alerts/{alert.id}"
@@ -464,6 +602,7 @@ def test_asociar_y_cambiar_propiedad(env):
 def test_asociar_duplicado_exige_confirmacion(env):
     alert = _search_alert(env, "ana")
     other = _property_alert(env, "bea", "bea", created_at=T0 - timedelta(days=1))
+    _complete_profile(env)
 
     response = _link(env, env.users["ana"], alert, "bea")
     assert response.headers["location"] == (
@@ -484,12 +623,20 @@ def test_asociar_duplicado_exige_confirmacion(env):
     assert f"alerta abierta #{other.id}" in stored.message
 
 
-def test_alerta_con_referencia_no_cambia_de_propiedad(env):
+def test_alerta_con_referencia_cambia_de_propiedad_solo_con_perfil(env):
+    """PLAN_PERFIL_OBLIGATORIO.md: el origen ya no cuenta; el perfil completo sí."""
     alert = _property_alert(env, "ana", "ana")
     response = _link(env, env.users["ana"], alert, "bea")
-    assert _flash(response) == {"category": "error",
-                                "message": "Solo las alertas sin referencia pueden asociar o cambiar de propiedad"}
+    assert response.headers["location"] == f"/alerts/{alert.id}?step=profile#propuesta"
+    assert _flash(response) == {"category": "error", "message": "Registra primero el perfil del comprador"}
     assert _reload(env, alert).property_id == env.props["ana"].id
+
+    _complete_profile(env)
+    response = _link(env, env.users["ana"], alert, "bea")
+    assert _flash(response)["category"] == "success"
+    stored = _reload(env, alert)
+    assert stored.property_id == env.props["bea"].id and stored.origin == AlertOrigin.PROPERTY
+    assert stored.agent_id == env.agents["ana"].id
 
 
 def test_metricas_por_agente_cuentan_busquedas_sin_propiedad(env):
@@ -554,12 +701,15 @@ def test_detalle_tres_pasos_perfil_sin_m2_sugerencias_y_cambio(env):
     for label in ("1. Contactar", "2. Perfil", "3. Propuesta", "Búsqueda general", "Registrar seguimiento"):
         assert label in html, label
 
-    # Perfil: formulario inline sin m², con la operación de la alerta como texto
+    # Perfil: formulario inline sin m², con la operación de la alerta precargada y
+    # editable (PLAN_PERFIL_UBICACION.md: si cambia, cambia la de la alerta)
     response, html = _detail(env, env.users["ana"], alert, step="profile")
     assert f'action="/alerts/{alert.id}/search-profile"' in html
     assert "Guardar perfil y ver propiedades" in html
     assert 'name="min_m2"' not in html and 'name="max_m2"' not in html and "m²" not in html
-    assert 'name="business_type"' not in html and "La de la alerta" in html
+    assert '<select name="business_type" id="spBusinessType" required' in html
+    assert '<option value="Venta" selected>Venta</option>' in html
+    assert "Si la cambias, cambia la operación de la alerta" in html
     assert 'name="zones" value="Centro"' in html
 
     # Tras guardar el perfil: Propuesta con sugerencias de cualquier agente
@@ -574,11 +724,12 @@ def test_detalle_tres_pasos_perfil_sin_m2_sugerencias_y_cambio(env):
     assert f'href="/properties/{env.props["bea"].id}"' not in html
     assert "¿No está en la lista?" in html
 
-    # Tras asociar: tarjeta de propiedad y "Cambiar propiedad"; sin pasos
+    # Tras asociar: tarjeta de propiedad y "Cambiar propiedad"; los pasos siguen
+    # (PLAN_PERFIL_OBLIGATORIO.md: en todas las alertas), en Propuesta
     _link(env, env.users["ana"], alert, "bea")
     response, html = _detail(env, env.users["ana"], alert)
-    assert response.context["show_steps"] is False
-    assert "Piso Bea" in html and "Cambiar propiedad" in html and "1. Contactar" not in html
+    assert response.context["show_steps"] is True and response.context["step"] == "proposal"
+    assert "Piso Bea" in html and "Cambiar propiedad" in html and "1. Contactar" in html
 
     # "Cambiar propiedad": paso Propuesta con la actual marcada
     response, html = _detail(env, env.users["ana"], alert, step="proposal")

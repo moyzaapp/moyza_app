@@ -3,41 +3,68 @@
   Orden de lectura (charts.md): KPIs, lo que hay que hacer hoy, tendencia, cartera.
 #}
 {% import "components/ui_macros.html" as ui %}
-{% from "dashboard/components/kpi.html" import metric_kpi %}
+{% from "dashboard/components/kpi.html" import delta_tag %}
+{% from "dashboard/components/progress_ring.html" import progress_ring %}
 {% from "dashboard/components/trend_chart.html" import trend_chart %}
 {% from "dashboard/components/notification_item.html" import notification_item %}
-{% set period_word = {'WEEKLY': 'semana', 'MONTHLY': 'mes', 'YEARLY': 'año'}[period.period_type] %}
-{% set this_period = {'WEEKLY': 'esta semana', 'MONTHLY': 'este mes', 'YEARLY': 'este año'}[period.period_type] %}
-{% set prev_period = {'WEEKLY': 'la semana anterior', 'MONTHLY': 'el mes anterior', 'YEARLY': 'el año anterior'}[period.period_type] %}
+{% set text_tones = {'green': 'text-green-700', 'amber': 'text-amber-700', 'red': 'text-red-700', 'gray': 'text-gray-500'} %}
 
-{# ---------------------------------------------------------------- KPIs #}
-<section aria-labelledby="kpisTitle" class="space-y-3">
-    <h2 id="kpisTitle" class="text-xs font-semibold uppercase tracking-wide text-gray-500">
-        Mis resultados · {{ period.label }}
-    </h2>
-    <div class="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        {% for kpi in home.objective_kpis %}{{ metric_kpi(kpi) }}{% endfor %}
-        {% for kpi in home.activity_kpis %}{{ metric_kpi(kpi) }}{% endfor %}
-
+{# ---------------------------------------------------------------- Mis resultados: semana y mes a la vez (PLAN_INICIO_SEMANA_MES.md) #}
+{% macro results_block(block, title, this_word, heading_id) -%}
+<section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="{{ heading_id }}">
+    <header class="flex items-start justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
+        <div class="min-w-0">
+            <h3 id="{{ heading_id }}" class="text-base font-bold text-gray-900">{{ title }}</h3>
+            <p class="text-xs text-gray-500 mt-0.5">{{ block.period.label }}</p>
+        </div>
         {# Cumplimiento global + puesto sin nombres (decisión §6-6) #}
-        {% set c = home.completion %}
-        {% if c is not none %}
-            {% set c_tone = 'green' if c >= 100 else ('amber' if c >= 60 else 'red') %}
-            {% if home.ranking %}
-                {% set c_hint = "Estás en el puesto " ~ home.ranking.position ~ " de " ~ home.ranking.total %}
-            {% else %}
-                {% set c_hint = "Media de tus objetivos de " ~ this_period %}
-            {% endif %}
-            {{ ui.kpi_card("Cumplimiento global", c ~ " %", tone=c_tone, hint=c_hint) }}
+        {% if block.completion is not none %}
+            {% set c = block.completion %}
+            <span class="shrink-0">{{ ui.badge(c ~ " % global", 'green' if c >= 100 else ('amber' if c >= 60 else 'red'), dot=True) }}</span>
         {% else %}
-            {{ ui.kpi_card("Cumplimiento global", "—", tone="gray", hint="Sin objetivos " ~ this_period ~ "; los define el administrador") }}
+            <span class="shrink-0">{{ ui.badge("Sin objetivos", "gray") }}</span>
+        {% endif %}
+    </header>
+    <div class="p-4 sm:p-6">
+        {# Clases completas (no dinámicas) para que el build de Tailwind las encuentre #}
+        {% set cols_class = {1: 'sm:grid-cols-1', 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3'}.get(block.objective_kpis | length, 'sm:grid-cols-3') %}
+        <ul class="grid grid-cols-1 {{ cols_class }} gap-3">
+            {% for kpi in block.objective_kpis %}
+            <li class="flex items-center gap-3 rounded-xl border border-gray-200 p-3">
+                <span class="shrink-0">{{ progress_ring(kpi.pct, kpi.tone, kpi.label ~ ": " ~ (kpi.pct ~ " % del objetivo" if kpi.target else "sin objetivo"), size=48) }}</span>
+                <div class="min-w-0">
+                    <p class="text-xs text-gray-500 truncate">{{ kpi.label }}</p>
+                    <p class="text-lg font-bold text-gray-900 tabular-nums leading-tight">
+                        {{ kpi.value }}{% if kpi.target %}<span class="text-sm font-medium text-gray-500"> / {{ kpi.target }}</span>{% endif %}
+                    </p>
+                    <p class="text-xs flex flex-wrap items-center gap-x-2">
+                        {% if kpi.target %}<span class="font-medium {{ text_tones[kpi.tone] }}">{{ kpi.pct }} %</span>{% else %}<span class="text-gray-500">Sin objetivo</span>{% endif %}
+                        {{ delta_tag(kpi.delta) }}
+                    </p>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        <p class="text-xs text-gray-500 mt-4 pt-3 border-t border-gray-100 flex flex-wrap gap-x-4 gap-y-1">
+            {% for kpi in block.activity_kpis %}
+            <span>{{ kpi.label }} <span class="font-medium text-gray-700 tabular-nums">{{ kpi.value }}</span> {{ delta_tag(kpi.delta) }}</span>
+            {% endfor %}
+            {% if block.ranking %}<span>Puesto <span class="font-medium text-gray-700">{{ block.ranking.position }} de {{ block.ranking.total }}</span></span>{% endif %}
+        </p>
+        {% if not block.has_target %}
+        <p class="text-xs text-gray-500 mt-2">Sin objetivos {{ this_word }}; los define el administrador.</p>
         {% endif %}
     </div>
-    <p class="text-xs text-gray-500">
-        Con objetivo {{ this_period }}:
-        {% for key in home.objective_keys %}{{ {'captaciones_crm': 'captaciones', 'bajadas': 'bajadas de precio', 'cierres': 'cierres'}[key] }}{% if not loop.last %}, {% endif %}{% endfor %}.
-        La flecha compara con {{ prev_period }}.
-    </p>
+</section>
+{%- endmacro %}
+
+<section aria-labelledby="kpisTitle" class="space-y-3">
+    <h2 id="kpisTitle" class="text-xs font-semibold uppercase tracking-wide text-gray-500">Mis resultados</h2>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {{ results_block(home.week, "Esta semana", "esta semana", "weekResultsTitle") }}
+        {{ results_block(home.month, "Este mes", "este mes", "monthResultsTitle") }}
+    </div>
+    <p class="text-xs text-gray-500">Anillo y % en las métricas con objetivo (semana: captaciones y bajadas; mes: también cierres). La flecha compara con la semana o el mes anterior.</p>
 </section>
 
 {# ---------------------------------------------------------------- Novedades y hoy #}
@@ -120,7 +147,8 @@
         </ul>
         {% endif %}
         {% if home.pending_buyers %}
-        {# Compradores que requieren atención en horas hábiles (PLAN_ALERTAS_DIAS_HABILES.md) #}
+        {# Compradores que requieren atención en horas hábiles: volver a llamar y sin gestión
+           (PLAN_RECORDATORIO_SIN_RESPUESTA.md) #}
         <div class="px-4 sm:px-6 py-3 border-t border-gray-200">
             <button type="button" data-modal-open="pendingBuyersModal" class="text-sm font-medium text-red-700 hover:text-red-800 hover:underline underline-offset-2">
                 {{ home.pending_buyers | length }} {{ 'comprador requiere' if home.pending_buyers | length == 1 else 'compradores requieren' }} atención
@@ -179,25 +207,36 @@
     <section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="notesTitle">
         <header class="px-4 sm:px-6 py-4 border-b border-gray-200">
             <h2 id="notesTitle" class="text-lg font-bold text-gray-900">Observaciones del administrador</h2>
-            <p class="text-xs text-gray-500 mt-0.5">{{ period.label }}</p>
+            <p class="text-xs text-gray-500 mt-0.5">Semana y mes en curso</p>
         </header>
-        {% if home.admin_notes %}
-        <div class="p-4 sm:p-6">
-            <p class="text-sm text-gray-700 whitespace-pre-line">{{ home.admin_notes }}</p>
+        {% if home.week.admin_notes or home.month.admin_notes %}
+        <div class="p-4 sm:p-6 space-y-4">
+            {% if home.week.admin_notes %}
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Esta semana · {{ home.week.period.label }}</p>
+                <p class="text-sm text-gray-700 whitespace-pre-line">{{ home.week.admin_notes }}</p>
+            </div>
+            {% endif %}
+            {% if home.month.admin_notes %}
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Este mes · {{ home.month.period.label }}</p>
+                <p class="text-sm text-gray-700 whitespace-pre-line">{{ home.month.admin_notes }}</p>
+            </div>
+            {% endif %}
         </div>
         {% else %}
-            {{ ui.empty_state("Sin observaciones en este período", "Cuando el administrador te deje una nota sobre tu " ~ period_word ~ ", la verás aquí.") }}
+            {{ ui.empty_state("Sin observaciones esta semana ni este mes", "Cuando el administrador te deje una nota sobre tu semana o tu mes, la verás aquí.") }}
         {% endif %}
     </section>
 </div>
 
-{# ---------------------------------------------------------------- Ventana de compradores sin atender (§3.4) #}
+{# ---------------------------------------------------------------- Ventana de compradores sin atender (§3.4; se abre al iniciar sesión) #}
 {% if home.pending_buyers %}
 {% set n = home.pending_buyers | length %}
 {% call ui.modal("pendingBuyersModal", "Compradores que requieren atención", size="lg",
-                 subtitle=(home.pending_summary ~ " · horas hábiles, sin fines de semana ni festivos de Jaén")) %}
-<div data-dismiss-daily="pending_buyers_dismissed">
-    <div class="p-6">
+                 subtitle=(home.pending_summary ~ " · en horas hábiles")) %}
+<div data-auto-open-on-login>
+    <div class="p-4 sm:p-6">
     <ul class="divide-y divide-gray-100 -my-2">
         {% for b in home.pending_buyers %}
         <li class="py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
@@ -205,9 +244,9 @@
                 <p class="text-sm font-medium text-gray-900 truncate">{{ b.buyer_name or 'Comprador sin nombre' }}</p>
                 <p class="text-xs text-gray-500">
                     {% if b.buyer_phone and b.buyer_phone != '—' %}<a href="{{ b.buyer_phone | tel_href }}" class="hover:text-blue-600">{{ b.buyer_phone | phone_display }}</a> · {% endif %}
-                    <span class="font-medium {{ 'text-red-700' if b.rule == 'no_action' else 'text-amber-700' }}">{{ b.text }}</span>
+                    <span class="font-medium {{ 'text-red-700' if b.tone == 'red' else 'text-amber-700' }}">{{ b.text }}</span>
                 </p>
-                <p class="text-xs text-gray-500">Venció el {{ b.due_label }}</p>
+                <p class="text-xs text-gray-500">{% if b.rule == 'callback' %}Sin respuesta desde el {{ b.since_label }} · venció{% else %}Venció{% endif %} el {{ b.due_label }}</p>
             </div>
             {{ ui.button("Gestionar", "secondary", href="/alerts/" ~ b.alert_id, full_mobile=True) }}
         </li>

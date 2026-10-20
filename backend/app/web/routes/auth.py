@@ -145,6 +145,19 @@ async def login(
         samesite="lax"
     )
 
+    # Marca de "acabo de iniciar sesión": el Inicio la lee desde JS para abrir
+    # el aviso de compradores sin atender una vez por sesión, y la borra.
+    # No es httponly a propósito (la consume el navegador), caduca en 2 minutos.
+    response.set_cookie(
+        key="moyza_welcome",
+        value="1",
+        max_age=120,
+        httponly=False,
+        secure=False,
+        samesite="lax",
+        path="/",
+    )
+
     return response
 
 

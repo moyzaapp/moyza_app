@@ -51,6 +51,10 @@ class NotificationKind:
     ALERT_ASSIGNED = "alert_assigned"
     # Compradores que requieren atención (PLAN_ALERTAS_DIAS_HABILES.md §2.3)
     BUYER_NO_ACTION = "buyer_no_action"
+    # PLAN_RECORDATORIO_SIN_RESPUESTA.md: «volver a llamar» tras «Sin respuesta»
+    BUYER_CALLBACK_DUE = "buyer_callback_due"
+    # Regla retirada («sin avance de Primera llamada»): solo para pintar el
+    # historial y resolver las antiguas
     BUYER_STAGE_STALL = "buyer_stage_stall"
 
     # Icono (dashboard/components/icons.html) y tono por tipo
@@ -63,6 +67,7 @@ class NotificationKind:
         ADMIN_NOTE_ADDED: ("chat", "gray"),
         ALERT_ASSIGNED: ("user", "blue"),
         BUYER_NO_ACTION: ("inbox", "amber"),
+        BUYER_CALLBACK_DUE: ("clock", "amber"),
         BUYER_STAGE_STALL: ("user", "amber"),
     }
 
@@ -384,15 +389,18 @@ def run_follow_up_due(db: Session, now: Optional[datetime] = None) -> int:
 
 def buyer_kind(rule: str) -> str:
     """Tipo de notificación de una regla de `buyer_attention_service`."""
-    from app.services.buyer_attention_service import RULE_NO_ACTION
-    return NotificationKind.BUYER_NO_ACTION if rule == RULE_NO_ACTION else NotificationKind.BUYER_STAGE_STALL
+    from app.services.buyer_attention_service import RULE_CALLBACK
+    return NotificationKind.BUYER_CALLBACK_DUE if rule == RULE_CALLBACK else NotificationKind.BUYER_NO_ACTION
 
 
-BUYER_KINDS = (NotificationKind.BUYER_NO_ACTION, NotificationKind.BUYER_STAGE_STALL)
+# Tipos que `resolve_buyer_notifications` revisa. `buyer_stage_stall` es de la
+# regla retirada «sin avance»: ya no se crea, solo se resuelve si queda alguno.
+BUYER_KINDS = (NotificationKind.BUYER_NO_ACTION, NotificationKind.BUYER_CALLBACK_DUE,
+               NotificationKind.BUYER_STAGE_STALL)
 
 
 def buyer_reminder_due(last_created_at: Optional[datetime], now: datetime, repeat_business_days: int) -> bool:
-    """¿Toca avisar otra vez? Cadencia de la campana (decisión 7).
+    """¿Toca avisar otra vez de R1? Cadencia de la campana (decisión 7).
 
     `last_created_at`: el último aviso de esa alerta y regla **del vencimiento
     en curso** (creado desde `due_at`), o None si aún no hay ninguno. Se
@@ -406,17 +414,39 @@ def buyer_reminder_due(last_created_at: Optional[datetime], now: datetime, repea
     return business_hours_between(last_created_at, now) >= max(repeat_business_days, 1) * 24
 
 
+def _buyer_notification_text(item) -> tuple[str, str]:
+    """(título, cuerpo) del aviso de una regla vencida."""
+    name = item.alert.lead_name or "Comprador"
+    if item.is_callback:
+        body = (f"Intento {item.attempts} de {item.max_attempts} sin respuesta desde el {item.since_label}"
+                f" · venció el {item.due_label}.")
+        if item.is_last_attempt:
+            body += " Tercer intento: cierra la alerta como «Sin interés» si no contesta."
+        else:
+            body += " Vuelve a llamar y registra el seguimiento."
+        return f"Vuelve a llamar · {name}", body
+    return (f"Comprador sin gestión · {name}",
+            f"{item.text} · venció el {item.due_label}. Registra un seguimiento.")
+
+
 def run_buyer_attention(db: Session, items: Iterable, now: Optional[datetime] = None,
                         repeat_business_days: Optional[int] = None) -> int:
     """Una notificación por alerta vencida (`items` de `find_buyers_needing_attention`).
 
-    Deduplicación por alerta + regla + vencimiento (`due_at`): solo cuentan
-    los avisos de esa alerta y regla creados desde `due_at` (los de un ciclo
-    anterior, antes de una gestión o una reasignación, no). Se avisa al
-    cruzar el umbral y otra vez cuando han pasado `repeat_business_days`
-    días hábiles desde el último aviso, lo haya leído o no. Al repetir, el
-    aviso anterior que siga sin leer se marca leído para que no se acumulen.
-    Devuelve cuántas se crearon. Solo in-app: sin email ni WhatsApp.
+    - R3 «volver a llamar» (`buyer_callback_due`): **una por intento**, sin
+      repetición. El intento lo marca el último «Sin respuesta» (`item.since`):
+      si ya hay un aviso de esa alerta creado desde entonces, no se crea otro.
+      Un «Sin respuesta» nuevo abre el intento siguiente y su propio aviso.
+    - R1 «sin gestión» (`buyer_no_action`): deduplicación por alerta +
+      vencimiento (`due_at`): solo cuentan los avisos creados desde `due_at`
+      (los de un ciclo anterior, antes de una gestión o una reasignación, no).
+      Se avisa al cruzar el umbral y otra vez cuando han pasado
+      `repeat_business_days` días hábiles desde el último aviso, lo haya leído
+      o no. Al repetir, el aviso anterior que siga sin leer se marca leído para
+      que no se acumulen.
+
+    Como una alerta solo cae en una regla, nunca recibe dos avisos distintos a
+    la vez. Devuelve cuántas se crearon. Solo in-app: sin email ni WhatsApp.
     """
     from app.core.config import settings
 
@@ -429,34 +459,31 @@ def run_buyer_attention(db: Session, items: Iterable, now: Optional[datetime] = 
         try:
             users = []
             for user in users_for_agent(db, alert.agent):
-                last = db.query(func.max(Notification.created_at)).filter(
+                same = db.query(func.max(Notification.created_at)).filter(
                     Notification.user_id == user.id,
                     Notification.company_id == alert.company_id,
                     Notification.kind == kind,
                     Notification.entity_type == "alert",
                     Notification.entity_id == alert.id,
-                    Notification.created_at >= item.due_at,
-                ).scalar()
-                if buyer_reminder_due(last, now, repeat):
+                )
+                if item.is_callback:
+                    if same.filter(Notification.created_at >= item.since).scalar() is None:
+                        users.append(user)
+                elif buyer_reminder_due(same.filter(Notification.created_at >= item.due_at).scalar(), now, repeat):
                     users.append(user)
             if not users:
                 continue
-            # El aviso anterior que siga sin leer queda superado por el nuevo
+            # El aviso anterior de la alerta que siga sin leer (otro intento, o
+            # el R1 de hace 2 días hábiles) queda superado por el nuevo
             db.query(Notification).filter(
                 Notification.user_id.in_([u.id for u in users]),
                 Notification.company_id == alert.company_id,
-                Notification.kind == kind,
+                Notification.kind.in_(BUYER_KINDS),
                 Notification.entity_type == "alert",
                 Notification.entity_id == alert.id,
                 Notification.read_at.is_(None),
             ).update({Notification.read_at: now}, synchronize_session=False)
-            name = alert.lead_name or "Comprador"
-            if kind == NotificationKind.BUYER_NO_ACTION:
-                title = f"Comprador sin gestión · {name}"
-                body = f"{item.text} · venció el {item.due_label}. Registra un seguimiento."
-            else:
-                title = f"Comprador sin avanzar · {name}"
-                body = f"{item.text} · venció el {item.due_label}."
+            title, body = _buyer_notification_text(item)
             created += len(notify(
                 db,
                 users=users,
@@ -478,10 +505,11 @@ def resolve_buyer_notifications(db: Session, items: Optional[Iterable] = None, a
                                 now: Optional[datetime] = None) -> int:
     """Marca leídas las notificaciones de compradores que ya no aplican.
 
-    Una notificación de `buyer_no_action` / `buyer_stage_stall` sin leer deja
+    Una notificación de `buyer_no_action` / `buyer_callback_due` sin leer deja
     de aplicar si la alerta ya no tiene esa regla vencida (se cerró, se
-    gestionó, avanzó de etapa, se reasignó o se borró) o si su reloj se
-    reinició después de crearla. No se borran: quedan en el historial como
+    gestionó, se reasignó o se borró) o si su reloj se reinició después de
+    crearla (otro «Sin respuesta» abre un intento nuevo). Las antiguas
+    `buyer_stage_stall` ya no aplican nunca. No se borran: quedan en el historial como
     leídas y dejan de contar en la campana.
 
     - Con `items` (la pasada completa del job): revisa todas.

@@ -107,6 +107,40 @@ Sin sombra. Si la tarjeta es clicable entera, es un `<a class="block ... hover:b
 - Listados largos (más de 50 filas): paginar en servidor, no `max-h`.
 - Alternativa móvil para tablas con muchas columnas: lista de tarjetas con `block lg:hidden` + tabla `hidden lg:block` (patrón de `auth/home.html`). Vale la pena en Propiedades y Compradores.
 
+### Tabla ordenable por columna
+
+`ui.js` (cargado en `base.html`) ordena en el navegador cualquier `table.js-sortable`:
+
+```html
+<table class="w-full text-sm js-sortable" data-table-id="teamTable">
+    <thead>
+        <tr>
+            <th scope="col" data-sort-type="text" data-sort-key="agent">Agente</th>
+            <th scope="col" data-sort-type="number" data-sort-key="capt">Capt.</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td data-sort-value="Laura García">Laura García</td>
+            <td data-sort-value="50">1 / 2 · 50 %</td>
+        </tr>
+    </tbody>
+</table>
+```
+
+- `data-sort-type` en el `th` lo hace ordenable (`number` o `text`); el indicador ↕ / ↑ / ↓,
+  `aria-sort`, el foco y Enter / espacio los pone `ui.js`.
+- `data-sort-value` en cada `td`: lo que se compara, no lo que se ve. Vacío = sin valor,
+  siempre al final. En métricas con objetivo se ordena por %, no por valor absoluto.
+- Primer clic: números de mayor a menor, texto de A a Z.
+- `data-table-id` recuerda el último orden en el navegador (`localStorage sort:<id>`).
+- Cabecera con dos filas (`colspan` / `rowspan`): añade `data-sort-col="N"` con el índice real
+  de la columna en el cuerpo. Filas que no deben ordenarse (estado vacío): `data-no-sort`.
+- El orden inicial sigue siendo el del servidor; la ordenación es una vista, no un filtro.
+
+Ejemplos: `properties/table.html` y `dashboard/_admin.html` (tabla "Cumplimiento del
+equipo"; en métricas con objetivo ordena por % y en las demás por valor).
+
 ## Badge
 
 ```html
@@ -176,7 +210,13 @@ el botón sin JS. El título se puede cambiar con `document.getElementById('clie
 `ui.js` se carga una vez en `base.html` (en `<head>`). No lo incluyas en las páginas.
 
 Un modal que aparece al cargar (error devuelto por el servidor): renderízalo con el macro y
-ábrelo en `DOMContentLoaded` (ver `clients/home.html`).
+ábrelo en `DOMContentLoaded` (ver `clients/home.html`). Un modal que debe salir una vez
+por inicio de sesión (aviso de compradores sin atender): el login deja la cookie
+`moyza_welcome`, y `dashboard.js` abre los `[data-auto-open-on-login]` y la borra.
+
+El macro lleva `!mt-0` porque un modal dentro de un contenedor `space-y-*` recibiría
+`margin-top` y el `fixed inset-0` nacería desplazado (pasó en el Inicio). Cuerpo y pie
+usan `p-4 sm:p-6` para que a 375 px quede sitio para el contenido.
 
 ## Formulario
 

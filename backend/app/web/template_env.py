@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 
+from app.core import geo
 from app.core.config import settings
 from app.core.constants import AlertOrigin, BusinessType, PhoneCountryCodes
 from app.core.phone import phone_display, split_phone, tel_href, whatsapp_url
@@ -106,5 +107,9 @@ templates.env.globals["visit_sheet_whatsapp_enabled"] = settings.VISIT_SHEET_WHA
 templates.env.globals["BusinessType"] = BusinessType
 # Origen de una alerta: con referencia ('property') o búsqueda general ('search')
 templates.env.globals["AlertOrigin"] = AlertOrigin
+# Provincia según el código postal (PLAN_PERFIL_UBICACION.md): tabla para la
+# ayuda "Provincia (según CP)" del formulario de propiedad
+templates.env.globals["geo_cp"] = {"provincias": geo.PROVINCIAS_POR_CP, "spain_aliases": geo.SPAIN_ALIASES,
+                                   "no_province": geo.NO_PROVINCE}
 # Tailwind: <link> al CSS compilado si existe; si es None, base.html carga tailwind.js
 templates.env.globals["tailwind_css_version"] = tailwind_css_version

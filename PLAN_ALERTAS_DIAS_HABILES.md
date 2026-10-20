@@ -2,6 +2,9 @@
 
 Fecha: 2026-10-18 · Rama `63-agregar-moes`
 
+> **Ajustado el 2026-10-19 por `PLAN_RECORDATORIO_SIN_RESPUESTA.md`: R2 eliminada, R3 "volver a llamar"
+> añadida; R1 y el calendario hábil se mantienen.**
+
 > **Prerrequisito:** hay trabajo sin commitear de otra sesión (PLAN_ALERTA_COMO_NUEVA.md,
 > `services/alert_view.py`, cambios en `buyer_reminder_service.py`, `notification_service.py`,
 > `dashboard_service.py`, `constants.py`, `property_alert.py`…). Este plan toca esos mismos archivos.
@@ -13,7 +16,7 @@ Fecha: 2026-10-18 · Rama `63-agregar-moes`
 | Aviso | Regla | Canal | Cuándo | Archivo |
 |---|---|---|---|---|
 | **Recordatorio "sin gestión"** | Alertas en estado **`PENDING`** cuya última gestión (último seguimiento, o la creación/asignación si no hay) tiene más de **48 h de reloj** (`BUYER_REMINDER_HOURS`). | Email por agente y empresa, con tabla de compradores. Se repite **cada día** mientras siga igual (no hay "ya avisado"). | Todos los días a las 06:00 UTC, incluidos sábados, domingos y festivos. | `services/buyer_reminder_service.py`, `jobs/scheduler.py:92-108, 247-255` |
-| Modal y "Hoy y pendiente" del Inicio (agente) y "Requiere atención" (admin) | La misma regla de 48 h. | En pantalla, al entrar al Inicio (modal una vez al día). | Al cargar `/dashboard`. | `services/dashboard_service.py:473, 747` |
+| Modal y "Hoy y pendiente" del Inicio (agente) y "Requiere atención" (admin) | La misma regla de 48 h. | En pantalla, al entrar al Inicio (modal una vez por inicio de sesión; ver PLAN_INICIO_SEMANA_MES.md). | Al cargar `/dashboard`. | `services/dashboard_service.py:473, 747` |
 | "Compradores abandonados" (admin) | `PENDING` con más de 7 días desde la asignación. | Inicio y Resultados Comerciales. | Al cargar. | `DashboardThresholds.ABANDONED_BUYER_DAYS` |
 | Comprador asignado | Al asignar o reasignar a un agente distinto del captador. | In-app (campana). | En el momento. | `alert_assignment_service.py` |
 | Seguimiento vencido | Seguimientos con `next_action_date` hoy o pasada. | In-app. | Job diario 08:00 Madrid. | `notification_service.py:330+` |

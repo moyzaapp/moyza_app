@@ -102,3 +102,104 @@ Qué cambiaría en código:
   reconstruir alertas hijas por propiedad si se adopta la alternativa del §2.
 - `property_alerts.company_id`: la alerta ya no depende de la propiedad para
   saber su empresa.
+
+## 5. 2026-10-19: perfil y propuesta en todas las alertas; perfil obligatorio al contactar
+
+Plan: `PLAN_PERFIL_OBLIGATORIO.md`. Motivo: un comprador entra por una
+propiedad concreta y después hay que ofrecerle otras que se ajusten a lo que
+puede, y el perfil no se estaba tomando de forma sistemática.
+
+Decisiones cerradas con el usuario:
+
+1. **Perfil, Propuesta y "Cambiar propiedad" en todas las alertas**, también
+   en las creadas con referencia. El agente que atiende conserva la alerta
+   aunque cambie a una propiedad de otro agente (como en las búsquedas).
+2. **El perfil es obligatorio y se toma al contactar.** El seguimiento
+   **Contactado** lleva dentro los campos del perfil. Sin perfil completo no
+   se puede registrar **Visita programada**, **Oferta** ni **Cerrado (éxito)**
+   (`FollowUpActionType.PROFILE_REQUIRED_STAGES`), ni usar la Propuesta ni
+   "Cambiar propiedad".
+3. **Se registran sin perfil**: Sin respuesta y los cierres negativos (Sin
+   interés, Sin solvencia económica, No apto para el propietario).
+4. **Perfil mínimo completo** = tipo de inmueble + precio máximo + al menos
+   una zona o una ciudad. Una sola definición:
+   `buyer_matching.profile_is_complete` / `missing_profile_fields` (rutas,
+   plantillas y tests). Dormitorios, baños, precio mínimo e imprescindibles
+   son opcionales; la operación viene de la alerta.
+5. **Perfil = Contactado**: la primera vez que el perfil del comprador queda
+   completo (paso Perfil o seguimiento Contactado) se registra **un**
+   seguimiento `CONTACTADO` con el resumen del perfil como nota (avanza la
+   etapa). Las ediciones posteriores registran `PERFIL_GUARDADO` (no mueven la
+   etapa). Contactado con perfil no crea además un `PERFIL_GUARDADO`.
+6. **Aplica a las alertas existentes**: una alerta antigua sin perfil lo pide
+   la próxima vez que el agente quiera avanzar de etapa.
+
+Qué significa ahora `origin`: **solo un dato** de cómo entró el comprador
+(`property` = con referencia, `search` = búsqueda general). Se usa en
+etiquetas ("Búsqueda general" / "Con referencia"), en el aviso de búsqueda
+duplicada al **crear** (`find_open_search_alerts`) y para analítica. Ya no
+decide qué pasos ni acciones tiene una alerta. `property_linked_at` vale
+también para las alertas con referencia: si no es NULL, la propiedad se
+cambió desde la Propuesta (y el historial está en `PROPIEDAD_ASOCIADA`).
+
+Implicaciones para analítica:
+
+- Una alerta **con referencia** también puede "saltar" de propiedad; las
+  métricas por propiedad (si se crean) deben leer `PROPIEDAD_ASOCIADA` para
+  saber por qué inmuebles pasó.
+- `CONTACTADO` puede aparecer sin un "Contactado" explícito del formulario:
+  lo crea el primer guardado del perfil desde el paso Perfil. Los conteos de
+  "contactados" siguen siendo correctos (antes ese guardado no movía la etapa).
+- Alertas antiguas **sin comprador** (anteriores a la tabla de compradores):
+  no tienen dónde guardar el perfil y quedan fuera del requisito (pueden
+  seguir avanzando y cerrarse).
+
+## 6. 2026-10-19: ubicación del perfil en cascada, provincia por CP y operación editable
+
+Plan: `PLAN_PERFIL_UBICACION.md`. Motivo: que la ubicación del perfil se tome
+como en InmoPC (País → Provincia → Población → Zona) y que la operación se
+pueda corregir al hablar con el comprador.
+
+Decisiones cerradas con el usuario:
+
+1. **Provincia sin columna en `properties`**: se deduce del código postal
+   (dos primeros dígitos, tabla 01 Álava … 52 Melilla en `app/core/geo.py`;
+   `Property.provincia` es de solo lectura). Una propiedad sin CP válido (o de
+   otro país) queda "Sin provincia": solo aparece al filtrar por país o por
+   población/zona directamente.
+2. **Operación editable en el perfil de la alerta**: al cambiarla cambia
+   `alert.business_type`, queda en la nota del **mismo** seguimiento que
+   guarda el perfil (`CONTACTADO` o `PERFIL_GUARDADO`: "Operación: Venta →
+   Alquiler") y las sugerencias se recalculan (el perfil guarda la nueva). Solo
+   con la alerta abierta. Si la alerta tiene propiedad de la otra operación, se
+   **mantiene** y la Propuesta avisa ("La propiedad asociada es de Venta y el
+   comprador busca Alquiler").
+3. **Población y Zona múltiples con "Todas"**; las zonas que se ofrecen son
+   las de las poblaciones marcadas.
+4. **Mínimo de ubicación** = provincia elegida (aunque sea con "Todas" las
+   poblaciones) **o** al menos una población **o** al menos una zona. El país
+   solo no basta. Sigue siendo una sola definición
+   (`buyer_matching.profile_is_complete` / `missing_profile_fields`; la etiqueta
+   del mínimo pasa de "zona o ciudad" a "ubicación"). La **ficha del
+   comprador** exige ahora los mismos mínimos (allí la operación se edita como
+   siempre y no se registra ningún seguimiento).
+
+Modelo: `buyer_search_criteria.country` y `province` (String, nullable;
+migración `a0b1c2d3e4f5`). `cities` y `zones` siguen siendo listas: **vacía =
+Todas**. "Todas las poblaciones" de una provincia incluye las que entren
+después (filtro `cod_postal LIKE 'NN___'`). País vacío (o variante de España)
+en una propiedad = "España", en la cascada y en el filtro. Los perfiles
+anteriores (sin país ni provincia) siguen filtrando por sus poblaciones y
+zonas como hasta ahora y se abren con España preseleccionada.
+
+Cascada: `buyer_matching.geo_options` (una consulta `DISTINCT (pais,
+cod_postal, city, zona)` de las propiedades no archivadas de la empresa
+activa) → JSON en la página (`<script type="application/json"
+id="geoData-{prefijo}">`, una copia por formulario) → `static/js/search-profile.js`
+rellena los niveles. El servidor pinta el estado inicial
+(`buyer_matching.geo_choices`). En el formulario de propiedad, junto al CP,
+una ayuda de solo lectura "Provincia (según CP)".
+
+Implicaciones para analítica: `alert.business_type` puede cambiar después de
+crear la alerta; el historial del cambio está en la nota del seguimiento
+("Operación: … → …"). Las métricas por operación leen el valor actual.

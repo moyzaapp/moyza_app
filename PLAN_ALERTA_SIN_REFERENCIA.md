@@ -2,6 +2,13 @@
 
 Fecha: 2026-10-16. Rama: `57-cambios-de-visitas-compradores-y-otros`.
 
+> **Generalizado el 2026-10-19 por `PLAN_PERFIL_OBLIGATORIO.md`**: los pasos Contactar → Perfil →
+> Propuesta, la asociación de propiedad y "Cambiar propiedad" valen para **todas** las alertas (también
+> las creadas con referencia); `origin` queda solo como dato (etiquetas, duplicados al crear y
+> analítica). El perfil completo (tipo + precio máximo + zona o ciudad) es obligatorio para la Propuesta,
+> para asociar/cambiar propiedad y para Visita programada, Oferta y Cerrado; el primer perfil completo
+> registra `CONTACTADO`. Lo que sigue describe el diseño original para las búsquedas.
+
 ## Objetivo
 
 Un solo punto de entrada para crear alertas: **"Agregar alerta comprador"**. La

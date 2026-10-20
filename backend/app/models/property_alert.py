@@ -54,8 +54,9 @@ class PropertyAlert(Base):
         nullable=False
     )
 
-    # 'property' (creada con referencia) o 'search' (sin referencia). Solo las
-    # de origen 'search' pueden asociar o cambiar de propiedad.
+    # 'property' (creada con referencia) o 'search' (sin referencia). Solo es
+    # un dato de cómo entró el comprador (etiquetas y analítica): desde
+    # PLAN_PERFIL_OBLIGATORIO.md cualquier alerta puede cambiar de propiedad.
     origin = Column(
         String,
         nullable=False,
@@ -63,7 +64,8 @@ class PropertyAlert(Base):
         server_default=AlertOrigin.PROPERTY
     )
 
-    # Cuándo se asoció (o cambió) la propiedad de una búsqueda
+    # Cuándo se asoció (o cambió) la propiedad desde la Propuesta. En una
+    # alerta con referencia que nunca cambió de propiedad queda a NULL.
     property_linked_at = Column(
         DateTime,
         nullable=True
@@ -229,7 +231,11 @@ class PropertyAlert(Base):
     # `builtins.property`: dentro de la clase, `property` es la relación
     @builtins.property
     def is_search(self) -> bool:
-        """Alerta creada sin referencia (búsqueda general)."""
+        """Alerta creada sin referencia (búsqueda general).
+
+        Solo para etiquetas y analítica (PLAN_PERFIL_OBLIGATORIO.md): no
+        decide qué pasos ni acciones tiene la alerta.
+        """
         return self.origin == AlertOrigin.SEARCH
 
     @validates("property")
