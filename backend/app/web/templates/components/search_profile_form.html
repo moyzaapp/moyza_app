@@ -161,10 +161,10 @@
         <div class="grid grid-cols-2 gap-3 sm:col-span-2">
             {{ ui.field("min_price", "Precio mín. (€)", type="number",
                         value=((c.min_price | int) if c and c.min_price is not none else ""),
-                        placeholder="–", attrs='min="0" step="1000" inputmode="numeric"', id=prefix ~ "MinPrice") }}
+                        placeholder="–", attrs='min="0" step="1" inputmode="numeric"', id=prefix ~ "MinPrice") }}
             {{ ui.field("max_price", "Precio máx. (€)", type="number", required=required,
                         value=((c.max_price | int) if c and c.max_price is not none else ""),
-                        placeholder="–", attrs=('min="0" step="1000" inputmode="numeric"' ~ (' data-profile-min' if validated else '')),
+                        placeholder="–", attrs=('min="0" step="1" inputmode="numeric"' ~ (' data-profile-min' if validated else '')),
                         id=prefix ~ "MaxPrice") }}
         </div>
     </div>
