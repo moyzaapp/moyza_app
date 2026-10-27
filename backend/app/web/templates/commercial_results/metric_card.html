@@ -7,8 +7,12 @@
   - is_objective: la métrica tiene objetivo en este período; solo entonces se
     muestran barra, "obj." y %. El resto es solo resultado.
   - Semáforo (tokens.md): verde >= 100 %, ámbar >= 60 %, rojo < 60 %.
+  - detail_url: URL del panel "de dónde sale el número"
+    (PLAN_TRAZABILIDAD_INDICADORES.md). Solo la pasa el llamador si es admin;
+    sin ella la tarjeta queda igual que antes. detail_label es el aria-label de
+    la lupa; detail_title / detail_subtitle, la cabecera del panel.
 #}
-{% macro metric_card(label, value, detail=none, has_breakdown=false, is_objective=false, target=none, pct=none, bar_pct=none, sale_color='#2563EB', rent_color='#F59E0B', highlight=false) %}
+{% macro metric_card(label, value, detail=none, has_breakdown=false, is_objective=false, target=none, pct=none, bar_pct=none, sale_color='#2563EB', rent_color='#F59E0B', highlight=false, detail_url=none, detail_label=none, detail_title=none, detail_subtitle=none) %}
 <div class="p-4">
   <div class="flex items-start justify-between gap-2 mb-1">
     <p class="text-xs text-gray-500">{{ label }}</p>
@@ -16,7 +20,24 @@
     <span class="text-xs font-semibold uppercase tracking-wide text-blue-600" title="Métrica con objetivo en este período">Obj.</span>
     {% endif %}
   </div>
+  {% if detail_url %}
+  <div class="flex items-center gap-1">
+    <p class="text-2xl font-bold {% if highlight and value > 0 %}text-green-600{% else %}text-gray-800{% endif %}">{{ value }}</p>
+    <button type="button"
+            data-metric-detail="{{ detail_url }}"
+            data-metric-title="{{ detail_title or label }}"
+            data-metric-subtitle="{{ detail_subtitle or '' }}"
+            aria-label="{{ detail_label or ('Ver el detalle de ' ~ label) }}"
+            aria-haspopup="dialog" aria-controls="metricDrawer"
+            class="w-9 h-9 inline-flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20 transition-colors">
+      <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/>
+      </svg>
+    </button>
+  </div>
+  {% else %}
   <p class="text-2xl font-bold {% if highlight and value > 0 %}text-green-600{% else %}text-gray-800{% endif %}">{{ value }}</p>
+  {% endif %}
 
   {% if detail %}
   <p class="flex flex-wrap items-center gap-x-2 text-xs text-gray-500 mt-0.5">

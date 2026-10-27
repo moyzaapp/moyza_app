@@ -602,3 +602,68 @@ Sin migración ni variables nuevas: desplegar el código y reiniciar.
 # Tests (rutas y servicios en SQLite en memoria)
 docker exec moyza_backend python -m pytest tests/test_sugerencias_multiempresa.py tests/test_alert_search.py -q
 ```
+
+## 17. Avisos de compradores solo para alertas asignadas desde el 20/10/2026 (2026-10-26)
+
+Las alertas antiguas que nadie cerró llenaban la campana, el email diario y el
+Inicio de avisos "Sin gestión" y "Volver a llamar". Decisión: **sin borrar
+ninguna alerta**, los avisos (R1 y R3, secciones 12 y 15) solo cuentan las
+alertas cuya ventana de asignación (`assigned_at`, o `created_at` si falta)
+empieza el **20/10/2026 a las 00:00 de Madrid** o después.
+
+- Un único punto: `buyer_attention_service` (`alert_clock`, que usan
+  `evaluate_alert(s)` y el detalle, y el filtro SQL de
+  `find_buyers_needing_attention`). Por ahí pasan el badge de `/alerts`, el
+  banner "Venció / Vence el …" del detalle, el Inicio ("Hoy y pendiente",
+  "Requiere atención"), el email diario, el job horario de "volver a llamar"
+  y la campana. Una alerta anterior al corte no tiene reloj en ningún sitio.
+- Una alerta antigua **reasignada** después del corte vuelve a avisar: la
+  reasignación pone `assigned_at` a la fecha de reasignación y cuenta desde
+  ahí, como ya ocurría (sección 9).
+- No cambia: la cola secuencial, "Compradores abandonados" (PENDING > 7 días)
+  ni las métricas; las alertas antiguas siguen en los listados y **se cierran
+  a mano** como siempre.
+
+Variable nueva:
+
+- `BUYER_ATTENTION_SINCE` (`2026-10-20` por defecto, formato `YYYY-MM-DD`):
+  vacía o inválida = sin corte (comportamiento anterior). Para moverla basta
+  con cambiar el `.env` y reiniciar.
+
+Despliegue (migración **solo de datos**, sin cambios de esquema):
+
+```bash
+docker exec moyza_backend alembic upgrade head      # b1c2d3e4f5a6: marca leídas las notificaciones de compradores de alertas anteriores al corte
+docker restart moyza_backend
+```
+
+La migración marca `read_at` en las notificaciones sin leer `buyer_no_action`,
+`buyer_callback_due` y `buyer_stage_stall` de alertas con
+`coalesce(assigned_at, created_at)` anterior al 20/10/2026 00:00 de Madrid. No
+borra nada. Downgrade vacío: lo marcado como leído se queda leído.
+
+Rollback: `BUYER_ATTENTION_SINCE=` (vacía) en el `.env` y reiniciar; o
+desplegar el código anterior. Las notificaciones marcadas leídas no vuelven.
+
+```bash
+# Tests (unitarios, consulta y SQL de la migración en una transacción que se deshace)
+docker exec moyza_backend python -m pytest tests/test_buyer_attention_service.py tests/test_buyer_attention_channels.py -q
+```
+
+## 18. Trazabilidad de indicadores para el admin (2026-10-26)
+
+PLAN_TRAZABILIDAD_INDICADORES.md. Sin migración y sin variables de entorno
+nuevas. Solo admin: lupa en cada tarjeta de Resultados Comerciales →
+Rendimiento que abre un panel lateral con la regla en una frase, los totales
+(congelado frente a recalculado en períodos cerrados, con aviso si difieren) y
+los registros que suman, con enlace al origen y descarga CSV. Ruta nueva
+`GET /commercial-results/{agente}/metric/{clave}` (`?format=csv`, `?offset=`),
+siempre dentro de la empresa activa (agente de otra empresa → 404; no admin →
+403). El contador y el detalle comparten la misma consulta, y un test por
+indicador comprueba que el número de filas coincide con la tarjeta.
+
+Tras desplegar: recompilar Tailwind (lo hace el build de Docker) y reiniciar.
+
+Nota conocida: las fechas de las filas se muestran en hora de Madrid, pero el
+período se corta en UTC (regla previa del contador). Un registro de las 22:00
+a 24:00 UTC del último día puede verse con fecha del día siguiente en el panel.

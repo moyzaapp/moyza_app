@@ -1,7 +1,19 @@
 import os
+from datetime import date
+from typing import Optional
+
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _parse_date(value: Optional[str]) -> Optional[date]:
+    """'YYYY-MM-DD' -> date; vacía o inválida -> None."""
+    try:
+        return date.fromisoformat(value.strip()) if value and value.strip() else None
+    except ValueError:
+        return None
+
 
 class Settings:
     PROJECT_NAME: str = "MOYZA API"
@@ -58,6 +70,13 @@ class Settings:
     # (BUYER_STAGE_STALL_HOURS) ya no existe.
     BUYER_CALLBACK_HOURS: int = int(os.getenv("BUYER_CALLBACK_HOURS", "24"))
     BUYER_CALLBACK_MAX_ATTEMPTS: int = int(os.getenv("BUYER_CALLBACK_MAX_ATTEMPTS", "3"))
+    # Corte de los avisos R1 y R3: solo cuentan las alertas cuya ventana de
+    # asignación (`assigned_at`, o `created_at` si falta) empieza este día o
+    # después, a las 00:00 de Madrid. Las anteriores llenaban la campana, el
+    # email y el Inicio de ruido (decisión del 2026-10-26): siguen existiendo y
+    # se cierran a mano; si se reasignan después del corte vuelven a avisar.
+    # Formato YYYY-MM-DD; vacía o inválida = sin corte.
+    BUYER_ATTENTION_SINCE: Optional[date] = _parse_date(os.getenv("BUYER_ATTENTION_SINCE", "2026-10-20"))
 
     # Hora del día (Europe/Madrid) del email diario y los avisos in-app; solo
     # en días hábiles. Antes era 6 en UTC: revisar el .env al desplegar.

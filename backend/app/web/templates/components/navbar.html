@@ -93,4 +93,4 @@
 
 </header>
 
-{% if not user_is_admin %}<script src="/static/js/notifications.js"></script>{% endif %}
+{% if not user_is_admin %}<script src="{{ static_url('/static/js/notifications.js') }}"></script>{% endif %}

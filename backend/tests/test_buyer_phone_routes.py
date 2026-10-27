@@ -305,3 +305,114 @@ def test_duplicado_con_telefono_guardado_con_formato(db):
     # search-buyers devuelve phone_display
     results = client.get_json("/alerts/search-buyers?q=" + urllib.parse.quote(name))["results"]
     assert [b["phone_display"] for b in results if b["id"] == existing.id] == ["+34 633 445 566"]
+
+
+# ---------------------------------------------------------------------------
+# Indicativo "Otro…" escrito a mano
+# ---------------------------------------------------------------------------
+
+def test_alta_con_otro_indicativo(db):
+    client = _Client("MOES")
+
+    name = f"{TAG} SUIZA"
+    status, headers = client.post("/buyers/create", {
+        "name": name, "phone_country_code": "other", "phone_country_code_other": "41",
+        "phone_number": "79 123 45 67",
+    })
+    assert status == 302
+    assert headers.get("location") == "/alerts?tab=buyers"
+    assert _buyer(db, name).phone == "+41791234567"
+
+    # Escrito a mano pero del selector: como si se hubiera elegido en la lista
+    name = f"{TAG} OTRO ES"
+    client.post("/buyers/create", {
+        "name": name, "phone_country_code": "other", "phone_country_code_other": "34",
+        "phone_number": "600 11 22 33",
+    })
+    assert _buyer(db, name).phone == "34600112233"
+
+    # Alerta sin referencia con comprador nuevo: lead_phone igual que el comprador
+    name = f"{TAG} SUIZA BUSQUEDA"
+    client.post("/alerts/create", {
+        "buyer_name": name, "buyer_phone_country_code": "other",
+        "buyer_phone_country_code_other": "41", "buyer_phone_number": "+41 79 765 43 21",
+        "business_type": "Venta", "confirm_new_buyer": "1", "agent_id": _any_agent_id(db, "MOES"),
+    })
+    buyer = _buyer(db, name)
+    assert buyer.phone == "+41797654321"
+    assert [a.lead_phone for a in buyer.alerts] == ["+41797654321"]
+
+
+def test_alta_otro_indicativo_invalido(db):
+    client = _Client("MOES")
+    name = f"{TAG} INDICATIVO MALO"
+    status, headers = client.post("/buyers/create", {
+        "name": name, "phone_country_code": "other", "phone_country_code_other": "999",
+        "phone_number": "79 123 45 67",
+    })
+    assert status == 302
+    assert headers.get("location") == "/alerts"
+    assert "Indicativo no válido" in _flash(headers)
+    assert _buyer(db, name) is None
+
+
+def test_edicion_preselecciona_otro(db):
+    from app.models.buyer import Buyer
+    from app.models.company import Company
+
+    client = _Client("MOES")
+    company = db.query(Company).filter(Company.code == "MOES").first()
+    name = f"{TAG} EDICION SUIZA"
+    buyer = Buyer(name=name, phone="+41791234567", company_id=company.id)
+    db.add(buyer)
+    db.commit()
+
+    html = client.get_html(f"/buyers/{buyer.id}")
+    assert '<option value="other" data-full="Otro…" data-short="Otro" selected>' in html
+    assert 'name="phone_country_code_other"' in html and 'value="41"' in html
+    assert 'name="phone_number" value="791234567"' in html
+    assert 'data-short="+34" selected' not in html
+    assert "+41 791 234 567" in html
+
+    # Guardar sin tocar el teléfono: se conserva tal cual
+    client.post(f"/buyers/{buyer.id}/update-contact", {
+        "name": name, "phone_country_code": "other", "phone_country_code_other": "41",
+        "phone_number": "791234567", "email": "suiza@example.com",
+    })
+    db.expire_all()
+    assert buyer.phone == "+41791234567"
+    assert buyer.email == "suiza@example.com"
+
+    # Indicativo no válido: flash y no se toca
+    status, headers = client.post(f"/buyers/{buyer.id}/update-contact", {
+        "name": name, "phone_country_code": "other", "phone_country_code_other": "999",
+        "phone_number": "791234567",
+    })
+    assert status == 303
+    assert "Indicativo no válido" in _flash(headers)
+    db.expire_all()
+    assert buyer.phone == "+41791234567"
+
+    # Volver a un país de la lista
+    client.post(f"/buyers/{buyer.id}/update-contact", {
+        "name": name, "phone_country_code": "34", "phone_number": "600 11 22 33",
+    })
+    db.expire_all()
+    assert buyer.phone == "34600112233"
+
+
+def test_check_buyer_con_otro_indicativo(db):
+    from app.models.buyer import Buyer
+    from app.models.company import Company
+
+    client = _Client("MOES")
+    company = db.query(Company).filter(Company.code == "MOES").first()
+    name = f"{TAG} SUIZA EXISTENTE"
+    existing = Buyer(name=name, phone="+41791234567", company_id=company.id)
+    db.add(existing)
+    db.commit()
+
+    # Lo que compone PhoneField.compose con "Otro…" = 41
+    results = client.get_json("/alerts/check-buyer?phone=41791234567&email=")["results"]
+    match = [b for b in results if b["id"] == existing.id]
+    assert match and match[0]["phone_display"] == "+41 791 234 567"

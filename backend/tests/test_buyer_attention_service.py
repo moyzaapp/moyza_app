@@ -352,3 +352,134 @@ def test_envoltorio_conserva_la_forma(ctx):
     assert row["rule"] == RULE_NO_ACTION and row["rule_label"] == "Sin gestión"
     assert row["attempts"] == 0 and row["is_last_attempt"] is False and row["tone"] == "amber"
     assert row["due_at"] == L(2026, 10, 15, 9, 0)
+
+
+# ---------------------------------------------------------------------------
+# Corte de los avisos (settings.BUYER_ATTENTION_SINCE, decisión 2026-10-26)
+# ---------------------------------------------------------------------------
+
+from datetime import date  # noqa: E402
+
+SINCE = date(2026, 10, 20)
+LATER = L(2026, 10, 27, 12, 0)   # martes: todo lo asignado hasta el jueves 22 ya ha vencido
+
+
+def _cut(alert, now=LATER, since=SINCE):
+    return svc.evaluate_alert(alert, now=now, since=since, **THRESHOLDS)
+
+
+def test_corte_fecha_es_medianoche_de_madrid():
+    assert svc.attention_since(SINCE) == L(2026, 10, 20, 0, 0) == datetime(2026, 10, 19, 22, 0)
+    assert svc.attention_since(None) is None
+    assert svc.attention_since(datetime(2026, 10, 20, 5, 0)) == datetime(2026, 10, 20, 5, 0)
+
+
+def test_corte_config_vacia_o_invalida_es_sin_corte():
+    from app.core.config import _parse_date
+    assert _parse_date("2026-10-20") == SINCE
+    assert _parse_date(" 2026-10-20 ") == SINCE
+    for value in (None, "", "  ", "20/10/2026", "mañana"):
+        assert _parse_date(value) is None
+
+
+def test_corte_asignada_antes_no_avisa():
+    alert = _alert(L(2026, 10, 19, 23, 59))   # nunca gestionada
+    assert _cut(alert) is None
+    assert svc.alert_clock(alert, now=LATER, since=SINCE, **THRESHOLDS) is None   # detalle: ni «Vence el …»
+
+
+def test_corte_asignada_el_mismo_dia_a_las_cero_avisa():
+    item = _cut(_alert(L(2026, 10, 20, 0, 0)))
+    assert item is not None and item.rule == RULE_NO_ACTION
+
+
+def test_corte_antigua_reasignada_despues_vuelve_a_avisar():
+    alert = _alert(
+        L(2026, 10, 22, 9, 0),
+        [_fu("SIN_RESPUESTA", L(2026, 10, 12, 10, 0)), _fu("REASIGNADA", L(2026, 10, 22, 9, 0))],
+        status=AlertStatus.PENDING, created=L(2026, 10, 10, 9, 0),
+    )
+    item = _cut(alert)
+    assert item.rule == RULE_NO_ACTION and item.since == L(2026, 10, 22, 9, 0)
+    # Sin reasignar (assigned_at = created_at = 10/10) no avisaría
+    alert.assigned_at = alert.created_at
+    assert _cut(alert) is None
+
+
+def test_corte_none_es_el_comportamiento_anterior():
+    alert = _alert(L(2026, 10, 19, 9, 0))
+    assert _cut(alert, since=None).rule == RULE_NO_ACTION
+
+
+def test_corte_por_defecto_sale_de_settings(monkeypatch):
+    from app.core.config import settings
+    alert = _alert(L(2026, 10, 19, 9, 0))
+    monkeypatch.setattr(settings, "BUYER_ATTENTION_SINCE", SINCE)
+    assert _eval(alert, LATER) is None
+    monkeypatch.setattr(settings, "BUYER_ATTENTION_SINCE", None)
+    assert _eval(alert, LATER).rule == RULE_NO_ACTION
+
+
+def test_corte_en_la_consulta(ctx, monkeypatch):
+    from app.core.config import settings
+    from app.services import alert_assignment_service
+
+    old = _db_alert(ctx, ctx.ana, ctx.moyza, L(2026, 10, 19, 23, 59), name="PYTEST-ATN Antigua")
+    new = _db_alert(ctx, ctx.ana, ctx.moyza, L(2026, 10, 20, 0, 0), name="PYTEST-ATN Nueva")
+    moved = _db_alert(ctx, ctx.ana, ctx.moyza, L(2026, 10, 10, 9, 0), name="PYTEST-ATN Reasignada")
+    alert_assignment_service.assign(ctx.db, moved, ctx.bea, ctx.admin, None, is_new=False,
+                                    now=L(2026, 10, 22, 9, 0))
+    ctx.db.flush()
+    assert moved.assigned_at == L(2026, 10, 22, 9, 0)   # la reasignación mueve la ventana
+
+    agents = (ctx.ana, ctx.bea)
+    items = svc.find_buyers_needing_attention(ctx.db, now=LATER, since=SINCE)
+    assert _ids_for(items, agents) == {new.id, moved.id}
+    assert _ids_for(svc.find_buyers_needing_attention(ctx.db, now=LATER, since=None), agents) == {
+        old.id, new.id, moved.id}
+
+    # Por defecto, el de settings: también el envoltorio del Inicio y el email
+    from app.services.buyer_reminder_service import get_pending_buyers_by_agent
+    monkeypatch.setattr(settings, "BUYER_ATTENTION_SINCE", SINCE)
+    assert _ids_for(svc.find_buyers_needing_attention(ctx.db, now=LATER), agents) == {new.id, moved.id}
+    pending = get_pending_buyers_by_agent(ctx.db, 48, now=LATER)
+    rows = pending.get((ctx.ana.id, ctx.moyza.id), []) + pending.get((ctx.bea.id, ctx.moyza.id), [])
+    assert {r["alert_id"] for r in rows} == {new.id, moved.id}
+
+
+def test_migracion_marca_leidas_solo_las_antiguas(ctx):
+    """b1c2d3e4f5a6: el SQL real de la migración sobre filas de prueba (se deshace al terminar)."""
+    import importlib.util
+    from pathlib import Path
+    from sqlalchemy import text
+    from app.models.notification import Notification
+    from app.models.user import User
+
+    user = User(email="pytest.atn.mig@example.com", full_name="Mig", hashed_password="x", is_active=True)
+    ctx.db.add(user)
+    ctx.db.flush()
+    old = _db_alert(ctx, ctx.ana, ctx.moyza, L(2026, 10, 19, 23, 59))
+    new = _db_alert(ctx, ctx.ana, ctx.moyza, L(2026, 10, 20, 0, 0))
+    moved = _db_alert(ctx, ctx.ana, ctx.moyza, L(2026, 10, 22, 9, 0))
+    moved.created_at = L(2026, 10, 10, 9, 0)
+    rows = {}
+    for alert, label in ((old, "old"), (new, "new"), (moved, "moved")):
+        for kind in ("buyer_no_action", "buyer_callback_due", "buyer_stage_stall", "follow_up"):
+            n = Notification(user_id=user.id, company_id=ctx.moyza.id, kind=kind, title="t",
+                             entity_type="alert", entity_id=alert.id, created_at=L(2026, 10, 21, 8, 0))
+            ctx.db.add(n)
+            rows[(label, kind)] = n
+    ctx.db.flush()
+
+    path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "b1c2d3e4f5a6_buyer_attention_since.py"
+    spec = importlib.util.spec_from_file_location("mig_b1c2d3e4f5a6", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.op = SimpleNamespace(execute=lambda sql: ctx.db.execute(text(sql)))
+    module.upgrade()
+    for n in rows.values():
+        ctx.db.refresh(n)
+
+    for (label, kind), n in rows.items():
+        should_read = label == "old" and kind != "follow_up"
+        assert (n.read_at is not None) == should_read, (label, kind)

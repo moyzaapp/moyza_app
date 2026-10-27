@@ -1,5 +1,6 @@
 {% from "commercial_results/metric_card.html" import metric_card %}
 {% from "commercial_results/targets_form.html" import targets_form %}
+{% import "components/ui_macros.html" as ui %}
 
 {% set p = period %}
 
@@ -143,6 +144,10 @@
            sale_color=sale_color,
            rent_color=rent_color,
            highlight=(key == 'cierres'),
+           detail_url=('/commercial-results/' ~ item.agent.id ~ '/metric/' ~ key ~ '?period_type=' ~ p.period_type ~ '&period_start=' ~ p.start_str) if can_trace else none,
+           detail_label='Ver el detalle de ' ~ metric_labels[key] ~ ' de ' ~ item.agent.name,
+           detail_title=metric_labels[key] ~ ' · ' ~ item.agent.name,
+           detail_subtitle=p.label ~ ' · ' ~ brand_name,
          ) }}
       {% endfor %}
 
@@ -191,6 +196,15 @@
   <p class="text-gray-500">No hay agentes en {{ brand_name }}</p>
   <a href="/agents" class="inline-block mt-3 text-sm text-blue-600 hover:underline">Gestionar agentes →</a>
 </div>
+{% endif %}
+
+{% if can_trace %}
+{# Panel "de dónde sale el número" (solo admin, PLAN_TRAZABILIDAD_INDICADORES.md):
+   commercial_results.js carga dentro el parcial de /commercial-results/{agente}/metric/{clave} #}
+{% call ui.drawer("metricDrawer", "Detalle del indicador", subtitle_id="metricDrawerSubtitle") %}
+<div id="metricDrawerBody" aria-live="polite" aria-busy="false"></div>
+{% endcall %}
+<script src="/static/js/commercial_results.js"></script>
 {% endif %}
 
 <script>

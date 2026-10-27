@@ -8,7 +8,7 @@ Seleccionar Propiedad
     <a
         href="/visits/new/{{ property.id }}"
         class="property-card bg-white rounded-2xl border border-gray-200 p-6 hover:border-gray-400 hover:shadow-md transition-all cursor-pointer"
-        data-search="{{ [property.title, property.address, property.city, property.agent.name if property.agent else '']|select|join(' ')|lower }}"
+        data-search="{{ [property.title, property.address | street, property.city, property.agent.name if property.agent else '']|select|join(' ')|lower }}"
     >
         <div class="flex items-start justify-between mb-3">
             <h3 class="text-lg font-bold text-gray-800 flex-1">
@@ -30,7 +30,7 @@ Seleccionar Propiedad
         </div>
 
         <p class="text-sm text-gray-500 mb-3">
-            {{ property.address or 'Sin dirección' }}{% if property.city %} · {{ property.city }}{% endif %}
+            {{ (property.address | street) or 'Sin dirección' }}{% if property.city %} · {{ property.city }}{% endif %}
         </p>
 
         {% if property.price %}

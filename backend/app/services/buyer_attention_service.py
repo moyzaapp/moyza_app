@@ -23,13 +23,23 @@ La antigua R2 «sin avance de Primera llamada» ya no existe.
 
 Una alerta cae en una sola regla a la vez: nunca dos avisos distintos por el
 mismo comprador. Todo acepta `now` (UTC naive) inyectable para los tests y el job.
+
+**Corte** (`settings.BUYER_ATTENTION_SINCE`, decisión del 2026-10-26): solo
+avisan las alertas cuya ventana de asignación empieza ese día o después (00:00
+de Madrid). Las anteriores no tienen reloj: no salen en el listado, el detalle,
+el Inicio, el email ni la campana. Una alerta antigua reasignada después del
+corte vuelve a contar desde la reasignación (su `assignment_start` es la
+nueva `assigned_at`). Las funciones aceptan `since` (fecha, UTC naive o None =
+sin corte) para los tests.
 """
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import date
 from datetime import datetime
 from datetime import timedelta
 from typing import Iterable
 from typing import Optional
+from typing import Union
 
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
@@ -50,6 +60,24 @@ RULE_LABELS = {
 }
 
 _ORDINALS = {1: "Primer", 2: "Segundo", 3: "Tercer", 4: "Cuarto", 5: "Quinto"}
+
+# `since` por defecto: el de settings (None explícito = sin corte)
+_FROM_SETTINGS = object()
+
+
+def attention_since(since: Union[date, datetime, None, object] = _FROM_SETTINGS) -> Optional[datetime]:
+    """Corte de los avisos en UTC naive, o None si no hay corte.
+
+    Una fecha se toma como las 00:00 de Madrid de ese día; un datetime, como
+    UTC naive tal cual. Por defecto, `settings.BUYER_ATTENTION_SINCE`.
+    """
+    if since is _FROM_SETTINGS:
+        since = settings.BUYER_ATTENTION_SINCE
+    if since is None:
+        return None
+    if isinstance(since, datetime):
+        return since
+    return bc.to_utc(datetime(since.year, since.month, since.day))
 
 
 @dataclass
@@ -187,18 +215,23 @@ def alert_clock(
     no_action_hours: Optional[int] = None,
     callback_hours: Optional[int] = None,
     max_attempts: Optional[int] = None,
+    since=_FROM_SETTINGS,
 ) -> Optional[BuyerAttention]:
     """El reloj de la regla que gobierna una alerta abierta (vencido o no).
 
     R3 si el último seguimiento real es «Sin respuesta» y no se ha pasado del
-    máximo de intentos; si no, R1. None si la alerta está cerrada o no tiene
-    agente ni fecha.
+    máximo de intentos; si no, R1. None si la alerta está cerrada, no tiene
+    agente ni fecha, o su ventana de asignación empieza antes del corte
+    (`attention_since`).
     """
     now = now or datetime.utcnow()
     no_action_hours, callback_hours, max_attempts = _thresholds(no_action_hours, callback_hours, max_attempts)
 
     start = alert_view.assignment_start(alert)
     if alert.status not in alert_view.OPEN_ALERT_STATUSES or start is None or alert.agent_id is None:
+        return None
+    cutoff = attention_since(since)
+    if cutoff is not None and start < cutoff:
         return None
 
     window = alert_view.real_follow_ups_since(alert.follow_ups, start)
@@ -232,7 +265,10 @@ def alert_clock(
 
 
 def evaluate_alert(alert, now: Optional[datetime] = None, **thresholds) -> Optional[BuyerAttention]:
-    """La regla de la alerta si ya venció, o None (una sola regla por alerta)."""
+    """La regla de la alerta si ya venció, o None (una sola regla por alerta).
+
+    `thresholds` admite también `since` (corte; por defecto el de settings).
+    """
     clock = alert_clock(alert, now=now, **thresholds)
     return clock if clock is not None and clock.overdue else None
 
@@ -260,15 +296,18 @@ def find_buyers_needing_attention(
     no_action_hours: Optional[int] = None,
     callback_hours: Optional[int] = None,
     max_attempts: Optional[int] = None,
+    since=_FROM_SETTINGS,
 ) -> list:
     """Alertas abiertas con su regla vencida, una fila por alerta, de más a menos antigua.
 
     Prefiltro en SQL: N horas hábiles son al menos N horas de reloj y los dos
     relojes arrancan como pronto en la asignación, así que una alerta asignada
-    hace menos del umbral menor no puede haber vencido. Los seguimientos se
-    cargan en lote.
+    hace menos del umbral menor no puede haber vencido. También en SQL, el
+    corte: fuera las alertas asignadas antes de `attention_since(since)`. Los
+    seguimientos se cargan en lote.
     """
     now = now or datetime.utcnow()
+    cutoff = attention_since(since)
     thresholds = dict(zip(
         ("no_action_hours", "callback_hours", "max_attempts"),
         _thresholds(no_action_hours, callback_hours, max_attempts),
@@ -284,6 +323,8 @@ def find_buyers_needing_attention(
             alert_view.assignment_start_expr() <= now - timedelta(hours=min_hours),
         )
     )
+    if cutoff is not None:
+        query = query.filter(alert_view.assignment_start_expr() >= cutoff)
     if company_id is not None:
         query = query.filter(PropertyAlert.company_id == company_id)
     if agent_id is not None:
@@ -292,7 +333,7 @@ def find_buyers_needing_attention(
         query = query.filter(PropertyAlert.id.in_(list(alert_ids)))
 
     items = [
-        item for item in (evaluate_alert(alert, now=now, **thresholds) for alert in query.all())
+        item for item in (evaluate_alert(alert, now=now, since=cutoff, **thresholds) for alert in query.all())
         if item is not None
     ]
     items.sort(key=lambda item: (-item.business_hours_elapsed, item.alert.id))

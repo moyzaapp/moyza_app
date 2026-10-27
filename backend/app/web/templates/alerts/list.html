@@ -266,7 +266,7 @@
                                         {% if alert.property %}
                                         <div class="flex flex-col items-start">
                                             <span class="font-medium">{{ alert.property.title }}</span>
-                                            <span class="text-xs text-gray-500">{{ (alert.property.address or '').split(',')[0] }}</span>
+                                            <span class="text-xs text-gray-500">{{ alert.property.address | street }}</span>
                                             {# Propiedad de la otra empresa asociada desde la Propuesta (PLAN_SUGERENCIAS_MULTIEMPRESA.md) #}
                                             {% if active_company and alert.property.company_id != active_company.id %}{{ ui.company_badge(alert.property.company, extra="mt-1") }}{% endif %}
                                         </div>
@@ -703,8 +703,13 @@
 
                     <!-- Sin referencia: búsqueda general -->
                     <div id="panelRefWithout" class="hidden space-y-2">
-                        <p class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
+                        {# En Alquiler no se toma perfil de comprador (buyer_matching.profile_applies):
+                           el texto cambia con la operación elegida (JS al final) #}
+                        <p id="refWithoutProfileText" class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
                             Búsqueda general: al llamarle tomarás su perfil (zona, tipo, habitaciones, precio) y le propondrás propiedades de toda la empresa.
+                        </p>
+                        <p id="refWithoutRentText" class="hidden rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
+                            Búsqueda general de alquiler: al llamarle, busca y asóciale una propiedad de toda la empresa.
                         </p>
                         {% if not is_admin %}
                         <p class="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
@@ -804,9 +809,9 @@
         </form>
 {% endcall %}
 
-<script src="/static/js/alert-duplicates.js"></script>
-<script src="/static/js/alert-assign.js"></script>
-<script src="/static/js/phone-field.js"></script>
+<script src="{{ static_url('/static/js/alert-duplicates.js') }}"></script>
+<script src="{{ static_url('/static/js/alert-assign.js') }}"></script>
+<script src="{{ static_url('/static/js/phone-field.js') }}"></script>
 {% if is_admin %}
 <script>
 // ---- Reasignar desde el listado (un modal para todas las filas, solo admin) ----
@@ -1198,6 +1203,8 @@ function setBuyerMode(mode) {
     const submitBtn = document.getElementById('createAlertSubmit');
     const phoneInput = document.getElementById('buyerPhoneInput');
     const phoneCountry = document.getElementById('buyerPhoneInput_country');
+    // Indicativo escrito a mano con "Otro…" (macro phone_field)
+    const phoneOther = document.getElementById('buyerPhoneInput_country_other');
     const phoneField = phoneInput.closest('[data-phone-field]');
     const emailInput = document.getElementById('buyerEmailInput');
     const businessTypeSelect = document.getElementById('alertBusinessType');
@@ -1307,7 +1314,7 @@ function setBuyerMode(mode) {
     }
 
     let buyerTimer = null;
-    [phoneInput, emailInput].forEach(function (el) {
+    [phoneInput, phoneOther, emailInput].filter(Boolean).forEach(function (el) {
         el.addEventListener('input', function () {
             clearTimeout(buyerTimer);
             buyerTimer = setTimeout(refreshBuyerMatch, 400);
@@ -1317,6 +1324,23 @@ function setBuyerMode(mode) {
     phoneCountry.addEventListener('change', refreshBuyerMatch);
     // La operación cuenta para el aviso de búsqueda ya abierta
     businessTypeSelect.addEventListener('change', function () { window.alertDupRefresh(); });
+})();
+</script>
+<script>
+// ---- Sin referencia en Alquiler: sin perfil de comprador, otro texto ----
+(function () {
+    var select = document.getElementById('alertBusinessType');
+    var profileText = document.getElementById('refWithoutProfileText');
+    var rentText = document.getElementById('refWithoutRentText');
+    if (!select || !profileText || !rentText) return;
+    var noProfileOperations = {{ no_profile_operations | default([]) | tojson }};
+    function update() {
+        var rent = noProfileOperations.indexOf(select.value) !== -1;
+        profileText.classList.toggle('hidden', rent);
+        rentText.classList.toggle('hidden', !rent);
+    }
+    select.addEventListener('change', update);
+    update();
 })();
 </script>
 <script>

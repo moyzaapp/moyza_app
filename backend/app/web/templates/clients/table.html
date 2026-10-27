@@ -7,7 +7,8 @@
             <input
                 type="text"
                 name="search"
-                placeholder="Buscar por nombre, correo o teléfono..."
+                placeholder="Buscar por nombre, correo, teléfono o dirección..."
+                aria-label="Buscar clientes"
                 value="{{ search or '' }}"
                 class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
@@ -30,7 +31,7 @@
     <!-- Scroll horizontal en móvil y vertical cuando hay muchos clientes -->
     <div class="overflow-x-auto overflow-y-auto max-h-[60vh] -mx-px">
 
-    <table class="w-full min-w-[700px]">
+    <table class="w-full min-w-[960px]">
 
         <thead class="bg-gray-50 border-b border-gray-200">
 
@@ -46,6 +47,10 @@
 
                 <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Teléfono
+                </th>
+
+                <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
+                    Dirección del inmueble
                 </th>
 
                 <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
@@ -82,6 +87,35 @@
                     {{ client.phone }}
                 </td>
 
+                {# Propiedades del cliente que el usuario puede ver (agente: solo las
+                   suyas; admin: todas las de la empresa activa), sin número de calle #}
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
+                    {% set client_properties = properties_by_client.get(client.id, []) %}
+                    {% if client_properties %}
+                    <ul class="space-y-1">
+                        {% for p in client_properties[:3] %}
+                        <li>
+                            <a href="/properties/{{ p.id }}" title="{{ p.title }}" class="text-blue-600 hover:text-blue-700 hover:underline">{{ p.street or p.title }}</a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% if client_properties | length > 3 %}
+                    <details class="mt-1">
+                        <summary class="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-900">+{{ client_properties | length - 3 }} más</summary>
+                        <ul class="mt-1 space-y-1">
+                            {% for p in client_properties[3:] %}
+                            <li>
+                                <a href="/properties/{{ p.id }}" title="{{ p.title }}" class="text-blue-600 hover:text-blue-700 hover:underline">{{ p.street or p.title }}</a>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </details>
+                    {% endif %}
+                    {% else %}
+                    <span class="text-gray-400">—</span>
+                    {% endif %}
+                </td>
+
                 <td class="px-3 sm:px-6 py-3 sm:py-4">
 
                     {% if client.status == 'Activo' %}
@@ -92,7 +126,7 @@
 
                     {% else %}
 
-                    <span class="bg-yellow-100 text-yellow-700 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap">
+                    <span class="bg-amber-100 text-amber-800 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap">
                         Pendiente
                     </span>
 
@@ -154,7 +188,7 @@
 
             <tr>
 
-                <td colspan="{{ 5 if can_manage else 4 }}" class="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500">
+                <td colspan="{{ 6 if can_manage else 5 }}" class="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500">
 
                     {% if search %}
                     No se encontraron clientes para "{{ search }}"

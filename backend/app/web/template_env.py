@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi.templating import Jinja2Templates
 
 from app.core import geo
+from app.core.address import street_only
 from app.core.config import settings
 from app.core.constants import AlertOrigin, BusinessType, PhoneCountryCodes
 from app.core.phone import phone_display, split_phone, tel_href, whatsapp_url
@@ -29,6 +30,22 @@ def _tailwind_css_version() -> int | None:
         return int(_TAILWIND_CSS.stat().st_mtime)
     except OSError:
         return None
+
+
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+
+def static_url(path: str) -> str:
+    """'/static/js/x.js' -> '/static/js/x.js?v=<mtime>' para que el navegador no
+    reutilice una versión antigua en caché tras un despliegue. Si el archivo no
+    existe, devuelve la ruta tal cual. Se calcula en cada render (barato: un
+    stat) para no tener que reiniciar al cambiar un script en desarrollo."""
+    relative = path.removeprefix("/static/")
+    try:
+        version = int((_STATIC_DIR / relative).stat().st_mtime)
+    except OSError:
+        return path
+    return f"{path}?v={version}"
 
 
 tailwind_css_version = _tailwind_css_version()
@@ -97,9 +114,12 @@ templates.env.filters["tel_href"] = tel_href
 templates.env.filters["split_phone"] = split_phone
 # Precios: {{ prop.price | eur }} -> '120.000 €'
 templates.env.filters["eur"] = eur
+# Dirección sin número (solo lo anterior a la primera coma): {{ prop.address | street }}
+templates.env.filters["street"] = street_only
 # Opciones del selector de país; globales para que las vea el macro phone_field
 templates.env.globals["phone_country_choices"] = PhoneCountryCodes.choices()
 templates.env.globals["phone_default_country"] = PhoneCountryCodes.DEFAULT
+templates.env.globals["phone_other_country"] = PhoneCountryCodes.OTHER
 templates.env.globals["current_year"] = lambda: datetime.now().year
 # Envío de la ficha de visita por WhatsApp (ver config.VISIT_SHEET_WHATSAPP_ENABLED)
 templates.env.globals["visit_sheet_whatsapp_enabled"] = settings.VISIT_SHEET_WHATSAPP_ENABLED
@@ -113,3 +133,5 @@ templates.env.globals["geo_cp"] = {"provincias": geo.PROVINCIAS_POR_CP, "spain_a
                                    "no_province": geo.NO_PROVINCE}
 # Tailwind: <link> al CSS compilado si existe; si es None, base.html carga tailwind.js
 templates.env.globals["tailwind_css_version"] = tailwind_css_version
+# Sello de versión para scripts/estilos propios: {{ static_url('/static/js/x.js') }}
+templates.env.globals["static_url"] = static_url

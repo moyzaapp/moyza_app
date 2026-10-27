@@ -1,13 +1,14 @@
 """
 Normaliza los teléfonos guardados de compradores y alertas al formato canónico
 (PLAN_TELEFONO_COMPRADOR.md §2.5): dígitos con el indicativo y sin `+`
-("34600112233"), el mismo que guardan ya los formularios.
+("34600112233"), el mismo que guardan ya los formularios; con `+` delante si
+el indicativo no es del selector ("+41791234567", `app.core.phone.storage_phone`).
 
 Opcional: la app lee bien los valores antiguos (split_phone, phone_display,
 whatsapp_url). Por defecto solo informa (--dry-run); con --apply reescribe
 únicamente los valores con resultado inequívoco:
 
-- `canonical_phone` no es None (los mismos que tienen botón de WhatsApp), y
+- `storage_phone` no es None (los mismos que tienen botón de WhatsApp), y
 - el indicativo es explícito (`+`, `00` o un indicativo conocido al inicio) o,
   si no lo hay, el número parece español (9 dígitos que empiezan por 6-9).
   Un "3134808723" sin indicativo (móvil colombiano, por ejemplo) se queda
@@ -29,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app.db.base  # noqa: E402,F401  (registra todos los modelos)
 from app.core.constants import PhoneCountryCodes  # noqa: E402
-from app.core.phone import _has_plus_prefix, canonical_phone  # noqa: E402
+from app.core.phone import _has_plus_prefix, storage_phone  # noqa: E402
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.buyer import Buyer  # noqa: E402
 from app.models.property_alert import PropertyAlert  # noqa: E402
@@ -57,7 +58,7 @@ def plan_changes(rows):
     for row_id, value in rows:
         if value is None or not str(value).strip():
             continue
-        canonical = canonical_phone(value)
+        canonical = storage_phone(value)
         if canonical is None or not is_unambiguous(value):
             unusable.append((row_id, value))
         elif canonical == value:

@@ -97,7 +97,7 @@
                 <td data-sort-value="{{ property.title or '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
                     <div class="flex flex-col">
                         <span class="font-medium">{{ property.title }}</span>
-                        <span class="text-xs text-gray-500">{{ property.address or '-' }}</span>
+                        <span class="text-xs text-gray-500">{{ (property.address | street) or '-' }}</span>
                     </div>
                 </td>
 

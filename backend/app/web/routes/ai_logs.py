@@ -146,7 +146,8 @@ async def get_ai_log_detail(
         "id": log.id,
         "property_id": log.property_id,
         "property_title": log.property.title if log.property else None,
-        "property_address": log.property.address if log.property else None,
+        # Sin número: solo lo anterior a la primera coma (app/core/address.py)
+        "property_address": log.property.street if log.property else None,
         "report_id": log.report_id,
         "analysis_type": log.analysis_type,
         "model_name": log.model_name,
@@ -365,7 +366,7 @@ async def get_property_ai_history(
     return {
         "property_id": property_id,
         "property_title": property_item.title,
-        "property_address": property_item.address,
+        "property_address": property_item.street,
         "total_analyses": len(logs),
         "total_cost_usd": float(total_cost),
         "total_tokens": int(total_tokens),

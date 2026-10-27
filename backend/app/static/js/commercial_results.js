@@ -8,6 +8,12 @@
  *      total; con un agente, una línea por tipo.
  * Indicador y agente se cambian sin recargar. Bajo cada gráfica se rellena
  * una tabla con los mismos datos (también si Chart.js no carga).
+ *
+ * Pestaña Rendimiento (solo admin): panel lateral "de dónde sale el número"
+ * (PLAN_TRAZABILIDAD_INDICADORES.md). La lupa de cada tarjeta lleva la URL en
+ * data-metric-detail; el panel se abre con UI.openModal y carga el parcial por
+ * fetch (esqueleto mientras carga, error con "Reintentar" dentro del panel).
+ * "Ver más" (data-metric-more) añade la página siguiente a la tabla.
  */
 (function () {
   'use strict';
@@ -346,4 +352,126 @@
   });
 
   render();
+})();
+
+(function () {
+  'use strict';
+
+  const drawer = document.getElementById('metricDrawer');
+  if (!drawer || !window.UI) return;
+
+  const body = document.getElementById('metricDrawerBody');
+  const title = document.getElementById('metricDrawerTitle');
+  const subtitle = document.getElementById('metricDrawerSubtitle');
+  let controller = null;
+  let currentUrl = null;
+
+  const SKELETON =
+    '<div class="p-4 sm:p-6 space-y-5 animate-pulse" aria-hidden="true">' +
+      '<div class="space-y-2"><div class="h-3 w-24 rounded bg-gray-200"></div>' +
+      '<div class="h-4 w-full rounded bg-gray-200"></div><div class="h-4 w-4/5 rounded bg-gray-200"></div></div>' +
+      '<div class="h-20 rounded-xl bg-gray-100"></div>' +
+      '<div class="space-y-2"><div class="h-10 rounded bg-gray-100"></div><div class="h-10 rounded bg-gray-100"></div>' +
+      '<div class="h-10 rounded bg-gray-100"></div></div>' +
+    '</div>' +
+    '<p class="sr-only">Cargando el detalle…</p>';
+
+  function errorHtml(message) {
+    return '<div class="p-4 sm:p-6">' +
+      '<div class="rounded-xl border border-red-200 bg-red-50 text-red-900 px-4 py-3" role="alert">' +
+        '<p class="text-sm font-semibold">No se pudo cargar el detalle</p>' +
+        '<p class="text-xs mt-1 opacity-90">' + UI.escapeHtml(message) + '</p>' +
+        '<button type="button" data-metric-retry class="mt-3 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20">Reintentar</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // Devuelve el HTML del parcial o lanza un Error con un mensaje para el usuario
+  async function fetchPartial(url, signal) {
+    const response = await fetch(url, {
+      credentials: 'same-origin',
+      headers: { 'X-Requested-With': 'fetch' },
+      signal: signal,
+    });
+    // Sesión caducada: el middleware redirige al login y fetch lo sigue
+    if (response.redirected) throw new Error('Tu sesión ha caducado. Recarga la página e inicia sesión.');
+    if (response.status === 403) throw new Error('Solo los administradores pueden ver este detalle.');
+    if (response.status === 404) throw new Error('El agente o el indicador ya no existen en la empresa activa.');
+    if (!response.ok) throw new Error('Error del servidor (' + response.status + '). Inténtalo de nuevo.');
+    return response.text();
+  }
+
+  async function load(url) {
+    if (controller) controller.abort();
+    controller = new AbortController();
+    currentUrl = url;
+    body.innerHTML = SKELETON;
+    body.setAttribute('aria-busy', 'true');
+    try {
+      body.innerHTML = await fetchPartial(url, controller.signal);
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      body.innerHTML = errorHtml(err.message || 'Error de conexión. Inténtalo de nuevo.');
+    } finally {
+      body.setAttribute('aria-busy', 'false');
+    }
+    const scroller = drawer.querySelector('[data-modal-body]');
+    if (scroller) scroller.scrollTop = 0;
+  }
+
+  async function loadMore(button) {
+    const wrap = button.closest('[data-metric-more-wrap]');
+    const tbody = body.querySelector('[data-metric-rows]');
+    if (!wrap || !tbody) return;
+    const label = button.textContent;
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.textContent = 'Cargando…';
+    try {
+      const html = await fetchPartial(button.dataset.metricMore);
+      const tpl = document.createElement('template');
+      tpl.innerHTML = html.trim();
+      const page = tpl.content.querySelector('[data-metric-page]');
+      if (!page) throw new Error('Respuesta inesperada del servidor. Inténtalo de nuevo.');
+      const rows = Array.from(page.querySelectorAll('tr[data-metric-row]'));
+      rows.forEach((row) => tbody.appendChild(row));
+      const nextWrap = page.querySelector('[data-metric-more-wrap]');
+      if (nextWrap) wrap.replaceWith(nextWrap);
+      // Foco en la primera fila nueva para seguir leyendo con teclado
+      const firstLink = rows.length && rows[0].querySelector('a');
+      if (firstLink) firstLink.focus({ preventScroll: false });
+    } catch (err) {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      button.textContent = label;
+      const msg = document.createElement('p');
+      msg.className = 'text-xs text-red-600';
+      msg.setAttribute('role', 'alert');
+      msg.textContent = err.message || 'No se pudieron cargar más registros.';
+      wrap.appendChild(msg);
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const opener = e.target.closest('[data-metric-detail]');
+    if (opener) {
+      e.preventDefault();
+      title.textContent = opener.dataset.metricTitle || 'Detalle del indicador';
+      if (subtitle) subtitle.textContent = opener.dataset.metricSubtitle || '';
+      UI.openModal('metricDrawer', opener);
+      load(opener.dataset.metricDetail);
+      return;
+    }
+    if (!drawer.contains(e.target)) return;
+    const more = e.target.closest('[data-metric-more]');
+    if (more) {
+      e.preventDefault();
+      loadMore(more);
+      return;
+    }
+    if (e.target.closest('[data-metric-retry]') && currentUrl) {
+      e.preventDefault();
+      load(currentUrl);
+    }
+  });
 })();

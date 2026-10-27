@@ -305,18 +305,21 @@ def test_contactado_con_provincia(env):
 # ---------------------------------------------------------------------------
 
 def test_cambiar_operacion_en_el_paso_perfil(env):
+    """Venta → Alquiler desde el perfil: cambia la operación de la alerta. En
+    Alquiler no hay perfil de comprador (buyer_matching.profile_applies): los
+    campos del perfil que lleguen se ignoran y no se guarda perfil."""
     alert = _property_alert(env, "ana", "ana")
     form = dict(CONTACT_PROFILE, business_type="Alquiler")
     response = _save_profile(env, env.users["ana"], alert, form=form)
     assert response.headers["location"] == f"/alerts/{alert.id}?step=proposal"
-    assert _flash(response)["message"].endswith(". La alerta pasa a Alquiler")
+    assert _flash(response)["message"] == "La alerta pasa a Alquiler; el perfil de Juan Comprador queda como estaba"
 
     stored = _reload(env, alert)
     assert stored.business_type == "Alquiler"
-    assert _criteria(env).business_type == "Alquiler"                  # las sugerencias se recalculan con ella
+    assert _criteria(env) is None                                       # en alquiler no se guarda perfil
     [follow_up] = stored.follow_ups                                     # un solo seguimiento
-    assert follow_up.action_type == "CONTACTADO"
-    assert follow_up.notes == "Operación: Venta → Alquiler\nPerfil de búsqueda: Piso · Centro · ≤ 150.000 €."
+    assert follow_up.action_type == "PERFIL_GUARDADO"
+    assert follow_up.notes == "Operación: Venta → Alquiler"
     assert stored.property_id == env.props["ana"].id                    # la propiedad se mantiene
 
 
@@ -328,8 +331,9 @@ def test_cambiar_operacion_con_contactado_un_solo_seguimiento(env):
     stored = _reload(env, alert)
     assert stored.business_type == "Alquiler"
     assert [f.action_type for f in stored.follow_ups] == ["CONTACTADO"]
-    assert stored.follow_ups[0].notes == ("Prefiere alquilar\nOperación: Venta → Alquiler\n"
-                                          "Perfil de búsqueda: Piso · Centro · ≤ 150.000 €.")
+    # Pasa a Alquiler: sin perfil de comprador (no se guarda ni va en la nota)
+    assert stored.follow_ups[0].notes == "Prefiere alquilar\nOperación: Venta → Alquiler"
+    assert _criteria(env) is None
 
 
 def test_misma_operacion_no_cambia_nada(env):
@@ -368,13 +372,18 @@ def test_propuesta_avisa_si_la_propiedad_es_de_otra_operacion(env):
     alert = _property_alert(env, "ana", "ana")
     _save_profile(env, env.users["ana"], alert, form=dict(CONTACT_PROFILE, business_type="Alquiler"))
 
+    # La alerta pasa a Alquiler (sin perfil de comprador): se compara con su operación
     response, html = _detail(env, env.users["ana"], alert, step="proposal")
     assert response.context["operation_mismatch"] == {"property": "Venta", "wanted": "Alquiler"}
     assert "La propiedad asociada es de Venta y el comprador busca Alquiler" in html
+    assert "cambia la operación en el perfil" not in html              # en alquiler no hay perfil
     assert "Asociada ahora" in html                                    # la propiedad se mantiene
 
-    # Al volver a Venta el aviso desaparece
-    _save_profile(env, env.users["ana"], alert, form=dict(CONTACT_PROFILE, business_type="Venta"))
+    # Si la alerta vuelve a Venta el aviso desaparece (en Alquiler ya no hay
+    # formulario de perfil desde el que cambiarla: se cambia en la alerta)
+    stored = _reload(env, alert)
+    stored.business_type = "Venta"
+    env.db.commit()
     response, html = _detail(env, env.users["ana"], alert, step="proposal")
     assert response.context["operation_mismatch"] is None
     assert "La propiedad asociada es de" not in html
