@@ -602,3 +602,50 @@ Sin migración ni variables nuevas: desplegar el código y reiniciar.
 # Tests (rutas y servicios en SQLite en memoria)
 docker exec moyza_backend python -m pytest tests/test_sugerencias_multiempresa.py tests/test_alert_search.py -q
 ```
+
+## 17. Avisos de compradores solo para alertas asignadas desde el 20/10/2026 (2026-10-26)
+
+Las alertas antiguas que nadie cerró llenaban la campana, el email diario y el
+Inicio de avisos "Sin gestión" y "Volver a llamar". Decisión: **sin borrar
+ninguna alerta**, los avisos (R1 y R3, secciones 12 y 15) solo cuentan las
+alertas cuya ventana de asignación (`assigned_at`, o `created_at` si falta)
+empieza el **20/10/2026 a las 00:00 de Madrid** o después.
+
+- Un único punto: `buyer_attention_service` (`alert_clock`, que usan
+  `evaluate_alert(s)` y el detalle, y el filtro SQL de
+  `find_buyers_needing_attention`). Por ahí pasan el badge de `/alerts`, el
+  banner "Venció / Vence el …" del detalle, el Inicio ("Hoy y pendiente",
+  "Requiere atención"), el email diario, el job horario de "volver a llamar"
+  y la campana. Una alerta anterior al corte no tiene reloj en ningún sitio.
+- Una alerta antigua **reasignada** después del corte vuelve a avisar: la
+  reasignación pone `assigned_at` a la fecha de reasignación y cuenta desde
+  ahí, como ya ocurría (sección 9).
+- No cambia: la cola secuencial, "Compradores abandonados" (PENDING > 7 días)
+  ni las métricas; las alertas antiguas siguen en los listados y **se cierran
+  a mano** como siempre.
+
+Variable nueva:
+
+- `BUYER_ATTENTION_SINCE` (`2026-10-20` por defecto, formato `YYYY-MM-DD`):
+  vacía o inválida = sin corte (comportamiento anterior). Para moverla basta
+  con cambiar el `.env` y reiniciar.
+
+Despliegue (migración **solo de datos**, sin cambios de esquema):
+
+```bash
+docker exec moyza_backend alembic upgrade head      # b1c2d3e4f5a6: marca leídas las notificaciones de compradores de alertas anteriores al corte
+docker restart moyza_backend
+```
+
+La migración marca `read_at` en las notificaciones sin leer `buyer_no_action`,
+`buyer_callback_due` y `buyer_stage_stall` de alertas con
+`coalesce(assigned_at, created_at)` anterior al 20/10/2026 00:00 de Madrid. No
+borra nada. Downgrade vacío: lo marcado como leído se queda leído.
+
+Rollback: `BUYER_ATTENTION_SINCE=` (vacía) en el `.env` y reiniciar; o
+desplegar el código anterior. Las notificaciones marcadas leídas no vuelven.
+
+```bash
+# Tests (unitarios, consulta y SQL de la migración en una transacción que se deshace)
+docker exec moyza_backend python -m pytest tests/test_buyer_attention_service.py tests/test_buyer_attention_channels.py -q
+```

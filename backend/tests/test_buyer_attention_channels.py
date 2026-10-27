@@ -424,8 +424,20 @@ def live_alert():
     if agent is None or admin is None:
         session.close()
         pytest.skip("Sin agente en MOYZA o sin admin")
-    # Asignada hace un mes: vencida seguro, sea cual sea el día
-    assigned = datetime.utcnow().replace(microsecond=0) - timedelta(days=30)
+    # Asignada hace un mes (vencida seguro, sea cual sea el día), pero no antes
+    # del corte de la app levantada (`Settings.BUYER_ATTENTION_SINCE`, el valor
+    # real: el de `settings` lo anula conftest)
+    from app.core.config import Settings
+    from app.services.buyer_attention_service import attention_since
+    now = datetime.utcnow().replace(microsecond=0)
+    assigned = now - timedelta(days=30)
+    cutoff = attention_since(Settings.BUYER_ATTENTION_SINCE)
+    if cutoff is not None and assigned < cutoff:
+        assigned = cutoff + timedelta(minutes=1)
+    # La de «volver a llamar» lleva su último «Sin respuesta» a los 3 días
+    if bc.business_hours_between(assigned + timedelta(days=3), now) < 25:
+        session.close()
+        pytest.skip("El corte de avisos es demasiado reciente para que las alertas de prueba hayan vencido")
     alert = PropertyAlert(company_id=moyza.id, agent_id=agent.id, lead_name=f"{TAG} Comprador",
                           status=AlertStatus.IN_PROGRESS, created_by=admin.id, created_at=assigned,
                           assigned_at=assigned, origin="search", business_type="Venta")
