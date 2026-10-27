@@ -12,6 +12,10 @@ PLAN_RESULTADOS_COMERCIALES.md. Reglas:
 - Períodos semana, mes y año. El período en curso se calcula en vivo; uno
   pasado se lee de su snapshot congelado si existe.
 - Las métricas con objetivo dependen del período (`PerformanceObjectives`).
+- Trazabilidad (PLAN_TRAZABILIDAD_INDICADORES.md): `indicator_rows` devuelve
+  los registros que componen cada número con la MISMA consulta que el
+  contador (`_scoped_indicator_query` / `_visits_query`), de modo que
+  `len(filas) == número de la tarjeta` por construcción.
 """
 import calendar
 from dataclasses import dataclass
@@ -22,6 +26,7 @@ from sqlalchemy import case
 from sqlalchemy import extract
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload
 
 from app.core.constants import FollowUpActionType
 from app.core.constants import PerformanceObjectives
@@ -55,6 +60,13 @@ BREAKDOWN_KEYS = {
 
 # Métricas de la pestaña Rendimiento, en orden de presentación
 RESULT_METRICS = ("captaciones_crm", "bajadas", "cierres", "contactos", "hojas_visita")
+
+# Tipos que suman en el total de cada indicador. Contactos solo cuenta venta y
+# alquiler (`metrics_from_counts`); el resto, también "otros".
+COUNTED_KINDS = {"contactos": (SALE, RENT)}
+
+# Filas por página en el panel de detalle de un indicador
+INDICATOR_ROWS_PAGE = 50
 
 # Indicadores de la pestaña Evolución (orden del selector)
 EVOLUTION_INDICATORS = ("captaciones_crm", "cierres", "bajadas")
@@ -413,6 +425,31 @@ class PerformanceReportService:
 
         raise ValueError(f"Indicador desconocido: {indicator}")
 
+    def _scoped_indicator_query(self, spec, query, agent_ids, period_start: datetime, period_end: datetime):
+        """FROM/JOIN/WHERE de un indicador: empresa del servicio, agentes y rango de fechas.
+
+        Punto único de la regla de cada indicador: lo usan el contador
+        (`grouped_counts`) y el detalle (`indicator_rows`).
+        """
+        agent_col, date_col, _type_col, company_col, build = spec
+        return build(query).filter(
+            company_col == self._require_company(),
+            agent_col.in_(list(agent_ids)),
+            date_col >= period_start,
+            date_col <= period_end,
+        )
+
+    def _visits_query(self, query, agent_id: int, period_start: datetime, period_end: datetime):
+        """Visitas en las que participó el agente (principal o acompañante) sobre
+        propiedades de la empresa; el captador que no estuvo no suma."""
+        return (
+            scope_visits(visits_for_agent(query, agent_id), self._require_company())
+            .filter(
+                PropertyVisit.created_at >= period_start,
+                PropertyVisit.created_at <= period_end,
+            )
+        )
+
     def grouped_counts(
         self,
         indicator: str,
@@ -427,12 +464,13 @@ class PerformanceReportService:
         (la de la alerta o la de la propiedad, según el indicador); `mes` es
         1..12 si `by_month`.
         """
-        company_id = self._require_company()
+        self._require_company()
         agent_ids = list(agent_ids)
         if not agent_ids:
             return {}
 
-        agent_col, date_col, type_col, company_col, build = self._indicator_spec(indicator)
+        spec = self._indicator_spec(indicator)
+        agent_col, date_col, type_col, _company_col, _build = spec
 
         group_cols = [agent_col.label("agent_id")]
         if by_month:
@@ -440,12 +478,9 @@ class PerformanceReportService:
         group_cols.append(business_kind(type_col).label("kind"))
 
         query = (
-            build(self.db.query(*group_cols, func.count().label("total")))
-            .filter(
-                company_col == company_id,
-                agent_col.in_(agent_ids),
-                date_col >= period_start,
-                date_col <= period_end,
+            self._scoped_indicator_query(
+                spec, self.db.query(*group_cols, func.count().label("total")),
+                agent_ids, period_start, period_end,
             )
             .group_by(*group_cols)
         )
@@ -463,7 +498,7 @@ class PerformanceReportService:
         period_end: datetime,
     ) -> dict:
         """Métricas del agente en la empresa del servicio y el rango dado."""
-        company_id = self._require_company()
+        self._require_company()
 
         counts = {
             indicator: self.grouped_counts(indicator, period_start, period_end, [agent_id])
@@ -471,16 +506,9 @@ class PerformanceReportService:
             for indicator in BREAKDOWN_KEYS
         }
 
-        # Visitas en las que participó el agente (principal o acompañante)
-        # sobre propiedades de la empresa; el captador que no estuvo no suma.
-        hojas_visita = (
-            scope_visits(visits_for_agent(self.db.query(PropertyVisit), agent_id), company_id)
-            .filter(
-                PropertyVisit.created_at >= period_start,
-                PropertyVisit.created_at <= period_end,
-            )
-            .count()
-        )
+        hojas_visita = self._visits_query(
+            self.db.query(PropertyVisit), agent_id, period_start, period_end
+        ).count()
 
         return self.metrics_from_counts(counts, hojas_visita)
 
@@ -518,11 +546,16 @@ class PerformanceReportService:
     def metrics_for_period(self, agent_id: int, period: Period):
         """(métricas, snapshot): en vivo si el período está en curso o no está congelado."""
         report = self.get_report(agent_id, period.period_type, period.start)
-        if period.is_current or report is None or not report.is_locked:
-            metrics = self.calculate_metrics(agent_id, period.start, period.end)
-        else:
+        if self.uses_snapshot(period, report):
             metrics = self.report_metrics(report)
+        else:
+            metrics = self.calculate_metrics(agent_id, period.start, period.end)
         return metrics, report
+
+    @staticmethod
+    def uses_snapshot(period: Period, report: Optional[AgentPerformanceReport]) -> bool:
+        """True si la tarjeta del período muestra el snapshot congelado y no el vivo."""
+        return not period.is_current and report is not None and bool(report.is_locked)
 
     def agents_period_data(self, agents, period: Period) -> list:
         """Datos de la pestaña Rendimiento: una entrada por agente."""
@@ -546,6 +579,258 @@ class PerformanceReportService:
                 "is_locked": report.is_locked if report else False,
             })
         return data
+
+    # ------------------------------------------------------------------
+    # Trazabilidad: qué registros componen cada número (solo admin)
+    # PLAN_TRAZABILIDAD_INDICADORES.md
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def is_traceable(indicator: str) -> bool:
+        return indicator in RESULT_METRICS
+
+    def _indicator_rows_query(self, indicator: str, agent_id: int, period_start: datetime, period_end: datetime):
+        """Consulta de filas de un indicador: la del contador con entidades en vez de count().
+
+        Devuelve (query, columna de fecha, columna id para desempatar). Cada
+        fila de la query es una tupla con las entidades del indicador y, salvo
+        en hojas de visita, la etiqueta `kind` calculada con la misma
+        expresión que el contador.
+        """
+        if indicator == "hojas_visita":
+            query = self._visits_query(
+                self.db.query(PropertyVisit).options(joinedload(PropertyVisit.property)),
+                agent_id, period_start, period_end,
+            )
+            return query, PropertyVisit.created_at, PropertyVisit.id
+
+        spec = self._indicator_spec(indicator)
+        _agent_col, date_col, type_col, _company_col, _build = spec
+        kind = business_kind(type_col).label("kind")
+
+        if indicator == "contactos":
+            entities = (PropertyAlert, kind)
+            options = (joinedload(PropertyAlert.property), joinedload(PropertyAlert.buyer))
+            id_col = PropertyAlert.id
+        elif indicator == "captaciones_crm":
+            entities = (Property, kind)
+            options = ()
+            id_col = Property.id
+        elif indicator == "bajadas":
+            entities = (PropertyPriceHistory, Property, kind)
+            options = ()
+            id_col = PropertyPriceHistory.id
+        else:  # cierres
+            entities = (AlertFollowUp, PropertyAlert, Property, kind)
+            options = (joinedload(PropertyAlert.buyer),)
+            id_col = AlertFollowUp.id
+
+        query = self._scoped_indicator_query(
+            spec, self.db.query(*entities).options(*options), [agent_id], period_start, period_end,
+        )
+        counted = COUNTED_KINDS.get(indicator)
+        if counted:
+            query = query.filter(business_kind(type_col).in_(counted))
+        return query, date_col, id_col
+
+    @staticmethod
+    def _property_fields(prop) -> dict:
+        """Referencia, título y ciudad de la propiedad. Sin dirección: decisión §4
+        (nota) hasta que se cierre el cambio de "dirección sin número"."""
+        if prop is None:
+            return {"property_id": None, "property_ref": None, "property_title": None, "property_city": None}
+        return {
+            "property_id": prop.id,
+            "property_ref": prop.referencia,
+            "property_title": prop.title,
+            "property_city": prop.city,
+        }
+
+    @staticmethod
+    def _buyer_name(alert) -> str:
+        if alert.buyer is not None and alert.buyer.name:
+            return alert.buyer.name
+        return alert.lead_name
+
+    def _row_dict(self, indicator: str, row, agent_id: int) -> dict:
+        if indicator == "hojas_visita":
+            visit = row
+            return {
+                "id": visit.id,
+                "date": visit.created_at,
+                "visit_id": visit.id,
+                "visitor_name": visit.visitor_name,
+                "role": "principal" if visit.agent_id == agent_id else "acompañante",
+                "status": visit.visit_status,
+                "has_pdf": bool(visit.visit_sheet_filepath),
+                **self._property_fields(visit.property),
+            }
+
+        if indicator == "contactos":
+            alert, kind = row
+            return {
+                "id": alert.id,
+                "date": alert.created_at,
+                "kind": kind,
+                "alert_id": alert.id,
+                "buyer_name": self._buyer_name(alert),
+                "is_search": alert.property_id is None,
+                "source": alert.source,
+                "status": alert.status,
+                **self._property_fields(alert.property),
+            }
+
+        if indicator == "captaciones_crm":
+            prop, kind = row
+            return {
+                "id": prop.id,
+                "date": prop.market_entry_date,
+                "kind": kind,
+                "price": prop.price,
+                "status": prop.status,
+                **self._property_fields(prop),
+            }
+
+        if indicator == "bajadas":
+            change, prop, kind = row
+            return {
+                "id": change.id,
+                "date": change.created_at,
+                "kind": kind,
+                "old_price": change.old_price,
+                "new_price": change.new_price,
+                "reason": change.reason,
+                **self._property_fields(prop),
+            }
+
+        follow_up, alert, prop, kind = row
+        return {
+            "id": follow_up.id,
+            "date": follow_up.created_at,
+            "kind": kind,
+            "alert_id": alert.id,
+            "buyer_name": self._buyer_name(alert),
+            "is_search": prop is None,
+            "notes": follow_up.notes,
+            **self._property_fields(prop),
+        }
+
+    def indicator_rows(
+        self,
+        indicator: str,
+        agent_id: int,
+        period_start: datetime,
+        period_end: datetime,
+        limit: Optional[int] = INDICATOR_ROWS_PAGE,
+        offset: int = 0,
+    ) -> list:
+        """Registros que componen el número del indicador, del más reciente al más antiguo.
+
+        Misma regla que `calculate_metrics` (empresa del servicio, agente y
+        rango): sin límite, `len(filas) == metric_value(calculate_metrics(), indicador)`.
+        `limit=None` devuelve todas (CSV). Cada fila es un dict con lo que pinta
+        el panel; `kind` es 'venta', 'alquiler' u 'otros' (no en hojas de visita).
+        """
+        if not self.is_traceable(indicator):
+            raise ValueError(f"Indicador desconocido: {indicator}")
+
+        query, date_col, id_col = self._indicator_rows_query(indicator, agent_id, period_start, period_end)
+        query = query.order_by(date_col.desc(), id_col.desc())
+        if offset:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+        return [self._row_dict(indicator, row, agent_id) for row in query.all()]
+
+    def indicator_live_counts(self, indicator: str, agent_id: int, period_start: datetime, period_end: datetime) -> dict:
+        """{'total', 'detail'} del indicador calculado ahora, con la fórmula de las tarjetas."""
+        if not self.is_traceable(indicator):
+            raise ValueError(f"Indicador desconocido: {indicator}")
+
+        if indicator == "hojas_visita":
+            visits = self._visits_query(self.db.query(PropertyVisit), agent_id, period_start, period_end).count()
+            metrics = self.metrics_from_counts({}, visits)
+        else:
+            counts = self.grouped_counts(indicator, period_start, period_end, [agent_id])
+            metrics = self.metrics_from_counts({indicator: counts.get((agent_id, None))}, 0)
+
+        return {"total": self.metric_value(metrics, indicator), "detail": self.breakdown(metrics, indicator)}
+
+    def indicator_live_total(self, indicator: str, agent_id: int, period_start: datetime, period_end: datetime) -> int:
+        """Total del indicador recalculado ahora (para compararlo con el snapshot)."""
+        return self.indicator_live_counts(indicator, agent_id, period_start, period_end)["total"]
+
+    def indicator_frozen(self, indicator: str, agent_id: int, period: Period) -> Optional[dict]:
+        """Valor congelado que muestra la tarjeta, o None si la tarjeta se calcula en vivo.
+
+        {'total', 'detail', 'locked_at'}; mismo criterio que `metrics_for_period`.
+        """
+        report = self.get_report(agent_id, period.period_type, period.start)
+        if not self.uses_snapshot(period, report):
+            return None
+        metrics = self.report_metrics(report)
+        return {
+            "total": self.metric_value(metrics, indicator),
+            "detail": self.breakdown(metrics, indicator),
+            "locked_at": report.locked_at,
+        }
+
+    @staticmethod
+    def date_range_text(period_start: datetime, period_end: datetime) -> str:
+        """'entre el 1 y el 31 de octubre de 2026' (agrupa mes y año comunes)."""
+        def month(d):
+            return MONTH_NAMES[d.month - 1].lower()
+
+        if period_start.year != period_end.year:
+            return (
+                f"entre el {period_start.day} de {month(period_start)} de {period_start.year} "
+                f"y el {period_end.day} de {month(period_end)} de {period_end.year}"
+            )
+        if period_start.month != period_end.month:
+            return (
+                f"entre el {period_start.day} de {month(period_start)} "
+                f"y el {period_end.day} de {month(period_end)} de {period_end.year}"
+            )
+        return f"entre el {period_start.day} y el {period_end.day} de {month(period_end)} de {period_end.year}"
+
+    @classmethod
+    def indicator_rule_text(cls, indicator: str, agent, period_start: datetime, period_end: datetime, company) -> str:
+        """Regla del indicador en una frase, con agente, empresa y fechas.
+
+        Se mantiene junto a `_indicator_spec`: si cambia una regla, cambia aquí.
+        """
+        name = agent.name
+        brand = company.name
+        dates = cls.date_range_text(period_start, period_end)
+        label = PerformanceObjectives.LABELS.get(indicator, indicator)
+
+        if indicator == "contactos":
+            return (
+                f"{label} = alertas de comprador de {brand} cuyo agente actual es {name}, "
+                f"de tipo venta o alquiler, creadas {dates}."
+            )
+        if indicator == "captaciones_crm":
+            return (
+                f"{label} = propiedades de {brand} cuyo agente es {name} y cuya fecha de entrada "
+                f"al mercado está {dates}."
+            )
+        if indicator == "bajadas":
+            return (
+                f"{label} = cambios de precio a la baja (precio nuevo menor que el anterior) en "
+                f"propiedades de {brand} cuyo agente es {name}, registrados {dates}."
+            )
+        if indicator == "cierres":
+            return (
+                f"{label} = seguimientos «Cerrado» de alertas de comprador de {brand} cuyo agente "
+                f"actual es {name}, registrados {dates}. El tipo es el de la alerta o, si falta, "
+                f"el de la propiedad."
+            )
+        if indicator == "hojas_visita":
+            return (
+                f"{label} = visitas a propiedades de {brand} en las que {name} fue agente principal "
+                f"o acompañante, creadas {dates}."
+            )
+        raise ValueError(f"Indicador desconocido: {indicator}")
 
     # ------------------------------------------------------------------
     # Evolución anual (pestaña Evolución)
