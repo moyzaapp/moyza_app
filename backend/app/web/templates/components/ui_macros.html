@@ -181,6 +181,42 @@
 {%- endmacro %}
 
 {#
+  Panel lateral (drawer) para consultar detalle sin salir de la página
+  (PLAN_TRAZABILIDAD_INDICADORES.md). Mismo contrato que `modal` y el mismo
+  helper de ui.js: UI.openModal(id, opener) / UI.closeModal(id), Escape, clic en
+  el fondo, foco al abrir y vuelta al botón que lo abrió. En escritorio se
+  pega a la derecha; en móvil ocupa toda la pantalla.
+  Uso:
+    {% call ui.drawer("metricDrawer", "Detalle", subtitle_id="metricDrawerSubtitle") %}
+        <div id="metricDrawerBody"></div>
+    {% endcall %}
+  El título lleva el id "<id>Title" para poder cambiarlo desde JS.
+#}
+{% set _drawer_sizes = { "lg": "sm:max-w-lg", "xl": "sm:max-w-xl", "2xl": "sm:max-w-2xl", "3xl": "sm:max-w-3xl" } %}
+
+{% macro drawer(id, title, size="2xl", subtitle=None, subtitle_id=None) -%}
+<div id="{{ id }}" class="fixed inset-0 z-50 hidden !mt-0" role="dialog" aria-modal="true" aria-labelledby="{{ id }}Title" aria-hidden="true">
+    <div class="absolute inset-0 bg-gray-900/50" data-modal-close></div>
+    <div class="absolute inset-y-0 right-0 w-full {{ _drawer_sizes.get(size, _drawer_sizes['2xl']) }} bg-white shadow-xl flex flex-col outline-none"
+         data-modal-panel tabindex="-1">
+        <header class="shrink-0 flex items-start justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
+            <div class="min-w-0">
+                <h2 id="{{ id }}Title" class="text-lg font-bold text-gray-900">{{ title }}</h2>
+                {% if subtitle or subtitle_id %}<p {% if subtitle_id %}id="{{ subtitle_id }}"{% endif %} class="text-sm text-gray-500 mt-0.5">{{ subtitle or "" }}</p>{% endif %}
+            </div>
+            <button type="button" data-modal-close aria-label="Cerrar"
+                class="w-10 h-10 -mr-2 -mt-1 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20 flex items-center justify-center shrink-0">
+                <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+            </button>
+        </header>
+        <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain" data-modal-body>
+            {{ caller() }}
+        </div>
+    </div>
+</div>
+{%- endmacro %}
+
+{#
   Pie fijo del modal. Va DESPUÉS del bloque con padding, dentro del <form>.
   submit_id / submit_attrs permiten engancharle JS (p. ej. el aviso de duplicados).
   Con `call` se puede añadir un botón extra a la izquierda (p. ej. "Limpiar").

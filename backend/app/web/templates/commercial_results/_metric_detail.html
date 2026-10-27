@@ -1,0 +1,227 @@
+{#
+  Panel lateral "de dónde sale el número" de un indicador (solo admin).
+  PLAN_TRAZABILIDAD_INDICADORES.md. Lo carga por fetch commercial_results.js
+  dentro del drawer #metricDrawer de la pestaña Rendimiento.
+
+  - Página 1 (rows_only = false): regla, totales (y congelado frente a
+    recalculado en períodos cerrados), CSV, tabla y "Ver más".
+  - Páginas siguientes (rows_only = true, ?offset=N): solo las filas nuevas,
+    el resumen y el nuevo "Ver más"; el JS las añade a la tabla existente.
+  - Captaciones y bajadas: título/referencia y ciudad, sin dirección
+    (decisión §4, nota).
+#}
+{% import "components/ui_macros.html" as ui %}
+
+{% set th = "text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap" %}
+{% set th_right = "text-right px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap" %}
+{% set td = "px-4 py-3 text-gray-700 align-top" %}
+{% set kind_tones = {'venta': 'blue', 'alquiler': 'amber', 'otros': 'gray'} %}
+{% set shown = offset + (rows | length) %}
+
+{% macro kind_badge(kind) -%}
+{{ ui.badge(kind_labels[kind], kind_tones[kind]) }}
+{%- endmacro %}
+
+{% macro date_cell(value) -%}
+<td class="{{ td }} whitespace-nowrap tabular-nums">
+  {% if value %}{{ value | madrid_dt('%d/%m/%Y') }}<span class="block text-xs text-gray-500">{{ value | madrid_dt('%H:%M') }}</span>{% else %}<span class="text-gray-500">Sin fecha</span>{% endif %}
+</td>
+{%- endmacro %}
+
+{% macro property_cell(r, search_label="Búsqueda general") -%}
+<td class="{{ td }}">
+  {% if r.property_id %}
+  <a href="/properties/{{ r.property_id }}" class="font-medium text-gray-900 hover:text-blue-600 hover:underline">{{ r.property_title or ('Propiedad #' ~ r.property_id) }}</a>
+  {# La referencia no se repite cuando el título ya es la referencia #}
+  {% set meta = [r.property_ref if r.property_ref != r.property_title else none, r.property_city] | select | list %}
+  {% if meta %}<span class="block text-xs text-gray-500">{{ meta | join(' · ') }}</span>{% endif %}
+  {% else %}
+  <span class="text-gray-500">{{ search_label }}</span>
+  {% endif %}
+</td>
+{%- endmacro %}
+
+{% macro buyer_cell(r) -%}
+<td class="{{ td }}">
+  <a href="/alerts/{{ r.alert_id }}" class="font-medium text-gray-900 hover:text-blue-600 hover:underline">{{ r.buyer_name }}</a>
+  <span class="block text-xs text-gray-500">Alerta #{{ r.alert_id }}</span>
+</td>
+{%- endmacro %}
+
+{% macro table_head() -%}
+<tr>
+  {% if key == 'contactos' %}
+  <th scope="col" class="{{ th }}">Fecha</th>
+  <th scope="col" class="{{ th }}">Comprador</th>
+  <th scope="col" class="{{ th }}">Propiedad</th>
+  <th scope="col" class="{{ th }}">Tipo</th>
+  <th scope="col" class="{{ th }}">Origen</th>
+  {% elif key == 'captaciones_crm' %}
+  <th scope="col" class="{{ th }}">Entrada</th>
+  <th scope="col" class="{{ th }}">Propiedad</th>
+  <th scope="col" class="{{ th }}">Tipo</th>
+  <th scope="col" class="{{ th_right }}">Precio</th>
+  {% elif key == 'bajadas' %}
+  <th scope="col" class="{{ th }}">Fecha</th>
+  <th scope="col" class="{{ th }}">Propiedad</th>
+  <th scope="col" class="{{ th }}">Tipo</th>
+  <th scope="col" class="{{ th_right }}">Precio</th>
+  <th scope="col" class="{{ th }}">Motivo</th>
+  {% elif key == 'cierres' %}
+  <th scope="col" class="{{ th }}">Fecha</th>
+  <th scope="col" class="{{ th }}">Comprador</th>
+  <th scope="col" class="{{ th }}">Propiedad</th>
+  <th scope="col" class="{{ th }}">Tipo</th>
+  <th scope="col" class="{{ th }}">Nota del cierre</th>
+  {% else %}
+  <th scope="col" class="{{ th }}">Fecha</th>
+  <th scope="col" class="{{ th }}">Visitante</th>
+  <th scope="col" class="{{ th }}">Propiedad</th>
+  <th scope="col" class="{{ th }}">Participación</th>
+  <th scope="col" class="{{ th }}">Ficha</th>
+  {% endif %}
+</tr>
+{%- endmacro %}
+
+{% macro table_row(r) -%}
+<tr class="hover:bg-gray-50 transition-colors" data-metric-row>
+  {{ date_cell(r.date) }}
+  {% if key == 'contactos' %}
+    {{ buyer_cell(r) }}
+    {{ property_cell(r) }}
+    <td class="{{ td }}">{{ kind_badge(r.kind) }}</td>
+    <td class="{{ td }}">
+      {{ r.source or 'Sin origen' }}
+      {% if r.status %}<span class="block mt-1">{{ ui.status_badge('alert', r.status) }}</span>{% endif %}
+    </td>
+  {% elif key == 'captaciones_crm' %}
+    {{ property_cell(r) }}
+    <td class="{{ td }}">{{ kind_badge(r.kind) }}</td>
+    <td class="{{ td }} text-right tabular-nums whitespace-nowrap text-gray-900">{{ r.price | eur }}</td>
+  {% elif key == 'bajadas' %}
+    {{ property_cell(r) }}
+    <td class="{{ td }}">{{ kind_badge(r.kind) }}</td>
+    <td class="{{ td }} text-right tabular-nums whitespace-nowrap">
+      <span class="text-gray-500 line-through">{{ r.old_price | eur }}</span>
+      <span class="block text-gray-900 font-medium">{{ r.new_price | eur }}</span>
+    </td>
+    <td class="{{ td }}">{{ r.reason or '–' }}</td>
+  {% elif key == 'cierres' %}
+    {{ buyer_cell(r) }}
+    {{ property_cell(r, 'Sin propiedad') }}
+    <td class="{{ td }}">{{ kind_badge(r.kind) }}</td>
+    <td class="{{ td }} min-w-[12rem]">{{ r.notes or '–' }}</td>
+  {% else %}
+    <td class="{{ td }} font-medium text-gray-900">{{ r.visitor_name }}</td>
+    {{ property_cell(r) }}
+    <td class="{{ td }}">
+      {{ ui.badge('Principal' if r.role == 'principal' else 'Acompañante', 'blue' if r.role == 'principal' else 'gray') }}
+      <span class="block text-xs text-gray-500 mt-1">{{ visit_status_labels.get(r.status, r.status) }}</span>
+    </td>
+    <td class="{{ td }} whitespace-nowrap">
+      {% if r.has_pdf %}
+      <a href="/visits/{{ r.visit_id }}/download" class="text-blue-600 hover:text-blue-700 hover:underline" aria-label="Descargar la ficha de la visita de {{ r.visitor_name }} (PDF)">PDF</a>
+      {% else %}
+      <a href="/visits" class="text-blue-600 hover:text-blue-700 hover:underline" aria-label="Ver la visita de {{ r.visitor_name }} en Visitas">Ver en Visitas</a>
+      {% endif %}
+    </td>
+  {% endif %}
+</tr>
+{%- endmacro %}
+
+{% macro more_block() -%}
+<div data-metric-more-wrap class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+  <p class="text-sm text-gray-500" data-metric-summary>
+    Mostrando <span class="font-medium text-gray-900 tabular-nums">{{ shown }}</span> de <span class="font-medium text-gray-900 tabular-nums">{{ live.total }}</span>
+  </p>
+  {% if has_more %}
+  {# Clases de ui.button "secondary"; escrito a mano para que data-metric-more se escape una sola vez #}
+  <button type="button" data-metric-more="{{ more_url }}"
+          class="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 disabled:opacity-50 disabled:cursor-not-allowed bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 focus-visible:ring-gray-900/20 w-full sm:w-auto">
+    Ver más ({{ remaining }} restantes)
+  </button>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{% if rows_only %}
+{# ---- Página siguiente: solo filas + resumen + "Ver más" ---- #}
+<div data-metric-page>
+  {# Contenedor de transporte: el JS mueve las filas a la tabla del panel; nunca se pinta #}
+  <div class="overflow-x-auto"><table><tbody>{% for r in rows %}{{ table_row(r) }}{% endfor %}</tbody></table></div>
+  {{ more_block() }}
+</div>
+{% else %}
+<div class="p-4 sm:p-6 space-y-5">
+
+  <!-- Regla -->
+  <section aria-labelledby="metricRuleTitle">
+    <h3 id="metricRuleTitle" class="text-xs font-semibold uppercase tracking-wide text-gray-500">Qué se cuenta</h3>
+    <p class="mt-1 text-sm text-gray-700" data-metric-rule>{{ rule_text }}</p>
+  </section>
+
+  <!-- Totales -->
+  <section aria-labelledby="metricTotalTitle" class="rounded-xl border border-gray-200 p-4">
+    <h3 id="metricTotalTitle" class="text-xs font-semibold uppercase tracking-wide text-gray-500">
+      {% if frozen %}Recalculado ahora{% else %}Total{% endif %}
+    </h3>
+    <p class="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <span class="text-3xl font-bold tabular-nums text-gray-900" data-metric-total>{{ live.total }}</span>
+      {% if live.detail %}
+      <span class="text-sm text-gray-500">
+        venta {{ live.detail.venta }} · alquiler {{ live.detail.alquiler }}{% if live.detail.otros %} · otros {{ live.detail.otros }}{% endif %}
+      </span>
+      {% endif %}
+    </p>
+
+    {% if frozen %}
+    <p class="mt-3 text-sm text-gray-700" data-metric-frozen>
+      Congelado el {{ frozen.locked_at | madrid_dt('%d/%m/%Y') if frozen.locked_at else 'cierre' }}:
+      <span class="font-semibold tabular-nums">{{ frozen.total }}</span>
+      · Recalculado ahora: <span class="font-semibold tabular-nums">{{ live.total }}</span>
+    </p>
+    {% elif not period.is_current %}
+    <p class="mt-3 text-xs text-gray-500">Período pasado sin congelar: la tarjeta también se calcula en vivo.</p>
+    {% endif %}
+  </section>
+
+  {% if frozen and frozen.total != live.total %}
+  {{ ui.banner(
+       'El número congelado (' ~ frozen.total ~ ') no coincide con el recalculado (' ~ live.total ~ ')',
+       'amber',
+       'La tarjeta muestra el valor congelado al cerrar el período. Las filas de abajo son las que cumplen la regla hoy: algún dato cambió después del cierre.'
+     ) }}
+  {% elif frozen %}
+  <p class="text-xs text-gray-500">Coinciden: los datos no han cambiado desde el cierre del período.</p>
+  {% endif %}
+
+  <!-- Filas -->
+  {% if rows %}
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <h3 class="text-sm font-semibold text-gray-900">Registros que suman</h3>
+    {% call ui.button('Descargar CSV', 'secondary', href=csv_url, attrs='download', full_mobile=True) %}
+    <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+    {% endcall %}
+  </div>
+
+  <div class="rounded-2xl border border-gray-200 overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full min-w-[560px] text-sm">
+        <caption class="sr-only">{{ label }} de {{ agent.name }} · {{ period.label }}</caption>
+        <thead class="bg-gray-50 border-b border-gray-200">{{ table_head() }}</thead>
+        <tbody class="divide-y divide-gray-100" data-metric-rows>
+          {% for r in rows %}{{ table_row(r) }}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {{ more_block() }}
+  {% else %}
+  <div class="rounded-2xl border border-gray-200">
+    {{ ui.empty_state('No hay registros en este período', 'Nada cumple la regla para ' ~ agent.name ~ ' en ' ~ period.label ~ '.') }}
+  </div>
+  {% endif %}
+
+</div>
+{% endif %}

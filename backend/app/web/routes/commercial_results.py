@@ -9,7 +9,11 @@ Una sección con tres pestañas, todas sobre la empresa activa:
 
 Sustituye a /alerts-dashboard y /performance-reports, que redirigen aquí.
 """
+import csv
+import io
 import logging
+import re
+import unicodedata
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
@@ -21,6 +25,7 @@ from fastapi import Query
 
 from fastapi.responses import HTMLResponse
 from fastapi.responses import RedirectResponse
+from fastapi.responses import Response
 
 from sqlalchemy.orm import Session
 
@@ -34,9 +39,11 @@ from app.services.company_scope import get_agent_in_company
 from app.services.company_scope import scope_agents
 from app.services.company_scope import scope_alerts
 from app.services.notification_service import notify_admin_note
+from app.services.performance_report_service import INDICATOR_ROWS_PAGE
 from app.services.performance_report_service import PerformanceReportService
 from app.web.dependencies.auth import is_admin
 from app.web.dependencies.company import get_active_company
+from app.web.template_env import madrid_dt
 from app.web.template_env import templates
 from app.web.utils.flash import set_flash
 
@@ -174,6 +181,8 @@ async def commercial_results(
         "period_labels": PeriodType.labels(),
         "metric_labels": PerformanceObjectives.LABELS,
         "target_fields": PerformanceObjectives.TARGET_FIELDS,
+        # Lupa de trazabilidad en cada tarjeta (PLAN_TRAZABILIDAD_INDICADORES.md): solo admin
+        "can_trace": is_admin(current_user),
     }
 
     if tab == TAB_PERFORMANCE:
@@ -204,6 +213,186 @@ async def commercial_results(
     return templates.TemplateResponse(
         request=request,
         name="commercial_results/home.html",
+        context=context,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Detalle de un indicador: de dónde sale el número (solo admin)
+# PLAN_TRAZABILIDAD_INDICADORES.md
+# ---------------------------------------------------------------------------
+
+KIND_LABELS = {"venta": "Venta", "alquiler": "Alquiler", "otros": "Otros"}
+
+VISIT_STATUS_LABELS = {
+    "draft": "Borrador",
+    "preview": "Vista previa",
+    "signed": "Firmada",
+    "completed": "Completada",
+}
+
+ALERT_STATUS_LABELS = {
+    AlertStatus.PENDING: "Pendiente",
+    AlertStatus.IN_PROGRESS: "En proceso",
+    AlertStatus.COMPLETED: "Completada",
+    AlertStatus.CANCELLED: "Cancelada",
+}
+
+
+def _csv_date(value) -> str:
+    return madrid_dt(value) if value else ""
+
+
+def _csv_price(value) -> str:
+    return "" if value is None else f"{float(value):.0f}"
+
+
+def _csv_property(row) -> str:
+    if row["property_id"] is None:
+        return "Búsqueda general"
+    return " · ".join(p for p in (row["property_ref"], row["property_title"]) if p)
+
+
+# Columnas del CSV por indicador: (cabecera, valor de la fila). La tabla del
+# panel pinta los mismos datos (commercial_results/_metric_detail.html).
+METRIC_CSV_COLUMNS = {
+    "contactos": (
+        ("Fecha", lambda r: _csv_date(r["date"])),
+        ("Comprador", lambda r: r["buyer_name"]),
+        ("Propiedad", _csv_property),
+        ("Ciudad", lambda r: r["property_city"] or ""),
+        ("Tipo", lambda r: KIND_LABELS[r["kind"]]),
+        ("Origen", lambda r: r["source"] or ""),
+        ("Estado", lambda r: ALERT_STATUS_LABELS.get(r["status"], r["status"] or "")),
+        ("Alerta", lambda r: f"/alerts/{r['alert_id']}"),
+    ),
+    "captaciones_crm": (
+        ("Fecha de entrada", lambda r: _csv_date(r["date"])),
+        ("Propiedad", _csv_property),
+        ("Ciudad", lambda r: r["property_city"] or ""),
+        ("Tipo", lambda r: KIND_LABELS[r["kind"]]),
+        ("Precio", lambda r: _csv_price(r["price"])),
+        ("Estado", lambda r: r["status"] or ""),
+        ("Enlace", lambda r: f"/properties/{r['property_id']}"),
+    ),
+    "bajadas": (
+        ("Fecha", lambda r: _csv_date(r["date"])),
+        ("Propiedad", _csv_property),
+        ("Ciudad", lambda r: r["property_city"] or ""),
+        ("Tipo", lambda r: KIND_LABELS[r["kind"]]),
+        ("Precio anterior", lambda r: _csv_price(r["old_price"])),
+        ("Precio nuevo", lambda r: _csv_price(r["new_price"])),
+        ("Motivo", lambda r: r["reason"] or ""),
+        ("Enlace", lambda r: f"/properties/{r['property_id']}"),
+    ),
+    "cierres": (
+        ("Fecha", lambda r: _csv_date(r["date"])),
+        ("Comprador", lambda r: r["buyer_name"]),
+        ("Propiedad", _csv_property),
+        ("Tipo", lambda r: KIND_LABELS[r["kind"]]),
+        ("Nota del cierre", lambda r: r["notes"] or ""),
+        ("Alerta", lambda r: f"/alerts/{r['alert_id']}"),
+    ),
+    "hojas_visita": (
+        ("Fecha", lambda r: _csv_date(r["date"])),
+        ("Visitante", lambda r: r["visitor_name"]),
+        ("Propiedad", _csv_property),
+        ("Ciudad", lambda r: r["property_city"] or ""),
+        ("Participación", lambda r: r["role"].capitalize()),
+        ("Estado", lambda r: VISIT_STATUS_LABELS.get(r["status"], r["status"] or "")),
+        ("Ficha", lambda r: f"/visits/{r['visit_id']}/download" if r["has_pdf"] else ""),
+    ),
+}
+
+
+def _slug(text: str) -> str:
+    ascii_text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-") or "agente"
+
+
+def _metric_url(agent_id: int, key: str, period, **extra) -> str:
+    params = {"period_type": period.period_type, "period_start": period.start_str, **extra}
+    return f"{BASE_URL}/{agent_id}/metric/{key}?{urlencode(params)}"
+
+
+def _metric_csv(key: str, rows: list, filename: str) -> Response:
+    buffer = io.StringIO()
+    # Punto y coma y BOM: Excel en español lo abre en columnas y con tildes
+    writer = csv.writer(buffer, delimiter=";")
+    columns = METRIC_CSV_COLUMNS[key]
+    writer.writerow([header for header, _ in columns])
+    for row in rows:
+        writer.writerow([value(row) for _, value in columns])
+    return Response(
+        content="﻿" + buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get(BASE_URL + "/{agent_id}/metric/{key}")
+async def metric_detail(
+    agent_id: int,
+    key: str,
+    request: Request,
+    period_type: str = Query(default=PeriodType.DEFAULT),
+    period_start: str = Query(default=""),
+    offset: int = Query(default=0, ge=0),
+    output: str = Query(default="", alias="format"),
+    db: Session = Depends(get_db),
+):
+    """Parcial HTML del panel lateral (o CSV con `?format=csv`) de un indicador.
+
+    `?offset=N` devuelve solo la página siguiente de filas ("Ver más").
+    """
+    if not is_admin(request.state.user):
+        return HTMLResponse("Solo administradores pueden ver el detalle de los indicadores.", status_code=403)
+
+    company = get_active_company(request)
+    svc = PerformanceReportService(db, company.id)
+    agent = get_agent_in_company(db, agent_id, company.id)
+    if agent is None or not svc.is_traceable(key):
+        return HTMLResponse("Agente o indicador no encontrado en la empresa activa.", status_code=404)
+
+    period = svc.period(period_type, period_start)
+
+    if output == "csv":
+        rows = svc.indicator_rows(key, agent.id, period.start, period.end, limit=None)
+        filename = f"{key}_{_slug(agent.name)}_{company.code.lower()}_{period.period_type.lower()}_{period.start_str}.csv"
+        return _metric_csv(key, rows, filename)
+
+    live = svc.indicator_live_counts(key, agent.id, period.start, period.end)
+    rows = svc.indicator_rows(key, agent.id, period.start, period.end, limit=INDICATOR_ROWS_PAGE, offset=offset)
+    next_offset = offset + len(rows)
+    has_more = next_offset < live["total"]
+
+    context = {
+        "request": request,
+        "key": key,
+        "label": PerformanceObjectives.LABELS[key],
+        "agent": agent,
+        "company": company,
+        "period": period,
+        "rows": rows,
+        "live": live,
+        "offset": offset,
+        "rows_only": offset > 0,
+        "has_more": has_more,
+        "remaining": max(live["total"] - next_offset, 0),
+        "more_url": _metric_url(agent.id, key, period, offset=next_offset) if has_more else None,
+        "kind_labels": KIND_LABELS,
+        "visit_status_labels": VISIT_STATUS_LABELS,
+    }
+    if offset == 0:
+        context.update({
+            "rule_text": svc.indicator_rule_text(key, agent, period.start, period.end, company),
+            "frozen": svc.indicator_frozen(key, agent.id, period),
+            "csv_url": _metric_url(agent.id, key, period, format="csv"),
+        })
+
+    return templates.TemplateResponse(
+        request=request,
+        name="commercial_results/_metric_detail.html",
         context=context,
     )
 
