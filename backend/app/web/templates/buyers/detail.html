@@ -235,7 +235,7 @@
                         data-prop-agent-id="{{ prop.agent_id or '' }}"
                         data-prop-agent-name="{{ prop.agent.name if prop.agent else '' }}"
                         data-prop-title="{{ prop.title | e }}"
-                        data-prop-meta="{{ [prop.address, prop.city, prop.zona] | select | join(' · ') | e }}"
+                        data-prop-meta="{{ [prop.address | street, prop.city, prop.zona] | select | join(' · ') | e }}"
                         onclick="openQuickAlertModal(this)"
                         class="w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20">
                         <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
@@ -299,7 +299,7 @@
                                         {% if alert.property %}
                                         <div class="flex flex-col items-start">
                                             <span class="font-medium">{{ alert.property.title }}</span>
-                                            <span class="text-xs text-gray-500">{{ alert.property.address or '' }}</span>
+                                            <span class="text-xs text-gray-500">{{ alert.property.address | street }}</span>
                                             {# Propiedad de la otra empresa (PLAN_SUGERENCIAS_MULTIEMPRESA.md) #}
                                             {% if alert.property.company_id != active_company_id %}{{ ui.company_badge(alert.property.company, extra="mt-1") }}{% endif %}
                                         </div>

@@ -25,7 +25,7 @@ Detalle Propiedad
                 </h1>
 
                 <p class="text-sm sm:text-base text-gray-500 mt-1 break-words">
-                    {{ property.address or 'Sin dirección' }}{% if property.city %} · {{ property.city }}{% endif %}
+                    {{ (property.address | street) or 'Sin dirección' }}{% if property.city %} · {{ property.city }}{% endif %}
                 </p>
             </div>
 
@@ -790,11 +790,15 @@ Detalle Propiedad
                                 {{ item.field_label }}
                             </span>
                         </td>
-                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-500 max-w-[180px] truncate" title="{{ item.old_value or '' }}">
-                            {{ item.old_value or '—' }}
+                        {# Dirección sin número (filtro `street`, app/core/address.py) #}
+                        {% set is_address = item.field_name == 'address' %}
+                        {% set old_shown = (item.old_value | street) if is_address else item.old_value %}
+                        {% set new_shown = (item.new_value | street) if is_address else item.new_value %}
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-500 max-w-[180px] truncate" title="{{ old_shown or '' }}">
+                            {{ old_shown or '—' }}
                         </td>
-                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-gray-800 max-w-[180px] truncate" title="{{ item.new_value or '' }}">
-                            {{ item.new_value or '—' }}
+                        <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm font-medium text-gray-800 max-w-[180px] truncate" title="{{ new_shown or '' }}">
+                            {{ new_shown or '—' }}
                         </td>
                         <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-600 whitespace-nowrap">
                             {% if item.changed_by %}

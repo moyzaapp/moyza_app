@@ -266,7 +266,7 @@
                                         {% if alert.property %}
                                         <div class="flex flex-col items-start">
                                             <span class="font-medium">{{ alert.property.title }}</span>
-                                            <span class="text-xs text-gray-500">{{ (alert.property.address or '').split(',')[0] }}</span>
+                                            <span class="text-xs text-gray-500">{{ alert.property.address | street }}</span>
                                             {# Propiedad de la otra empresa asociada desde la Propuesta (PLAN_SUGERENCIAS_MULTIEMPRESA.md) #}
                                             {% if active_company and alert.property.company_id != active_company.id %}{{ ui.company_badge(alert.property.company, extra="mt-1") }}{% endif %}
                                         </div>

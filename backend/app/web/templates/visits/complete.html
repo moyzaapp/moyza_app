@@ -84,7 +84,7 @@ Visita Completada
             <div class="space-y-2 text-sm">
                 <p><span class="font-semibold">Cliente:</span> {{ visit.visitor_name }}</p>
                 <p><span class="font-semibold">Propiedad:</span> {{ property.title }}</p>
-                <p><span class="font-semibold">Dirección:</span> {{ property.address }}</p>
+                <p><span class="font-semibold">Dirección:</span> {{ property.address | street }}</p>
                 <p><span class="font-semibold">Fecha:</span> {{ visit.created_at | madrid_dt("%d/%m/%Y %H:%M") if visit.created_at else 'N/A' }}</p>
             </div>
         </div>

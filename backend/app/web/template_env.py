@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi.templating import Jinja2Templates
 
 from app.core import geo
+from app.core.address import street_only
 from app.core.config import settings
 from app.core.constants import AlertOrigin, BusinessType, PhoneCountryCodes
 from app.core.phone import phone_display, split_phone, tel_href, whatsapp_url
@@ -97,6 +98,8 @@ templates.env.filters["tel_href"] = tel_href
 templates.env.filters["split_phone"] = split_phone
 # Precios: {{ prop.price | eur }} -> '120.000 €'
 templates.env.filters["eur"] = eur
+# Dirección sin número (solo lo anterior a la primera coma): {{ prop.address | street }}
+templates.env.filters["street"] = street_only
 # Opciones del selector de país; globales para que las vea el macro phone_field
 templates.env.globals["phone_country_choices"] = PhoneCountryCodes.choices()
 templates.env.globals["phone_default_country"] = PhoneCountryCodes.DEFAULT

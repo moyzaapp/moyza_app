@@ -47,7 +47,7 @@
 
                         <div>
                             <label class="text-sm text-gray-600">Dirección</label>
-                            <p class="text-gray-800">{{ alert.property.address or '—' }}</p>
+                            <p class="text-gray-800">{{ (alert.property.address | street) or '—' }}</p>
                         </div>
 
                         {% if alert.property.price %}

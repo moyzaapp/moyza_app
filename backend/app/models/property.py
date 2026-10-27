@@ -16,6 +16,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import relationship
 
 from app.core import geo
+from app.core.address import street_only
 from app.core.constants import PropertyStatus
 from app.db.base import Base
 
@@ -196,3 +197,10 @@ class Property(Base):
     @property
     def provincia(self):
         return geo.provincia_for(self.pais, self.cod_postal)
+
+    # Dirección para mostrar en la app: solo la calle, sin lo que sigue a la
+    # primera coma (app/core/address.py). La completa sigue en `address`
+    # (formulario, PDF, WhatsApp, buscadores).
+    @property
+    def street(self) -> str:
+        return street_only(self.address)

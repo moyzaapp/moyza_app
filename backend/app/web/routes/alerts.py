@@ -1077,7 +1077,8 @@ async def search_properties(
         item = {
             "id": p.id,
             "title": p.title,
-            "address": p.address or "",
+            # Sin número: solo lo anterior a la primera coma (app/core/address.py)
+            "address": p.street,
             "city": p.city or "",
             "agent": p.agent.name if p.agent else "",
             "agent_id": p.agent_id,
