@@ -649,3 +649,21 @@ desplegar el código anterior. Las notificaciones marcadas leídas no vuelven.
 # Tests (unitarios, consulta y SQL de la migración en una transacción que se deshace)
 docker exec moyza_backend python -m pytest tests/test_buyer_attention_service.py tests/test_buyer_attention_channels.py -q
 ```
+
+## 18. Trazabilidad de indicadores para el admin (2026-10-26)
+
+PLAN_TRAZABILIDAD_INDICADORES.md. Sin migración y sin variables de entorno
+nuevas. Solo admin: lupa en cada tarjeta de Resultados Comerciales →
+Rendimiento que abre un panel lateral con la regla en una frase, los totales
+(congelado frente a recalculado en períodos cerrados, con aviso si difieren) y
+los registros que suman, con enlace al origen y descarga CSV. Ruta nueva
+`GET /commercial-results/{agente}/metric/{clave}` (`?format=csv`, `?offset=`),
+siempre dentro de la empresa activa (agente de otra empresa → 404; no admin →
+403). El contador y el detalle comparten la misma consulta, y un test por
+indicador comprueba que el número de filas coincide con la tarjeta.
+
+Tras desplegar: recompilar Tailwind (lo hace el build de Docker) y reiniciar.
+
+Nota conocida: las fechas de las filas se muestran en hora de Madrid, pero el
+período se corta en UTC (regla previa del contador). Un registro de las 22:00
+a 24:00 UTC del último día puede verse con fecha del día siguiente en el panel.
