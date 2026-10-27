@@ -64,24 +64,24 @@ del Inicio, abriendo el mismo panel.)
 ## 3. Implementación
 
 ### Fase 1 · Servicio
-- [ ] `PerformanceReportService.indicator_rows(indicator, agent_id, period_start, period_end, limit, offset)`
+- [x] `PerformanceReportService.indicator_rows(indicator, agent_id, period_start, period_end, limit, offset)`
       reutilizando `_indicator_spec` (+ `hojas_visita` con `visits_for_agent`), con `joinedload` de lo que
       pinta cada fila. `indicator_rule_text(indicator, agent, period, company)` para la frase.
-- [ ] `tests/test_indicator_rows.py`: para cada indicador, `len(rows) == calculate_metrics()[indicador]`
+- [x] `tests/test_indicator_rows.py`: para cada indicador, `len(rows) == calculate_metrics()[indicador]`
       con datos de prueba (venta y alquiler, dentro y fuera del período, otra empresa, otro agente); la frase
       contiene agente, empresa y fechas.
 
 ### Fase 2 · Ruta, panel y CSV
-- [ ] `GET /commercial-results/{agent_id}/metric/{key}` (admin, agente de la empresa activa) → parcial
+- [x] `GET /commercial-results/{agent_id}/metric/{key}` (admin, agente de la empresa activa) → parcial
       `commercial_results/_metric_detail.html`; `?format=csv` → descarga.
-- [ ] Lupa en `metric_card` (solo si `is_admin`), drawer accesible (`role="dialog"`, Escape, foco), carga con
+- [x] Lupa en `metric_card` (solo si `is_admin`), drawer accesible (`role="dialog"`, Escape, foco), carga con
       `fetch`, estado "cargando" y error en el propio panel. JS en `static/js/commercial_results.js`.
-- [ ] Período cerrado: mostrar snapshot y recálculo.
-- [ ] Tests de ruta: 403 para agente; parcial contiene las filas; CSV con cabecera y N filas; aislamiento por empresa.
+- [x] Período cerrado: mostrar snapshot y recálculo.
+- [x] Tests de ruta: 403 para agente; parcial contiene las filas; CSV con cabecera y N filas; aislamiento por empresa.
 
 ### Fase 3 · QA
-- [ ] `ui_lint.py`; revisión a 375 px (el panel ocupa toda la pantalla en móvil); `fetch_page.py`.
-- [ ] Nota breve en `MULTIEMPRESA_MOYZA_MOES.md`: sin migración, sin variables.
+- [x] `ui_lint.py`; revisión a 375 px (el panel ocupa toda la pantalla en móvil); `fetch_page.py`.
+- [x] Nota breve de despliegue: en §5 de este documento (pendiente de mover a `MULTIEMPRESA_MOYZA_MOES.md`).
 
 ## 4. Decisiones tomadas (2026-10-26)
 
@@ -95,3 +95,34 @@ del Inicio, abriendo el mismo panel.)
 Nota de implementación: la columna de dirección en las filas de captaciones/bajadas se muestra como
 título/referencia y ciudad, **sin la dirección**, hasta que se cierre el cambio de "dirección sin número"
 que está en curso en otra tarea (evita tocar el mismo filtro a la vez).
+
+## 5. Estado y nota de despliegue (2026-10-26)
+
+Implementadas las fases 1 a 3. Nota para `MULTIEMPRESA_MOYZA_MOES.md` (moverla allí):
+
+> **Trazabilidad de indicadores (PLAN_TRAZABILIDAD_INDICADORES.md).** Sin migración y sin variables de
+> entorno nuevas. Solo admin: lupa en cada tarjeta de Resultados Comerciales → Rendimiento que abre un panel
+> lateral con la regla, los totales (congelado frente a recalculado en períodos cerrados) y los registros
+> que suman, con enlace al origen y descarga CSV. Ruta nueva `GET /commercial-results/{agente}/metric/{clave}`
+> (`?format=csv`, `?offset=`), siempre dentro de la empresa activa (agente de otra empresa → 404; no admin → 403).
+> Tras desplegar: recompilar Tailwind (lo hace el build de Docker) y reiniciar.
+
+Dónde está:
+
+- Servicio: `PerformanceReportService.indicator_rows`, `indicator_rule_text`, `indicator_live_counts` /
+  `indicator_live_total`, `indicator_frozen`. El contador (`grouped_counts`, `calculate_metrics`) y el detalle
+  comparten `_scoped_indicator_query` y `_visits_query`: la regla está en un solo sitio. Contactos solo suma
+  venta y alquiler (`COUNTED_KINDS`), igual que la tarjeta.
+- Ruta y CSV: `routes/commercial_results.py::metric_detail` (`METRIC_CSV_COLUMNS`; CSV con `;` y BOM para Excel).
+- Interfaz: `commercial_results/_metric_detail.html`, parámetro `detail_url` de `metric_card`, macro
+  `ui.drawer` en `components/ui_macros.html` (mismo helper `UI.openModal` que los modales) y el bloque del
+  panel en `static/js/commercial_results.js`.
+- Tests: `tests/test_indicator_rows.py` (filas == tarjeta por indicador) y `tests/test_metric_detail.py` (ruta).
+
+Desviaciones y notas:
+
+- Hojas de visita sin ficha generada enlazan a `/visits` (no hay página de detalle de una visita); con ficha, al PDF.
+- Las fechas de las filas se muestran en hora de Madrid (`madrid_dt`, como el resto de la app), pero los
+  límites del período se aplican en UTC (regla previa del contador, no cambiada). Un registro creado entre
+  las 22:00 y las 24:00 UTC del último día puede verse con fecha del día siguiente en el panel.
+
