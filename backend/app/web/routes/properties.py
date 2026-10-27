@@ -14,7 +14,7 @@ from app.web.template_env import templates
 
 from sqlalchemy import or_, cast, Integer, case, func
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.constants import PropertyInteractionType
 from app.core.constants import PropertyStatus
@@ -274,26 +274,37 @@ async def properties_page(
     if search:
         pattern = f"%{search}%"
 
+        conditions = [
+            Property.title.ilike(pattern),
+            Property.address.ilike(pattern),
+            Property.city.ilike(pattern),
+            Client.name.ilike(pattern),
+            Client.phone.ilike(pattern),
+            Agent.name.ilike(pattern),
+        ]
+
+        # Búsqueda por teléfono del propietario sin depender del formato:
+        # "600 112 233" o "+34 600-112-233" encuentran "34600112233" (y los
+        # teléfonos antiguos guardados con espacios o guiones).
+        phone_digits = "".join(ch for ch in search if ch.isdigit())
+        if len(phone_digits) >= 3 and not search.strip("+()-. 0123456789"):
+            conditions.append(
+                func.regexp_replace(Client.phone, "[^0-9]", "", "g").like(f"%{phone_digits}%")
+            )
+
         filtered_query = (
             filtered_query
             .outerjoin(Client, Property.client_id == Client.id)
             .outerjoin(Agent, Property.agent_id == Agent.id)
-            .filter(
-                or_(
-                    Property.title.ilike(pattern),
-                    Property.address.ilike(pattern),
-                    Property.city.ilike(pattern),
-                    Client.name.ilike(pattern),
-                    Agent.name.ilike(pattern)
-                )
-            )
+            .filter(or_(*conditions))
         )
 
     numeric_title = case(
         (Property.title.op("~")(r"^\d+$"), cast(Property.title, Integer)),
         else_=None
     )
-    properties = filtered_query.order_by(
+    # El teléfono del propietario se pinta en "Mis propiedades": cliente en la misma consulta (sin N+1)
+    properties = filtered_query.options(joinedload(Property.client)).order_by(
         Property.price.desc().nullslast(),
         numeric_title.desc().nullslast()
     ).all()

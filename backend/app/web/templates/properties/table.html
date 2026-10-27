@@ -9,7 +9,7 @@
             <input
                 type="text"
                 name="search"
-                placeholder="Buscar por título, dirección, ciudad, cliente o agente..."
+                placeholder="Buscar por título, dirección, ciudad, cliente, teléfono o agente..."
                 value="{{ search or '' }}"
                 class="w-full border border-gray-300 rounded-xl p-2 sm:p-3 focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
@@ -41,7 +41,7 @@
     <!-- Scroll horizontal en móvil y vertical cuando hay muchas propiedades -->
     <div class="overflow-x-auto overflow-y-auto max-h-[60vh] -mx-px">
 
-    <table class="js-sortable w-full min-w-[800px]">
+    <table class="js-sortable w-full min-w-[960px]">
 
         <thead class="bg-gray-50 border-b border-gray-200">
 
@@ -53,6 +53,10 @@
 
                 <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
                     Cliente
+                </th>
+
+                <th class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap">
+                    Teléfono propietario
                 </th>
 
                 <th data-sort-type="text" class="sticky top-0 z-10 bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 text-left text-xs sm:text-sm font-semibold text-gray-600 whitespace-nowrap cursor-pointer select-none hover:text-gray-900">
@@ -97,6 +101,28 @@
                     {{ property.client.name if property.client else '-' }}
                 </td>
 
+                {# Teléfono del propietario: solo en "Mis propiedades" (table_others.html no lo carga) #}
+                <td class="px-3 sm:px-6 py-1 text-sm whitespace-nowrap">
+                    {% set owner_phone = property.client.phone if property.client else None %}
+                    {% if owner_phone %}
+                    {% set owner_whatsapp_url = owner_phone | whatsapp_url %}
+                    <div class="flex items-center gap-1">
+                        <a href="{{ owner_phone | tel_href }}" class="inline-flex items-center h-10 text-blue-600 hover:underline">
+                            {{ owner_phone | phone_display }}
+                        </a>
+                        {% if owner_whatsapp_url %}
+                        <a href="{{ owner_whatsapp_url }}" target="_blank" rel="noopener noreferrer"
+                            aria-label="Abrir chat de WhatsApp con {{ property.client.name }}" title="Abrir chat de WhatsApp"
+                            class="inline-flex items-center justify-center w-10 h-10 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors">
+                            <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z"/></svg>
+                        </a>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <span class="text-gray-400">—</span>
+                    {% endif %}
+                </td>
+
                 <td data-sort-value="{{ property.agent.name if property.agent else '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
                     {{ property.agent.name if property.agent else '-' }}
                 </td>
@@ -122,7 +148,7 @@
                             bg-green-100 text-green-700
 
                         {% elif property.status == 'Pausada' %}
-                            bg-yellow-100 text-yellow-700
+                            bg-amber-100 text-amber-700
 
                         {% elif property.status == 'Vendida' %}
                             bg-red-100 text-red-700
@@ -245,7 +271,7 @@
 
             <tr>
 
-                <td colspan="8" class="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500">
+                <td colspan="9" class="px-3 sm:px-6 py-8 text-center text-xs sm:text-sm text-gray-500">
 
                     {% if search %}
                     No se encontraron propiedades para "{{ search }}"
