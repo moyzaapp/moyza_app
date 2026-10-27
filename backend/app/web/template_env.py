@@ -32,6 +32,22 @@ def _tailwind_css_version() -> int | None:
         return None
 
 
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+
+def static_url(path: str) -> str:
+    """'/static/js/x.js' -> '/static/js/x.js?v=<mtime>' para que el navegador no
+    reutilice una versión antigua en caché tras un despliegue. Si el archivo no
+    existe, devuelve la ruta tal cual. Se calcula en cada render (barato: un
+    stat) para no tener que reiniciar al cambiar un script en desarrollo."""
+    relative = path.removeprefix("/static/")
+    try:
+        version = int((_STATIC_DIR / relative).stat().st_mtime)
+    except OSError:
+        return path
+    return f"{path}?v={version}"
+
+
 tailwind_css_version = _tailwind_css_version()
 if tailwind_css_version is None:
     logger.warning(
@@ -117,3 +133,5 @@ templates.env.globals["geo_cp"] = {"provincias": geo.PROVINCIAS_POR_CP, "spain_a
                                    "no_province": geo.NO_PROVINCE}
 # Tailwind: <link> al CSS compilado si existe; si es None, base.html carga tailwind.js
 templates.env.globals["tailwind_css_version"] = tailwind_css_version
+# Sello de versión para scripts/estilos propios: {{ static_url('/static/js/x.js') }}
+templates.env.globals["static_url"] = static_url

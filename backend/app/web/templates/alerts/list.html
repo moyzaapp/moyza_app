@@ -809,9 +809,9 @@
         </form>
 {% endcall %}
 
-<script src="/static/js/alert-duplicates.js"></script>
-<script src="/static/js/alert-assign.js"></script>
-<script src="/static/js/phone-field.js"></script>
+<script src="{{ static_url('/static/js/alert-duplicates.js') }}"></script>
+<script src="{{ static_url('/static/js/alert-assign.js') }}"></script>
+<script src="{{ static_url('/static/js/phone-field.js') }}"></script>
 {% if is_admin %}
 <script>
 // ---- Reasignar desde el listado (un modal para todas las filas, solo admin) ----

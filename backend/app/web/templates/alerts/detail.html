@@ -454,7 +454,7 @@
     {{ ui.modal_footer(submit_label="Reasignar") }}
 </form>
 {% endcall %}
-<script src="/static/js/alert-assign.js"></script>
+<script src="{{ static_url('/static/js/alert-assign.js') }}"></script>
 <script>
 (function () {
     var assign = window.AlertAssign && AlertAssign.init('ra');
@@ -525,7 +525,7 @@
 </form>
 {% endcall %}
 
-<script src="/static/js/search-profile.js"></script>
+<script src="{{ static_url('/static/js/search-profile.js') }}"></script>
 <script>
 const CLOSING_STAGES = new Set({{ FollowUpActionType.CLOSING_STAGES | list | sort | tojson }});
 // Perfil obligatorio (PLAN_PERFIL_OBLIGATORIO.md): etapas que lo exigen y estado del comprador.

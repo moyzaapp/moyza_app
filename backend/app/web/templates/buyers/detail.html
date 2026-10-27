@@ -466,10 +466,10 @@
 </form>
 {% endcall %}
 
-<script src="/static/js/alert-duplicates.js"></script>
-<script src="/static/js/alert-assign.js"></script>
-<script src="/static/js/phone-field.js"></script>
-<script src="/static/js/search-profile.js"></script>
+<script src="{{ static_url('/static/js/alert-duplicates.js') }}"></script>
+<script src="{{ static_url('/static/js/alert-assign.js') }}"></script>
+<script src="{{ static_url('/static/js/phone-field.js') }}"></script>
+<script src="{{ static_url('/static/js/search-profile.js') }}"></script>
 <script>
 var qaDupRequest = 0;
 var qaAssign = window.AlertAssign ? AlertAssign.init('qa') : null;
