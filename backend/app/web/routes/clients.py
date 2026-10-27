@@ -5,6 +5,7 @@ from app.web.dependencies.auth import get_agent_from_user
 from app.models.user import User
 from app.models.client import Client
 from app.models.property import Property
+from app.core.constants import PropertyStatus
 from fastapi import APIRouter
 from fastapi import Request
 from fastapi import Depends
@@ -39,6 +40,14 @@ async def clients_page(request: Request, db: Session = Depends(get_db)):
     # Solo clientes de la empresa activa
     base_query = scope_clients(db.query(Client), company.id)
 
+    # Propiedades que el usuario puede ver en la empresa activa (sin
+    # archivadas): las de su agente, o todas si es admin. Alimentan la
+    # columna "Dirección del inmueble" y la búsqueda por dirección.
+    visible_properties = scope_properties(db.query(Property), company.id).filter(
+        Property.client_id.isnot(None),
+        Property.status != PropertyStatus.ARCHIVED,
+    )
+
     # Agentes ven solo clientes cuyas propiedades tienen asignadas
     if not is_admin(current_user):
         agent = get_agent_from_user(current_user, db)
@@ -53,21 +62,44 @@ async def clients_page(request: Request, db: Session = Depends(get_db)):
                 .subquery()
             )
             base_query = base_query.filter(Client.id.in_(client_ids))
+            visible_properties = visible_properties.filter(Property.agent_id == agent.id)
         else:
             base_query = base_query.filter(Client.id == -1)
+            visible_properties = visible_properties.filter(Property.id == -1)
 
     search = (request.query_params.get("search") or "").strip()
 
     if search:
+        # La dirección se busca completa (con número), solo entre las
+        # propiedades visibles; IN evita filas duplicadas por cliente.
+        address_client_ids = (
+            visible_properties
+            .filter(Property.address.ilike(f"%{search}%"))
+            .with_entities(Property.client_id)
+            .subquery()
+        )
         base_query = base_query.filter(
             or_(
                 Client.name.ilike(f"%{search}%"),
                 Client.email.ilike(f"%{search}%"),
-                Client.phone.ilike(f"%{search}%")
+                Client.phone.ilike(f"%{search}%"),
+                Client.id.in_(address_client_ids),
             )
         )
 
     clients = base_query.order_by(Client.name).all()
+
+    # Una sola consulta para las propiedades de todos los clientes listados
+    properties_by_client = {}
+    if clients:
+        rows = (
+            visible_properties
+            .filter(Property.client_id.in_([c.id for c in clients]))
+            .order_by(Property.address, Property.id)
+            .all()
+        )
+        for prop in rows:
+            properties_by_client.setdefault(prop.client_id, []).append(prop)
 
     error = request.query_params.get("error")
 
@@ -80,6 +112,7 @@ async def clients_page(request: Request, db: Session = Depends(get_db)):
         context={
             "request": request,
             "clients": clients,
+            "properties_by_client": properties_by_client,
             "current_user": current_user,
             "error": error,
             "search": search,
