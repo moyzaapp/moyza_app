@@ -71,8 +71,11 @@
                             {{ ui.badge("Búsqueda general", "gray") }}
                             {% if alert.business_type %}{{ ui.status_badge("business", alert.business_type, dot=False) }}{% endif %}
                         </p>
+                        {# En Alquiler no hay perfil de comprador (`profile_shown`): criteria_parts llega vacío #}
                         {% if criteria_parts %}
                         <p class="text-sm text-gray-700">{{ criteria_parts | join(" · ") }}</p>
+                        {% elif not profile_shown %}
+                        <p class="text-sm text-gray-500">Aún sin propiedad asociada.</p>
                         {% else %}
                         <p class="text-sm text-gray-500">Aún sin perfil de búsqueda ni propiedad asociada.</p>
                         {% endif %}
@@ -486,7 +489,8 @@
         </div>
 
         {% if follow_up_profile %}
-        {# «Contactado» lleva dentro el perfil del comprador (PLAN_PERFIL_OBLIGATORIO.md):
+        {# Nunca en Alquiler: `follow_up_profile` exige `profile_shown` (buyer_matching.profile_applies).
+           «Contactado» lleva dentro el perfil del comprador (PLAN_PERFIL_OBLIGATORIO.md):
            obligatorio si aún no está completo; si ya lo está, sale precargado para editarlo.
            Solo obligatorio si `profile_required` (Venta; PLAN_PERFIL_SOLO_VENTA.md): en
            Alquiler los campos son opcionales, pero si se rellenan van con los mínimos.

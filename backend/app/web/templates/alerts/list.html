@@ -703,8 +703,13 @@
 
                     <!-- Sin referencia: búsqueda general -->
                     <div id="panelRefWithout" class="hidden space-y-2">
-                        <p class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
+                        {# En Alquiler no se toma perfil de comprador (buyer_matching.profile_applies):
+                           el texto cambia con la operación elegida (JS al final) #}
+                        <p id="refWithoutProfileText" class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
                             Búsqueda general: al llamarle tomarás su perfil (zona, tipo, habitaciones, precio) y le propondrás propiedades de toda la empresa.
+                        </p>
+                        <p id="refWithoutRentText" class="hidden rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
+                            Búsqueda general de alquiler: al llamarle, busca y asóciale una propiedad de toda la empresa.
                         </p>
                         {% if not is_admin %}
                         <p class="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
@@ -1317,6 +1322,23 @@ function setBuyerMode(mode) {
     phoneCountry.addEventListener('change', refreshBuyerMatch);
     // La operación cuenta para el aviso de búsqueda ya abierta
     businessTypeSelect.addEventListener('change', function () { window.alertDupRefresh(); });
+})();
+</script>
+<script>
+// ---- Sin referencia en Alquiler: sin perfil de comprador, otro texto ----
+(function () {
+    var select = document.getElementById('alertBusinessType');
+    var profileText = document.getElementById('refWithoutProfileText');
+    var rentText = document.getElementById('refWithoutRentText');
+    if (!select || !profileText || !rentText) return;
+    var noProfileOperations = {{ no_profile_operations | default([]) | tojson }};
+    function update() {
+        var rent = noProfileOperations.indexOf(select.value) !== -1;
+        profileText.classList.toggle('hidden', rent);
+        rentText.classList.toggle('hidden', !rent);
+    }
+    select.addEventListener('change', update);
+    update();
 })();
 </script>
 <script>

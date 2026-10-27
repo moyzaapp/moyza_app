@@ -16,6 +16,10 @@
   si se rellena algo) y la Propuesta (`can_propose`) ofrece el buscador manual
   aunque no haya perfil; las sugerencias siguen saliendo solo con perfil completo.
 
+  Alquiler sin perfil de comprador (`profile_shown`, de buyer_matching.profile_applies):
+  solo Contactar y Propuesta; ni estado del perfil, ni sugerencias. La Propuesta
+  queda con el buscador manual para asociar o cambiar la propiedad.
+
   Dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md): las sugerencias y el buscador manual
   salen de MOYZA y MOES PREMIUM; cada tarjeta y cada resultado lleva el distintivo de su
   empresa (`ui.company_badge`), la cabecera el desglose (`suggestions_by_company`) y un
@@ -35,7 +39,9 @@
 {# Estado del perfil en Contactar y Propuesta: resumen con "Editar", aviso ámbar
    (obligatorio y pendiente) o línea discreta (opcional y sin perfil completo) #}
 {% macro profile_status() -%}
-{% if profile_complete %}
+{% if not profile_shown %}
+{# Alquiler: sin perfil de comprador #}
+{% elif profile_complete %}
 <div class="flex flex-wrap items-center gap-2">
     <span class="text-xs font-semibold uppercase tracking-wide text-gray-500">Perfil</span>
     {% for part in criteria_parts %}
@@ -61,7 +67,7 @@
 {% macro operation_warning() -%}
 {% if operation_mismatch %}
 {{ ui.banner("La propiedad asociada es de " ~ operation_mismatch.property ~ " y el comprador busca " ~ operation_mismatch.wanted,
-             "amber", text="Propónle otra que encaje con su búsqueda o cambia la operación en el perfil.") }}
+             "amber", text=("Propónle otra que encaje con su búsqueda o cambia la operación en el perfil." if profile_shown else "Propónle otra que encaje con su búsqueda.")) }}
 {% endif %}
 {%- endmacro %}
 
@@ -69,7 +75,7 @@
     <div class="px-4 sm:px-6 pt-4">
         <h2 id="searchStepsTitle" class="text-lg font-bold text-gray-900">Búsqueda del comprador</h2>
         <p class="text-sm text-gray-500 mt-1">
-            {% if alert.property %}Llámale, toma su perfil y ofrécele esta u otras propiedades que encajen{% else %}Llámale, toma su perfil y proponle una propiedad{% endif %}
+            {% if not profile_shown %}{% if alert.property %}Llámale y ofrécele esta u otra propiedad{% else %}Llámale y proponle una propiedad{% endif %}{% elif alert.property %}Llámale, toma su perfil y ofrécele esta u otras propiedades que encajen{% else %}Llámale, toma su perfil y proponle una propiedad{% endif %}
         </p>
     </div>
     <div class="px-4 sm:px-6 mt-2">
@@ -112,12 +118,16 @@
 
             <div class="flex flex-col sm:flex-row sm:items-center gap-3 pt-4 border-t border-gray-100">
                 {{ ui.button("Registrar seguimiento", "primary", attrs='onclick="openFollowUpModal()"', full_mobile=True) }}
+                {% if profile_shown %}
                 {{ ui.button("Siguiente: perfil de búsqueda", "text", href="/alerts/" ~ alert.id ~ "?step=profile#propuesta") }}
+                {% else %}
+                {{ ui.button("Siguiente: propuesta", "text", href="/alerts/" ~ alert.id ~ "?step=proposal#propuesta") }}
+                {% endif %}
             </div>
         </div>
 
         {# ------------------------------------------------------------ 2. Perfil #}
-        {% elif step == "profile" %}
+        {% elif step == "profile" and profile_shown %}
         <form method="POST" action="/alerts/{{ alert.id }}/search-profile" data-once data-loading-text="Guardando…">
             <div class="mb-5 space-y-1">
                 {% if profile_required %}
@@ -178,9 +188,9 @@
             </div>
             {% endif %}
 
-            {# Sugerencias: solo con perfil completo. Perfil opcional sin completar
-               (Alquiler): directamente el buscador #}
-            {% if profile_complete %}
+            {# Sugerencias: solo con perfil completo y visible. En Alquiler (sin perfil
+               de comprador): directamente el buscador #}
+            {% if profile_complete and profile_shown %}
             {# Desglose por empresa y filtro "Solo {empresa activa}" (PLAN_SUGERENCIAS_MULTIEMPRESA.md):
                "12 propiedades sugeridas · 8 MOYZA · 4 MOES PREMIUM"; el enlace solo si hay de más de una #}
             {% set proposal_url = "/alerts/" ~ alert.id ~ "?step=proposal" %}
@@ -230,8 +240,9 @@
             {# Buscador: todas las disponibles de las dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md).
                Con perfil, "¿No está en la lista?" bajo las sugerencias; con perfil opcional sin
                completar, el modo de proponer #}
-            <div{% if profile_complete %} class="pt-5 border-t border-gray-200"{% endif %}>
-                <h3 class="text-sm font-semibold text-gray-900">{{ "¿No está en la lista?" if profile_complete else "Buscar una propiedad" }}</h3>
+            {% set with_suggestions = profile_complete and profile_shown %}
+            <div{% if with_suggestions %} class="pt-5 border-t border-gray-200"{% endif %}>
+                <h3 class="text-sm font-semibold text-gray-900">{{ "¿No está en la lista?" if with_suggestions else "Buscar una propiedad" }}</h3>
                 <p class="text-xs text-gray-500 mt-1">Busca por título o dirección entre todas las propiedades disponibles de las dos empresas.</p>
                 <div class="relative mt-3">
                     <label for="linkPropertySearch" class="sr-only">Buscar propiedad para asociar</label>

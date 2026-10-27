@@ -3,8 +3,14 @@ Perfil de búsqueda obligatorio solo en Venta; opcional en Alquiler
 (PLAN_PERFIL_SOLO_VENTA.md).
 
 `buyer_matching.profile_required(alert)` es la única fuente de verdad de
-"hace falta perfil". En Alquiler el perfil se puede registrar (y sugiere
-propiedades), pero no bloquea etapas, ni la Propuesta, ni asociar propiedad.
+"hace falta perfil". En Alquiler el perfil no bloquea etapas, ni la
+Propuesta, ni asociar propiedad.
+
+2026-10-26 (alquiler sin perfil de comprador): en Alquiler el perfil ya ni
+se muestra ni se guarda (`buyer_matching.profile_applies`): sin bloque de
+perfil, sin paso Perfil, sin sugerencias y sin perfil en «Contactado»; la
+ficha de un comprador solo de alquiler no tiene las pestañas de perfil ni de
+compatibles (`buyer_profile_applies`). Los datos guardados se conservan.
 
 Rutas en proceso contra una SQLite en memoria con los modelos reales; mismo
 entorno y helpers que tests/test_alert_search.py y tests/test_profile_required.py.
@@ -36,7 +42,7 @@ from tests.test_alert_search import (  # noqa: F401  (env es un fixture)
     env,
 )
 from tests.test_profile_location import _save_buyer_profile
-from tests.test_profile_required import PROFILE_STEP, _actions, _criteria
+from tests.test_profile_required import _actions, _criteria
 
 
 def _rent_alert(env, prop_key="ana", agent_key="ana", created_at=T0, buyer=None):
@@ -116,29 +122,25 @@ def test_alquiler_contactado_sin_campos(env):
     assert _criteria(env) is None                                   # no se crea un perfil vacío
 
 
-def test_alquiler_contactado_con_campos_parciales_exige_minimos(env):
+def test_alquiler_contactado_con_campos_del_perfil_los_ignora(env):
+    """Alquiler sin perfil de comprador (buyer_matching.profile_applies): si llegan
+    campos del perfil (parciales o completos) se ignoran; ni se exigen mínimos ni
+    se guarda perfil. Antes: parciales → error de mínimos; completos → perfil."""
     alert = _rent_alert(env)
     response = _add_follow_up(env, env.users["ana"], alert, "CONTACTADO",
                               form={"property_type": "Piso", "min_bedrooms": "2"})
-    assert response.headers["location"] == f"/alerts/{alert.id}{PROFILE_STEP}"
-    assert _flash(response) == {
-        "category": "error",
-        "message": "Para registrar «Contactado» completa el perfil del comprador. Falta: precio máximo, ubicación",
-    }
-    assert _reload(env, alert).follow_ups == [] and _criteria(env) is None
+    assert _flash(response) == {"category": "success", "message": "Seguimiento agregado correctamente"}
+    assert _actions(env, alert) == ["CONTACTADO"] and _criteria(env) is None
 
 
-def test_alquiler_contactado_con_minimos_un_solo_contactado(env):
+def test_alquiler_contactado_con_minimos_no_guarda_perfil(env):
     alert = _rent_alert(env)
     response = _add_follow_up(env, env.users["ana"], alert, "CONTACTADO", notes="Busca piso",
                               form=dict(CONTACT_PROFILE, business_type="Alquiler"))
-    assert _flash(response) == {"category": "success",
-                                "message": "«Contactado» registrado con el perfil de Juan Comprador"}
-    criteria = _criteria(env)
-    assert buyer_matching.profile_is_complete(criteria) and criteria.business_type == "Alquiler"
+    assert _flash(response) == {"category": "success", "message": "Seguimiento agregado correctamente"}
+    assert _criteria(env) is None
     stored = _reload(env, alert)
-    assert [f.action_type for f in stored.follow_ups] == ["CONTACTADO"]
-    assert stored.follow_ups[0].notes == "Busca piso\nPerfil de búsqueda: Piso · Centro · ≤ 150.000 €."
+    assert [(f.action_type, f.notes) for f in stored.follow_ups] == [("CONTACTADO", "Busca piso")]
     assert stored.business_type == "Alquiler"
 
 
@@ -171,32 +173,19 @@ def test_alquiler_buscador_de_la_propuesta_sin_perfil(env):
     assert titles(venta) == ["Piso Centro"]
 
 
-def test_alquiler_paso_perfil_vacio_no_guarda_nada(env):
+@pytest.mark.parametrize("form", [
+    {"country": "España", "business_type": "Alquiler"},              # vacío
+    {"property_type": "Piso", "max_price": "900"},                   # parcial
+    CONTACT_PROFILE,                                                 # completo
+])
+def test_alquiler_paso_perfil_no_guarda_nada(env, form):
+    """Alquiler sin perfil de comprador: el paso Perfil no existe y su POST no
+    guarda nada (antes: vacío → aviso, parcial → mínimos, completo → Contactado)."""
     alert = _rent_alert(env)
-    response = _save_profile(env, env.users["ana"], alert, form={"country": "España", "business_type": "Alquiler"})
+    response = _save_profile(env, env.users["ana"], alert, form=form)
     assert response.headers["location"] == f"/alerts/{alert.id}?step=proposal#propuesta"
-    assert _flash(response) == {
-        "category": "info",
-        "message": "No se ha guardado nada: el perfil de Juan Comprador está vacío y es opcional en alquiler",
-    }
+    assert _flash(response) == {"category": "info", "message": "En alquiler no se registra el perfil del comprador"}
     assert _criteria(env) is None and _reload(env, alert).follow_ups == []
-
-
-def test_alquiler_paso_perfil_parcial_exige_minimos(env):
-    alert = _rent_alert(env)
-    response = _save_profile(env, env.users["ana"], alert, form={"property_type": "Piso", "max_price": "900"})
-    assert response.headers["location"] == f"/alerts/{alert.id}{PROFILE_STEP}"
-    assert _flash(response) == {"category": "error", "message": "Faltan datos del perfil: ubicación"}
-    assert _criteria(env) is None
-
-
-def test_alquiler_paso_perfil_completo_registra_contactado(env):
-    alert = _rent_alert(env)
-    response = _save_profile(env, env.users["ana"], alert, form=CONTACT_PROFILE)
-    assert response.headers["location"] == f"/alerts/{alert.id}?step=proposal"
-    assert "registrado como «Contactado»" in _flash(response)["message"]
-    assert _actions(env, alert) == ["CONTACTADO"]
-    assert _criteria(env).business_type == "Alquiler"
 
 
 # ---------------------------------------------------------------------------
@@ -243,92 +232,86 @@ def test_cambio_de_operacion_sin_datos_actualiza_el_perfil_existente(env):
     assert criteria.business_type == "Alquiler" and criteria.max_price is None and criteria.zones == ["Centro"]
 
 
-def test_alquiler_a_venta_con_perfil_incompleto_rechazado(env):
-    alert = _rent_alert(env)
-    response = _save_profile(env, env.users["ana"], alert, form={"business_type": "Venta", "property_type": "Piso"})
-    assert response.headers["location"] == f"/alerts/{alert.id}{PROFILE_STEP}"
-    assert _flash(response) == {"category": "error", "message": "Faltan datos del perfil: precio máximo, ubicación"}
-    stored = _reload(env, alert)
-    assert stored.business_type == "Alquiler" and stored.follow_ups == [] and _criteria(env) is None
-
-    # Sin ningún dato: también, con todos los mínimos
-    response = _save_profile(env, env.users["ana"], alert, form={"business_type": "Venta"})
-    assert _flash(response)["message"] == "Faltan datos del perfil: tipo de inmueble, precio máximo, ubicación"
-
-    # Y con «Contactado» igual
-    response = _add_follow_up(env, env.users["ana"], alert, "CONTACTADO", form={"business_type": "Venta"})
-    assert _flash(response)["message"].endswith("Falta: tipo de inmueble, precio máximo, ubicación")
-    assert _reload(env, alert).business_type == "Alquiler"
-
-
-def test_alquiler_a_venta_con_minimos(env):
+def test_alquiler_a_venta_ya_no_se_cambia_desde_el_perfil(env):
+    """En Alquiler no hay formulario de perfil: ni el paso Perfil ni «Contactado»
+    cambian la operación (antes: Alquiler → Venta exigía los mínimos)."""
     alert = _rent_alert(env)
     response = _save_profile(env, env.users["ana"], alert, form=dict(CONTACT_PROFILE, business_type="Venta"))
-    assert _flash(response)["message"].endswith(". La alerta pasa a Venta")
+    assert _flash(response)["category"] == "info"
+    response = _add_follow_up(env, env.users["ana"], alert, "CONTACTADO", form={"business_type": "Venta"})
+    assert _flash(response) == {"category": "success", "message": "Seguimiento agregado correctamente"}
     stored = _reload(env, alert)
-    assert stored.business_type == "Venta" and _actions(env, alert) == ["CONTACTADO"]
-    assert buyer_matching.profile_is_complete(_criteria(env))
+    assert stored.business_type == "Alquiler" and _criteria(env) is None
+    assert [(f.action_type, f.notes) for f in stored.follow_ups] == [("CONTACTADO", None)]
 
 
 # ---------------------------------------------------------------------------
 # Render del detalle
 # ---------------------------------------------------------------------------
 
-def test_detalle_alquiler_sin_perfil(env):
+def test_detalle_alquiler_sin_perfil_de_comprador(env):
+    """Alquiler: sin bloque de perfil, sin paso Perfil, sin perfil en «Contactado».
+    Se mantienen el comprador, la propiedad, los seguimientos y la Propuesta con
+    el buscador manual."""
     alert = _rent_alert(env)
 
-    # Contactar: línea discreta en lugar del banner; "Cambiar propiedad" disponible
     response, html = _detail(env, env.users["ana"], alert)
     ctx = response.context
-    assert ctx["step"] == "contact" and ctx["profile_required"] is False and ctx["can_propose"] is True
-    assert "Perfil opcional en alquiler: si lo registras verás propiedades sugeridas." in html
-    assert "Registrar perfil" in html
-    assert "Perfil pendiente" not in html and "Cuando hables con el comprador" not in html
-    assert "Cambiar propiedad" in html
+    assert ctx["step"] == "contact" and ctx["profile_shown"] is False and ctx["can_propose"] is True
+    assert ctx["search_steps"] == (("contact", "1. Contactar"), ("proposal", "2. Propuesta"))
+    assert ctx["follow_up_profile"] is False
+    for text in ("Perfil del comprador", "2. Perfil", "Perfil opcional", "Registrar perfil",
+                 "Perfil pendiente", "Siguiente: perfil de búsqueda", 'id="followUpProfile"',
+                 'id="fuPropertyType"', "toma su perfil"):
+        assert text not in html, text
+    for text in ("Información del Interesado", "Juan Comprador", "Historial de Seguimientos",
+                 "Piso Centro", "Cambiar propiedad", "1. Contactar", "2. Propuesta",
+                 "Siguiente: propuesta", '<option value="CONTACTADO">', "const PROFILE_BLOCKS_STAGES = false"):
+        assert text in html, text
 
-    # Modal: perfil opcional (sin `required` al pintar) que sigue a la operación;
-    # Visita programada no se bloquea
-    assert "const PROFILE_BLOCKS_STAGES = false" in html
-    assert 'id="fuPropertyType" name="property_type" required' not in html
-    assert 'id="fuMaxPrice" name="max_price" value="" placeholder="–" required' not in html
-    assert "Opcional en alquiler: si lo rellenas, incluye tipo, precio máximo y ubicación" in html
-    assert 'data-required-operations="[&#34;Venta&#34;]"' in html and "data-minimums-if-filled" in html
-    assert '<option value="VISITA_PROGRAMADA">' in html
+    # ?step=profile no existe en Alquiler: abre el paso por defecto
+    response, html = _detail(env, env.users["ana"], alert, step="profile")
+    assert response.context["step"] == "contact" and 'id="spPropertyType"' not in html
 
-    # Tras una gestión, por defecto la Propuesta (no el Perfil)
+    # Tras una gestión, Propuesta: buscador manual, sin sugerencias
     _add_follow_up(env, env.users["ana"], alert, "SIN_RESPUESTA")
     response, html = _detail(env, env.users["ana"], alert)
-    assert response.context["step"] == "proposal"
-    assert response.context["suggestions"] == []                      # sin perfil no hay sugerencias
-    for text in ('id="linkPropertySearch"', "Buscar una propiedad", 'id="linkPropertyForm"',
-                 "Perfil opcional en alquiler", "Asociada ahora"):
+    assert response.context["step"] == "proposal" and response.context["suggestions"] == []
+    for text in ('id="linkPropertySearch"', "Buscar una propiedad", 'id="linkPropertyForm"', "Asociada ahora"):
         assert text in html, text
-    for text in ("Perfil pendiente", "Aún no hay propuesta", ">¿No está en la lista?</h3>",
+    for text in ("Perfil pendiente", "Aún no hay propuesta", ">¿No está en la lista?</h3>", "Perfil opcional",
                  "No hay propiedades que encajen con su perfil"):
         assert text not in html, text
 
 
-def test_detalle_alquiler_paso_perfil_opcional(env):
-    alert = _rent_alert(env)
-    response, html = _detail(env, env.users["ana"], alert, step="profile")
-    assert "Opcional en alquiler: si lo registras verás propiedades sugeridas" in html
-    assert "Si lo rellenas, incluye tipo, precio máximo y ubicación" in html
-    assert "Datos mínimos: tipo, precio máximo y ubicación (provincia, población o zona)" not in html
-    assert 'id="spPropertyType" name="property_type" required' not in html
-    assert 'data-places-error="spPlacesError"' in html                # el JS lo exige si rellena algo
-
-
-def test_detalle_alquiler_con_perfil_sugiere(env):
+def test_detalle_alquiler_con_perfil_guardado_no_lo_muestra(env):
+    """Un perfil ya guardado no se borra, pero en Alquiler no se muestra ni sugiere."""
     _complete_profile(env, business_type="Alquiler", max_price=500000)
     alert = _rent_alert(env)
     _add_follow_up(env, env.users["ana"], alert, "SIN_RESPUESTA")
     response, html = _detail(env, env.users["ana"], alert)
     ctx = response.context
-    assert ctx["step"] == "proposal" and ctx["profile_complete"] is True
-    # Las propiedades de prueba son de Venta: ninguna encaja, pero salen el estado y el buscador de siempre
-    assert ctx["suggestions"] == []
-    assert "No hay propiedades que encajen con su perfil" in html and "¿No está en la lista?" in html
-    assert ">Editar</a>" in html and "Perfil opcional" not in html
+    assert ctx["step"] == "proposal" and ctx["profile_complete"] is True and ctx["criteria_parts"] == []
+    assert ctx["suggestions"] == [] and ctx["suggestions_by_company"] == []
+    for text in (">Editar</a>", "Perfil del comprador", ">¿No está en la lista?</h3>", "No hay propiedades que encajen"):
+        assert text not in html, text
+    assert "Buscar una propiedad" in html
+    assert _criteria(env) is not None                                    # el dato se conserva
+
+
+def test_detalle_busqueda_general_alquiler_sin_resumen_del_perfil(env):
+    _complete_profile(env, business_type="Alquiler", max_price=500000)
+    alert = _search_alert(env, "ana", business_type="Alquiler")
+    response, html = _detail(env, env.users["ana"], alert)
+    assert "Aún sin propiedad asociada." in html
+    assert "≤ 500.000 €" not in html and "Aún sin perfil de búsqueda" not in html
+
+
+def test_detalle_venta_muestra_el_perfil_del_comprador(env):
+    alert = _property_alert(env, "ana", "ana")
+    response, html = _detail(env, env.users["ana"], alert)
+    assert response.context["profile_shown"] is True
+    assert "Perfil del comprador" in html and "2. Perfil" in html and 'id="followUpProfile"' in html
 
 
 def test_detalle_venta_sin_perfil_como_antes(env):
@@ -365,6 +348,25 @@ def test_chip_sin_perfil_solo_en_venta(env):
     assert alquiler.id not in response.context["profile_missing_ids"]
 
 
+def test_listado_sin_resumen_del_perfil_en_busquedas_de_alquiler(env):
+    from app.web.routes.alerts import _page_profiles
+    _complete_profile(env, max_price=500000)
+    venta = _search_alert(env, "ana")
+    alquiler = _search_alert(env, "bea", created_at=T0 + timedelta(hours=1), business_type="Alquiler")
+    summaries, _ = _page_profiles(env.db, [venta, alquiler])
+    assert venta.id in summaries and alquiler.id not in summaries
+
+
+def test_modal_alta_texto_sin_perfil_en_alquiler(env):
+    from app.web.routes.alerts import alerts_page
+    request = _request(env, env.admin, "/alerts")
+    response = asyncio.run(alerts_page(request, q="", status_filter=[], agent_id=None,
+                                       page=None, per_page=None, b_q="", b_page=None, db=env.db))
+    html = response.body.decode("utf-8")
+    assert response.context["no_profile_operations"] == ["Alquiler"]
+    assert 'id="refWithoutRentText"' in html and "Búsqueda general de alquiler" in html
+
+
 # ---------------------------------------------------------------------------
 # Ficha del comprador: mínimos según la operación enviada
 # ---------------------------------------------------------------------------
@@ -384,12 +386,20 @@ def test_ficha_venta_sin_minimos_rechazada(env):
     assert _criteria(env) is None
 
 
-def test_ficha_render_minimos_segun_operacion(env):
+def _buyer_page(env, user=None, tab="criteria"):
     from app.web.routes.alerts import buyer_detail
+    request = _request(env, user or env.admin, f"/buyers/{env.buyer.id}")
+    response = asyncio.run(buyer_detail(env.buyer.id, request, tab=tab, db=env.db))
+    return response, response.body.decode("utf-8")
+
+
+def test_ficha_render_minimos_segun_operacion(env):
+    # Con una alerta de Venta la ficha muestra el perfil (aunque el guardado sea
+    # de Alquiler); sin ella, sería un comprador solo de alquiler (ver abajo)
+    _property_alert(env, "ana", "ana")
 
     def html():
-        request = _request(env, env.admin, f"/buyers/{env.buyer.id}")
-        return asyncio.run(buyer_detail(env.buyer.id, request, tab="criteria", db=env.db)).body.decode("utf-8")
+        return _buyer_page(env)[1]
 
     _complete_profile(env, business_type="Alquiler", max_price=None)
     page = html()
@@ -401,3 +411,56 @@ def test_ficha_render_minimos_segun_operacion(env):
     criteria.business_type = "Venta"
     env.db.commit()
     assert 'id="bcPropertyType" name="property_type" required' in html()     # Venta al pintar
+
+
+# ---------------------------------------------------------------------------
+# Ficha del comprador solo de alquiler: sin pestañas de perfil
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("operations, criteria_operation, expected", [
+    (["Venta"], None, True),
+    (["Alquiler", "Venta"], "Alquiler", True),        # alguna de Venta: como hoy
+    (["Alquiler"], None, False),                      # todas de Alquiler
+    (["Alquiler", "Alquiler"], "Venta", False),
+    ([], "Alquiler", False),                          # sin alertas, perfil en Alquiler
+    ([None, "Alquiler"], "Alquiler", False),          # sin alertas de Venta, perfil en Alquiler
+    ([None], None, True),
+    ([], None, True),                                 # sin alertas ni perfil: como hoy
+    ([], "Venta", True),
+])
+def test_buyer_profile_applies(operations, criteria_operation, expected):
+    assert buyer_matching.buyer_profile_applies(operations, criteria_operation) is expected
+
+
+def test_profile_applies():
+    assert buyer_matching.profile_applies("Venta") is True
+    assert buyer_matching.profile_applies(None) is True
+    assert buyer_matching.profile_applies("Alquiler") is False
+    assert buyer_matching.no_profile_operations() == ["Alquiler"]
+
+
+def test_ficha_comprador_solo_alquiler_sin_pestana_de_criterios(env):
+    _complete_profile(env, business_type="Alquiler", max_price=500000)
+    _rent_alert(env)
+    for tab in ("criteria", "matches", "alerts"):
+        response, page = _buyer_page(env, tab=tab)
+        ctx = response.context
+        assert ctx["profile_shown"] is False and ctx["tab"] == "alerts", tab
+        assert ctx["matching_properties"] == []
+        for text in ('id="tab-criteria"', 'id="panel-criteria"', 'id="tab-matches"', 'id="panel-matches"',
+                     "Perfil de búsqueda", "Propiedades compatibles", 'action="/buyers/%d/search-criteria"' % env.buyer.id):
+            assert text not in page, (tab, text)
+        assert 'id="tab-alerts"' in page and 'id="panel-alerts" class=""' in page
+    assert _criteria(env) is not None                                    # el perfil se conserva
+
+    # El agente también
+    _, page = _buyer_page(env, user=env.users["ana"])
+    assert 'id="tab-criteria"' not in page
+
+
+def test_ficha_comprador_con_alguna_alerta_de_venta_como_hoy(env):
+    _rent_alert(env)
+    _property_alert(env, "bea", "bea", created_at=T0 + timedelta(hours=1))
+    response, page = _buyer_page(env)
+    assert response.context["profile_shown"] is True and response.context["tab"] == "criteria"
+    assert 'id="tab-criteria"' in page and 'id="tab-matches"' in page and "Perfil de búsqueda" in page

@@ -139,6 +139,42 @@ def profile_required_operations() -> list:
 
 
 # ---------------------------------------------------------------------------
+# ¿Se muestra el perfil? (alquiler sin perfil de comprador)
+# ---------------------------------------------------------------------------
+
+def profile_applies(business_type) -> bool:
+    """¿Tiene sentido el perfil de comprador para esta operación? False solo en Alquiler.
+
+    En Alquiler el perfil no se muestra ni se pide ni se guarda (detalle de la
+    alerta, modal «Contactado», ficha del comprador solo de alquiler). Es solo
+    visibilidad: los perfiles ya guardados y sus columnas se conservan. Venta
+    o sin operación: como siempre (y `profile_required` decide si es obligatorio).
+    ÚNICO sitio que compara la operación con Alquiler para esto.
+    """
+    return business_type != BusinessType.ALQUILER
+
+
+def no_profile_operations() -> list:
+    """Operaciones sin perfil de comprador (hoy, Alquiler), en el orden de los selects (para el JS)."""
+    return [bt for bt in BusinessType.values() if not profile_applies(bt)]
+
+
+def buyer_profile_applies(alert_operations: Iterable, criteria_operation=None) -> bool:
+    """¿Se muestra el perfil en la ficha del comprador?
+
+    Sí si tiene alguna alerta de Venta. No si todas sus alertas son de
+    Alquiler. En otro caso (sin alertas, o alertas sin operación), según la
+    operación de su perfil guardado: no si es Alquiler; sin perfil, sí (como hoy).
+    """
+    operations = list(alert_operations)
+    if any(op == BusinessType.VENTA for op in operations):
+        return True
+    if operations and not any(profile_applies(op) for op in operations):
+        return False
+    return profile_applies(criteria_operation)
+
+
+# ---------------------------------------------------------------------------
 # Propiedades compatibles
 # ---------------------------------------------------------------------------
 

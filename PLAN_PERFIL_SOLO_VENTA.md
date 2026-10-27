@@ -2,6 +2,16 @@
 
 Fecha: 2026-10-20. Rama: `63-agregar-moes`.
 
+> **2026-10-26, alquiler sin perfil de comprador**: en Alquiler el perfil ya
+> **no se muestra ni se guarda** (`buyer_matching.profile_applies`): sin bloque
+> de perfil, sin paso Perfil (pasos: Contactar y Propuesta con buscador manual),
+> sin sugerencias, sin perfil en «Contactado» (el servidor ignora esos campos) y
+> el POST del paso Perfil no guarda nada. Una alerta de Venta que pasa a
+> Alquiler desde el perfil solo cambia la operación. La ficha de un comprador
+> solo de alquiler (`buyer_profile_applies`) no tiene las pestañas de perfil ni
+> de compatibles. Solo visibilidad: los perfiles guardados y sus columnas se
+> conservan. Lo de abajo sobre "perfil opcional en Alquiler" queda sustituido.
+
 ## Decisión cerrada con el usuario
 
 El perfil de búsqueda (`PLAN_PERFIL_OBLIGATORIO.md`, mínimos de
