@@ -23,7 +23,7 @@ from app.core.constants import BusinessType
 from app.core.constants import AlertPriority
 from app.core.constants import AlertStatus
 from app.core.constants import FollowUpActionType
-from app.core.phone import PhoneValidationError, phone_display, phone_from_form, split_phone, valid_country_code
+from app.core.phone import PhoneValidationError, form_matches_stored, phone_display, phone_from_form
 from app.db.deps import get_db
 
 from app.models.property_alert import PropertyAlert
@@ -907,6 +907,7 @@ async def create_buyer(
     request: Request,
     name: str = Form(...),
     phone_country_code: str = Form(None),
+    phone_country_code_other: str = Form(None),
     phone_number: str = Form(None),
     phone: str = Form(None),
     email: str = Form(None),
@@ -918,8 +919,9 @@ async def create_buyer(
     El comprador queda registrado a nombre del usuario (`created_by`), que es
     lo que le da acceso al agente que lo creó.
 
-    Teléfono: indicativo + número (PLAN_TELEFONO_COMPRADOR.md); `phone` es el
-    campo antiguo de texto libre, aceptado si llega solo."""
+    Teléfono: indicativo + número (PLAN_TELEFONO_COMPRADOR.md); con "Otro…" el
+    indicativo llega escrito en `phone_country_code_other`. `phone` es el campo
+    antiguo de texto libre, aceptado si llega solo."""
 
     current_user = request.state.user
 
@@ -930,7 +932,9 @@ async def create_buyer(
         return response
 
     try:
-        buyer_phone = phone_from_form(phone_country_code, phone_number, phone)
+        buyer_phone = phone_from_form(
+            phone_country_code, phone_number, phone, other_code=phone_country_code_other
+        )
     except PhoneValidationError as error:
         response = RedirectResponse(url="/alerts", status_code=302)
         set_flash(response, "error", str(error))
@@ -1527,6 +1531,7 @@ async def create_alert(
     buyer_id: int = Form(None),
     buyer_name: str = Form(None),
     buyer_phone_country_code: str = Form(None),
+    buyer_phone_country_code_other: str = Form(None),
     buyer_phone_number: str = Form(None),
     buyer_phone: str = Form(None),
     buyer_email: str = Form(None),
@@ -1600,7 +1605,10 @@ async def create_alert(
         # Teléfono canónico con indicativo (PLAN_TELEFONO_COMPRADOR.md); `buyer_phone`
         # es el campo antiguo de texto libre, aceptado si llega solo
         try:
-            new_phone = phone_from_form(buyer_phone_country_code, buyer_phone_number, buyer_phone)
+            new_phone = phone_from_form(
+                buyer_phone_country_code, buyer_phone_number, buyer_phone,
+                other_code=buyer_phone_country_code_other,
+            )
         except PhoneValidationError as error:
             response = RedirectResponse(url="/alerts", status_code=302)
             set_flash(response, "error", str(error))
@@ -2836,6 +2844,7 @@ async def update_buyer_contact(
     request: Request,
     name: str = Form(...),
     phone_country_code: str = Form(None),
+    phone_country_code_other: str = Form(None),
     phone_number: str = Form(None),
     phone: str = Form(None),
     email: str = Form(None),
@@ -2860,14 +2869,14 @@ async def update_buyer_contact(
         set_flash(response, "error", "No tienes acceso a este comprador")
         return response
 
-    unchanged = (
-        buyer.phone
-        and phone_number is not None
-        and (valid_country_code(phone_country_code), phone_number.strip()) == split_phone(buyer.phone)
+    unchanged = form_matches_stored(
+        buyer.phone, phone_country_code, phone_number, phone_country_code_other
     )
     if not unchanged:
         try:
-            new_phone = phone_from_form(phone_country_code, phone_number, phone)
+            new_phone = phone_from_form(
+                phone_country_code, phone_number, phone, other_code=phone_country_code_other
+            )
         except PhoneValidationError as error:
             response = RedirectResponse(url=f"/buyers/{buyer_id}", status_code=303)
             set_flash(response, "error", str(error))

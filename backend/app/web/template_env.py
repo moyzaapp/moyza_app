@@ -103,6 +103,7 @@ templates.env.filters["street"] = street_only
 # Opciones del selector de país; globales para que las vea el macro phone_field
 templates.env.globals["phone_country_choices"] = PhoneCountryCodes.choices()
 templates.env.globals["phone_default_country"] = PhoneCountryCodes.DEFAULT
+templates.env.globals["phone_other_country"] = PhoneCountryCodes.OTHER
 templates.env.globals["current_year"] = lambda: datetime.now().year
 # Envío de la ficha de visita por WhatsApp (ver config.VISIT_SHEET_WHATSAPP_ENABLED)
 templates.env.globals["visit_sheet_whatsapp_enabled"] = settings.VISIT_SHEET_WHATSAPP_ENABLED

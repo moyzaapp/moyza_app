@@ -1203,6 +1203,8 @@ function setBuyerMode(mode) {
     const submitBtn = document.getElementById('createAlertSubmit');
     const phoneInput = document.getElementById('buyerPhoneInput');
     const phoneCountry = document.getElementById('buyerPhoneInput_country');
+    // Indicativo escrito a mano con "Otro…" (macro phone_field)
+    const phoneOther = document.getElementById('buyerPhoneInput_country_other');
     const phoneField = phoneInput.closest('[data-phone-field]');
     const emailInput = document.getElementById('buyerEmailInput');
     const businessTypeSelect = document.getElementById('alertBusinessType');
@@ -1312,7 +1314,7 @@ function setBuyerMode(mode) {
     }
 
     let buyerTimer = null;
-    [phoneInput, emailInput].forEach(function (el) {
+    [phoneInput, phoneOther, emailInput].filter(Boolean).forEach(function (el) {
         el.addEventListener('input', function () {
             clearTimeout(buyerTimer);
             buyerTimer = setTimeout(refreshBuyerMatch, 400);
