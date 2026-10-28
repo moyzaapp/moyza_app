@@ -32,7 +32,7 @@ siguen esa regla. El admin solo ve la fecha de la última asignación entrando e
 
 ---
 
-## 2. Honorarios en caso de compra: importe o porcentaje
+## 2. Honorarios en caso de compra: importe o porcentaje — IMPLEMENTADO (fase B)
 
 ### Hoy
 
@@ -156,7 +156,7 @@ confirmación de los metadatos (`:505, 509, 618-631`) y "generado … UTC". Las 
 | Fase | Contenido | Commit |
 |---|---|---|
 | A | §1 fecha de reasignación a la vista (**IMPLEMENTADO**; la pestaña de alertas de la ficha del comprador también ordena por la última asignación para el admin) | `feat(alertas): fecha de la última asignación a simple vista para todos los roles` |
-| B | §2 honorarios en % | `feat(visitas): honorarios en caso de compra en importe o porcentaje` |
+| B | §2 honorarios en % (**IMPLEMENTADO**) | `feat(visitas): honorarios en caso de compra en importe o porcentaje` |
 | C | §3 observaciones internas | `feat(visitas): observaciones internas fuera de la ficha firmada` |
 | D | §4 hora de España | `fix(visitas): hora de España en la ficha de visita y sus metadatos` |
 | E | §5 migración + servicio + ruta + modal + chip + aviso a admins | `feat(alertas): ceder comprador a otro agente dentro de las 48 h hábiles` |
