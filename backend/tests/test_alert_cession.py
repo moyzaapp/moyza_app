@@ -605,3 +605,71 @@ def test_alerta_ajena_y_admin_no_ceden(data):
     db, alert = _get_alert(alert_id)
     assert alert.agent_id == data["ana"]
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# Fase F: historial para el admin y bloque del Inicio
+# ---------------------------------------------------------------------------
+
+def test_resumen_y_cesiones_recientes_por_empresa(ctx):
+    alert = _new_alert(ctx, ctx.ana)
+    svc.cede(ctx.db, alert, ctx.bea, ctx.users["ana"], "Uno", now=NOW + timedelta(hours=1))
+    svc.cede(ctx.db, alert, ctx.ana, ctx.users["bea"], "Dos", now=NOW + timedelta(hours=2))
+    svc.assign(ctx.db, alert, ctx.bea, ctx.admin, None, is_new=False, now=NOW + timedelta(hours=3))
+
+    start, end = NOW - timedelta(days=1), NOW + timedelta(days=1)
+    rows = {r["agent_id"]: (r["ceded"], r["received"])
+            for r in svc.cession_summary(ctx.db, ctx.moyza.id, start=start, end=end)}
+    assert rows[ctx.ana.id] == (1, 1) and rows[ctx.bea.id] == (1, 1)
+    moes_ids = {r["agent_id"] for r in svc.cession_summary(ctx.db, ctx.moes.id, start=start, end=end)}
+    assert ctx.ana.id not in moes_ids and ctx.bea.id not in moes_ids
+
+    recent = [log for log in svc.recent_cessions(ctx.db, ctx.moyza.id, since=start, limit=50) if log.alert_id == alert.id]
+    assert [log.reason for log in recent] == ["Dos", "Uno"]
+
+    history = svc.with_history_details(svc.history_query(ctx.db, ctx.moyza.id, start=start, end=end)).all()
+    kinds = [log.kind for log in history if log.alert_id == alert.id]
+    assert kinds == ["reassigned", "ceded", "ceded", "created"]
+    only_bea_received = svc.history_query(ctx.db, ctx.moyza.id, start=start, end=end, agent_id=ctx.bea.id,
+                                          kind="ceded").all()
+    assert {log.reason for log in only_bea_received if log.alert_id == alert.id} == {"Uno", "Dos"}
+
+
+def test_historial_solo_admin_y_de_la_empresa_activa(data):
+    _clear_queue(data, "ana", "bea")
+    name = f"{TAG} HISTORIAL"
+    alert_id = _new_alert_for(data, name, "ana")
+    status, _, headers = _cede(_Client(EMAIL.format("ana")), alert_id, data["bea"], reason="Motivo historial")
+    assert status == 302 and _flash(headers).get("category") == "success"
+
+    # Agente: fuera
+    status, _, headers = _Client(EMAIL.format("bea")).get("/alerts/assignments")
+    assert status == 302 and headers.get("location") == "/alerts"
+    assert "Solo un administrador" in _flash(headers).get("message", "")
+
+    admin = _Client(ADMIN_EMAIL)
+    status, body, _ = admin.get("/alerts/assignments")
+    assert status == 200
+    assert "Historial de cesiones" in body and "Cesiones por agente" in body
+    assert name in body and "Motivo historial" in body and "Cedida" in body
+    assert f"{TAG} ANA" in body and f"{TAG} BEA" in body
+
+    # Filtros: tipo y agente
+    status, body, _ = admin.get(f"/alerts/assignments?kind=created&agent_id={data['bea']}")
+    assert status == 200 and "Motivo historial" not in body
+    status, body, _ = admin.get(f"/alerts/assignments?kind=ceded&agent_id={data['bea']}")
+    assert status == 200 and "Motivo historial" in body
+    # Rango sin la cesión
+    status, body, _ = admin.get("/alerts/assignments?date_from=2020-01-01&date_to=2020-01-31")
+    assert status == 200 and name not in body and "No hay asignaciones con estos filtros" in body
+
+    # Con MOES activa no aparecen las de MOYZA
+    status, body, _ = _Client(ADMIN_EMAIL, "MOES").get("/alerts/assignments")
+    assert status == 200 and name not in body
+
+    # Enlace desde Compradores e Inicio del admin con el bloque de cesiones recientes
+    status, body, _ = admin.get("/alerts")
+    assert status == 200 and 'href="/alerts/assignments"' in body
+    status, body, _ = admin.get("/dashboard")
+    assert status == 200 and "Cesiones recientes" in body and name in body
+    assert 'href="/alerts/assignments?kind=ceded"' in body

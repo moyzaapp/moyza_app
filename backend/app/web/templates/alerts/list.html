@@ -20,6 +20,14 @@
 
             {# Acciones disponibles para admin y agentes #}
             <div class="flex flex-wrap gap-2">
+                {# Historial de cesiones y reasignaciones (solo admin, PLAN_CEDER_COMPRADORES.md §5.2) #}
+                {% if is_admin %}
+                <a href="/alerts/assignments"
+                   class="bg-white text-gray-700 px-4 py-2.5 rounded-xl hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm font-medium border border-gray-300">
+                    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+                    Historial de cesiones
+                </a>
+                {% endif %}
                 <button
                     type="button"
                     onclick="openCreateBuyerModal()"

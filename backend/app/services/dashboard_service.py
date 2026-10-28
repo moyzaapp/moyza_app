@@ -42,6 +42,7 @@ from app.models.alert_follow_up import AlertFollowUp
 from app.models.property import Property
 from app.models.property_alert import PropertyAlert
 from app.models.property_visit import PropertyVisit
+from app.services import alert_assignment_service
 from app.services.alert_view import assignment_start_expr
 from app.services.alert_view import get_locked_alert_ids
 from app.services.alert_view import real_follow_ups_clause
@@ -693,7 +694,7 @@ class DashboardService:
     ) -> dict:
         """Inicio del admin: bloques de semana y mes (KPIs y filas de la tabla
         de cumplimiento, que la plantilla muestra para la semana), actividad del
-        mes, atención, actividad reciente y tendencia."""
+        mes, atención, actividad reciente, cesiones recientes y tendencia."""
         now = now or datetime.utcnow()
         default_week, default_month = self.current_periods(now=now)
         week = week or default_week
@@ -725,7 +726,20 @@ class DashboardService:
             "feed": self.activity_feed(now),
             "trend": self.team_trend(agents, week, now=now),
             "pending_by_agent": pending,
+            "recent_cessions": self.recent_cessions(now),
+            "recent_cessions_days": DashboardThresholds.RECENT_CESSIONS_DAYS,
         }
+
+    def recent_cessions(self, now: Optional[datetime] = None) -> list:
+        """Cesiones de compradores entre agentes de la empresa en los últimos días
+        (PLAN_CEDER_COMPRADORES.md §7-5): el admin no tiene campana, así que el
+        aviso `alert_ceded` se ve aquí. Filas del historial con su alerta."""
+        now = now or datetime.utcnow()
+        return alert_assignment_service.recent_cessions(
+            self.db, self.company_id,
+            since=now - timedelta(days=DashboardThresholds.RECENT_CESSIONS_DAYS),
+            limit=DashboardThresholds.RECENT_CESSIONS_LIMIT,
+        )
 
     # -- KPIs del equipo ----------------------------------------------------
 

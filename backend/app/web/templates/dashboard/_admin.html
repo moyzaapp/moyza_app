@@ -182,6 +182,38 @@
     </section>
 </div>
 
+{# ---------------------------------------------------------------- Cesiones recientes (PLAN_CEDER_COMPRADORES.md §7-5) #}
+<section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="cessionsTitle">
+    <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
+        <div class="min-w-0">
+            <h2 id="cessionsTitle" class="text-lg font-bold text-gray-900">Cesiones recientes</h2>
+            <p class="text-xs text-gray-500 mt-0.5">Compradores que un agente ha cedido a otro en los últimos {{ home.recent_cessions_days }} días</p>
+        </div>
+        <a href="/alerts/assignments?kind=ceded" class="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Ver historial</a>
+    </header>
+    {% if home.recent_cessions %}
+    <ul class="divide-y divide-gray-100">
+        {% for log in home.recent_cessions %}
+        <li class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 px-4 sm:px-6 py-3">
+            <div class="min-w-0 flex-1">
+                <p class="text-sm text-gray-900 truncate">
+                    <span class="font-medium">{{ log.alert.lead_name or "Comprador" }}</span>
+                    <span class="text-gray-500">·</span>
+                    {{ log.from_agent.name if log.from_agent else "Agente eliminado" }}
+                    <span class="text-gray-500" aria-hidden="true">→</span><span class="sr-only"> a </span>
+                    {{ log.to_agent.name if log.to_agent else "Agente eliminado" }}
+                </p>
+                <p class="text-xs text-gray-500 tabular-nums">{{ log.created_at | madrid_dt('%d/%m/%Y %H:%M') }}{% if log.reason %} · {{ log.reason }}{% endif %}</p>
+            </div>
+            <a href="/alerts/{{ log.alert_id }}" class="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Ver alerta</a>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="px-4 sm:px-6 py-4 text-sm text-gray-500">Ningún agente ha cedido compradores en los últimos {{ home.recent_cessions_days }} días.</p>
+    {% endif %}
+</section>
+
 {# ---------------------------------------------------------------- Tendencia #}
 {{ trend_chart("teamTrend", home.trend, "Tendencia del equipo",
                "Hojas de visita por agente (barras apiladas) y contactos del equipo (línea), últimas " ~ (home.trend.labels | length) ~ " semanas",

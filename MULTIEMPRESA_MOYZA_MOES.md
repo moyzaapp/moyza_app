@@ -667,3 +667,31 @@ Tras desplegar: recompilar Tailwind (lo hace el build de Docker) y reiniciar.
 Nota conocida: las fechas de las filas se muestran en hora de Madrid, pero el
 período se corta en UTC (regla previa del contador). Un registro de las 22:00
 a 24:00 UTC del último día puede verse con fecha del día siguiente en el panel.
+
+## 19. Ceder compradores entre agentes e historial de cesiones (2026-10-28)
+
+PLAN_CEDER_COMPRADORES.md §5 y §7. Migración `c2d3e4f5a6b7` (sin
+dependencias ni variables de entorno nuevas): `alert_assignment_logs.kind`
+(`created` / `reassigned` / `ceded`, NOT NULL con valor por defecto
+`reassigned`; las filas sin agente de origen pasan a `created`) y
+`property_alerts.ceded_at` + `ceded_by_agent_id` (FK a agents, ON DELETE SET
+NULL). Downgrade limpio (borra las tres columnas).
+
+- El agente de una alerta abierta puede **cederla** (`POST /alerts/{id}/cede`,
+  desde el detalle o la acción de fila del listado) a otro agente **de la
+  empresa de la alerta**, con motivo obligatorio y la casilla del aviso de
+  comisión, mientras no venza su reloj de atención (R1 / R3; sin reloj por el
+  corte del §17, 48 h hábiles desde la asignación). Vencido, el botón sale
+  desactivado: "El plazo para ceder ha vencido: pide a un administrador que la
+  reasigne". Efectos de una reasignación (Pendiente, sin leer, reloj de cero,
+  avisos del anterior resueltos) y aviso "Te han cedido un comprador" al nuevo.
+- Distintivo «Cedido» en el listado y el detalle (admin y receptor); el
+  receptor ve quién y cuándo, no el motivo. Una reasignación posterior del
+  admin quita la marca.
+- Admins de la empresa: notificación `alert_ceded` (queda en `/notifications`),
+  bloque "Cesiones recientes" (7 días) en su Inicio y página
+  `GET /alerts/assignments` (solo admin, empresa activa) con el historial de
+  altas, reasignaciones y cesiones, filtros y resumen por agente. Nada por email.
+
+Tras desplegar: `alembic upgrade head`, recompilar Tailwind (lo hace el build de
+Docker) y reiniciar.

@@ -551,3 +551,7 @@ class DashboardThresholds:
     AGENDA_LIMIT = 8
     FEED_LIMIT = 20
     NEWS_LIMIT = 8
+
+    # Admin: bloque "Cesiones recientes" (PLAN_CEDER_COMPRADORES.md §7-5)
+    RECENT_CESSIONS_DAYS = 7
+    RECENT_CESSIONS_LIMIT = 5

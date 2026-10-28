@@ -40,7 +40,11 @@ from datetime import datetime
 from typing import Callable
 from typing import Optional
 
+from sqlalchemy import func
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import contains_eager
+from sqlalchemy.orm import joinedload
 
 from sqlalchemy.orm import selectinload
 
@@ -52,6 +56,7 @@ from app.models.agent import Agent
 from app.models.alert_assignment_log import AlertAssignmentLog
 from app.models.alert_follow_up import AlertFollowUp
 from app.models.company import Company
+from app.models.property_alert import PropertyAlert
 from app.services import alert_view
 from app.services import buyer_attention_service
 from app.services.company_scope import add_to_company
@@ -470,3 +475,88 @@ def _notify_assigned(db: Session, alert, agent, by_user, company_id, now, title=
     except Exception:
         logger.exception("No se pudo notificar la asignación de la alerta %s", alert.id)
         return []
+
+
+# ---------------------------------------------------------------------------
+# Historial para el admin (PLAN_CEDER_COMPRADORES.md §5.2, página
+# /alerts/assignments y bloque "Cesiones recientes" del Inicio)
+# ---------------------------------------------------------------------------
+
+def history_query(db: Session, company_id: int, *, start: Optional[datetime] = None,
+                  end: Optional[datetime] = None, agent_id: Optional[int] = None,
+                  kind: Optional[str] = None):
+    """Filas del historial de las alertas de la empresa, de la más reciente a la más antigua.
+
+    `start` (incluido) y `end` (excluido) en UTC naive; `agent_id` filtra por
+    agente de origen o de destino; `kind` por tipo (`KIND_LABELS`).
+    """
+    query = (
+        db.query(AlertAssignmentLog)
+        .join(PropertyAlert, PropertyAlert.id == AlertAssignmentLog.alert_id)
+        .filter(PropertyAlert.company_id == company_id)
+    )
+    if start is not None:
+        query = query.filter(AlertAssignmentLog.created_at >= start)
+    if end is not None:
+        query = query.filter(AlertAssignmentLog.created_at < end)
+    if agent_id is not None:
+        query = query.filter(or_(
+            AlertAssignmentLog.from_agent_id == agent_id,
+            AlertAssignmentLog.to_agent_id == agent_id,
+        ))
+    if kind:
+        query = query.filter(AlertAssignmentLog.kind == kind)
+    return query
+
+
+def with_history_details(query):
+    """Carga alerta, agentes y usuario de cada fila (sin consultas por fila al pintar)."""
+    return (
+        query
+        .options(
+            contains_eager(AlertAssignmentLog.alert),
+            joinedload(AlertAssignmentLog.from_agent),
+            joinedload(AlertAssignmentLog.to_agent),
+            joinedload(AlertAssignmentLog.assigned_by_user),
+        )
+        .order_by(AlertAssignmentLog.created_at.desc(), AlertAssignmentLog.id.desc())
+    )
+
+
+def cession_summary(db: Session, company_id: int, *, start: Optional[datetime] = None,
+                    end: Optional[datetime] = None) -> list[dict]:
+    """Cesiones por agente en el período: [{agent_id, name, ceded, received}].
+
+    De más a menos cesiones hechas y, a igualdad, recibidas. Solo agentes con
+    alguna cesión; los agentes borrados no cuentan.
+    """
+    base = history_query(db, company_id, start=start, end=end, kind=KIND_CEDED)
+    ceded = dict(
+        base.with_entities(AlertAssignmentLog.from_agent_id, func.count(AlertAssignmentLog.id))
+        .filter(AlertAssignmentLog.from_agent_id.isnot(None))
+        .group_by(AlertAssignmentLog.from_agent_id)
+        .all()
+    )
+    received = dict(
+        base.with_entities(AlertAssignmentLog.to_agent_id, func.count(AlertAssignmentLog.id))
+        .filter(AlertAssignmentLog.to_agent_id.isnot(None))
+        .group_by(AlertAssignmentLog.to_agent_id)
+        .all()
+    )
+    ids = set(ceded) | set(received)
+    if not ids:
+        return []
+    names = dict(db.query(Agent.id, Agent.name).filter(Agent.id.in_(ids)).all())
+    rows = [
+        {"agent_id": i, "name": names.get(i, "Agente eliminado"),
+         "ceded": ceded.get(i, 0), "received": received.get(i, 0)}
+        for i in ids
+    ]
+    rows.sort(key=lambda r: (-r["ceded"], -r["received"], r["name"]))
+    return rows
+
+
+def recent_cessions(db: Session, company_id: int, *, since: datetime, limit: int) -> list:
+    """Últimas cesiones de la empresa desde `since` (filas del historial con su alerta)."""
+    query = history_query(db, company_id, start=since, kind=KIND_CEDED)
+    return with_history_details(query).limit(limit).all()

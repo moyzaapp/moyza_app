@@ -1,5 +1,7 @@
 import logging
+from datetime import date
 from datetime import datetime
+from datetime import timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter
@@ -17,6 +19,8 @@ from app.web.template_env import templates
 from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 from sqlalchemy import func, case, or_
 
+from app.core.business_calendar import madrid_today
+from app.core.business_calendar import to_utc
 from app.core.constants import AlertType, PropertyStatus
 from app.core.constants import AlertOrigin
 from app.core.constants import BusinessType
@@ -28,6 +32,7 @@ from app.db.deps import get_db
 
 from app.models.property_alert import PropertyAlert
 from app.models.alert_follow_up import AlertFollowUp
+from app.models.alert_assignment_log import AlertAssignmentLog
 from app.models.property import Property
 from app.models.agent import Agent
 from app.models.user import User
@@ -1409,6 +1414,96 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
                 ctx["link_duplicate"] = {"property": target, "alerts": others}
 
     return ctx
+
+
+def _parse_day(value: Optional[str]) -> Optional[date]:
+    """'aaaa-mm-dd' del input date, o None si falta o no es válida."""
+    try:
+        return date.fromisoformat((value or "").strip())
+    except ValueError:
+        return None
+
+
+# Página del historial de asignaciones: período por defecto y filas por página
+# (uno de PAGE_SIZES, que es lo que admite paginate_params)
+ASSIGNMENT_HISTORY_DAYS = 30
+ASSIGNMENT_HISTORY_PAGE_SIZE = 50
+
+
+# Antes de /alerts/{alert_id}: si no, "assignments" se tomaría por un id
+@router.get("/alerts/assignments", response_class=HTMLResponse)
+async def alert_assignments_page(
+    request: Request,
+    agent_id: Optional[str] = Query(default=None),
+    kind: Optional[str] = Query(default=None),
+    date_from: Optional[str] = Query(default=None),
+    date_to: Optional[str] = Query(default=None),
+    page: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db)
+):
+    """Historial de cesiones y reasignaciones de la empresa activa (solo admin).
+
+    PLAN_CEDER_COMPRADORES.md §5.2: una fila por asignación (alta, reasignación
+    del admin o cesión del agente) con fecha, comprador, de → a, tipo, motivo
+    y estado actual de la alerta. Filtros por agente (de o a), tipo y rango de
+    fechas (por defecto los últimos 30 días, en hora de Madrid); arriba, las
+    cesiones por agente del período.
+    """
+    current_user = request.state.user
+    if not is_admin(current_user):
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Solo un administrador puede ver el historial de asignaciones")
+        return response
+
+    company = get_active_company(request)
+    today = madrid_today()
+    day_to = _parse_day(date_to) or today
+    day_from = _parse_day(date_from) or (day_to - timedelta(days=ASSIGNMENT_HISTORY_DAYS))
+    if day_from > day_to:
+        day_from, day_to = day_to, day_from
+    # Días de Madrid → UTC naive: desde las 00:00 del primero hasta las 00:00 del siguiente al último
+    start = to_utc(datetime.combine(day_from, datetime.min.time()))
+    end = to_utc(datetime.combine(day_to + timedelta(days=1), datetime.min.time()))
+
+    agent_id_int = assignment._to_int(agent_id)
+    kind_value = kind if kind in assignment.KIND_LABELS else ""
+
+    query = assignment.history_query(db, company.id, start=start, end=end,
+                                     agent_id=agent_id_int, kind=kind_value or None)
+    total = query.with_entities(func.count(AlertAssignmentLog.id)).scalar() or 0
+    pagination = paginate_params(page, ASSIGNMENT_HISTORY_PAGE_SIZE, total)
+    logs = (
+        assignment.with_history_details(query)
+        .offset(pagination["offset"])
+        .limit(pagination["per_page"])
+        .all()
+    )
+
+    filters_active = bool(agent_id_int or kind_value or date_from or date_to)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="alerts/assignments.html",
+        context={
+            "request": request,
+            "current_user": current_user,
+            "is_admin": True,
+            "logs": logs,
+            "pagination": pagination,
+            "summary": assignment.cession_summary(db, company.id, start=start, end=end),
+            "agents": scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all(),
+            "kind_labels": assignment.KIND_LABELS,
+            "selected_agent_id": agent_id_int,
+            "selected_kind": kind_value,
+            "date_from": day_from.isoformat(),
+            "date_to": day_to.isoformat(),
+            "date_from_label": day_from.strftime("%d/%m/%Y"),
+            "date_to_label": day_to.strftime("%d/%m/%Y"),
+            "default_days": ASSIGNMENT_HISTORY_DAYS,
+            "filters_active": filters_active,
+            "AlertStatus": AlertStatus,
+        }
+    )
 
 
 @router.get("/alerts/{alert_id}", response_class=HTMLResponse)

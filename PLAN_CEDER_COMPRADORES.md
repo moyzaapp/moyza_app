@@ -159,8 +159,8 @@ confirmación de los metadatos (`:505, 509, 618-631`) y "generado … UTC". Las 
 | B | §2 honorarios en % (**IMPLEMENTADO**) | `feat(visitas): honorarios en caso de compra en importe o porcentaje` |
 | C | §3 observaciones internas (**IMPLEMENTADO**) | `feat(visitas): observaciones internas fuera de la ficha firmada` |
 | D | §4 hora de España (**IMPLEMENTADO**) | `fix(visitas): hora de España en la ficha de visita y sus metadatos` |
-| E | §5 migración + servicio + ruta + modal + chip + aviso a admins | `feat(alertas): ceder comprador a otro agente dentro de las 48 h hábiles` |
-| F | §5 página de historial para el admin + bloque del Inicio + docs | `feat(alertas): historial de cesiones y reasignaciones para el admin` |
+| E | §5 migración + servicio + ruta + modal + chip + aviso a admins (**IMPLEMENTADO**) | `feat(alertas): ceder comprador a otro agente dentro de las 48 h hábiles` |
+| F | §5 página de historial para el admin + bloque del Inicio + docs (**IMPLEMENTADO**) | `feat(alertas): historial de cesiones y reasignaciones para el admin` |
 
 Despliegue: `alembic upgrade head` (migración `c2d3e4f5a6b7`) y reinicio. Sin dependencias nuevas.
 
@@ -174,18 +174,21 @@ Despliegue: `alembic upgrade head` (migración `c2d3e4f5a6b7`) y reinicio. Sin d
 
 ---
 
-## 7. Preguntas (respondidas → se ejecuta)
+## 7. Decisiones (respondidas el 2026-10-28)
 
-1. **Plazo de 48 h**: ¿horas **hábiles** (mismo reloj que el aviso "sin gestión", recomendado) o 48 h
-   naturales?
-2. **A quién puede ceder un agente**: ¿solo a agentes de la **misma empresa** de la alerta (recomendado) o a
-   cualquier agente, dándole acceso a la empresa como hace el admin?
-3. **Motivo** al ceder: ¿obligatorio (recomendado, para que el admin sepa por qué) u opcional como al
-   reasignar?
-4. **El agente que recibe** el comprador: ¿debe ver que es cedido y por quién ("Cedido por Ana el 28/10"),
-   o para él es una alerta nueva sin rastro, como ahora con las reasignaciones del admin? Recomiendo que lo
-   vea, por el tema de la comisión.
-5. **Aviso al admin**: además de la notificación y el bloque en el Inicio, ¿quieres una sección en el **email
-   diario** existente de compradores sin atender? Recomiendo no (cero spam), lo pregunto por si acaso.
-6. **Fecha (punto 1)**: confirmo que el **orden** del listado del admin también pasa a la fecha de última
-   asignación (la alerta reasignada sube arriba). Si prefieres que solo cambie el texto y no el orden, dímelo.
+1. **Plazo de 48 h**: el plazo es el del aviso "sin gestión" (R1, `BUYER_REMINDER_HOURS` = 48 h **hábiles**
+   desde la asignación o el último seguimiento real, `buyer_attention_service.alert_clock`). El objetivo del
+   usuario: que el agente pueda pasar el comprador a otro **antes de que salte ese aviso** (y llegue al
+   Inicio/email del admin), en vez de dejarlo sin gestionar. Por tanto `can_cede` = la alerta está abierta,
+   es suya y su reloj R1/R3 **no ha vencido** (`alert_clock(alert, now).overdue == False`, o sin reloj por el
+   corte `BUYER_ATTENTION_SINCE`, en cuyo caso se usa `business_hours_between(assignment_start, now) < 48`).
+   Al ceder, los avisos de atención del agente anterior se resuelven (`safe_resolve_buyer_notifications`) y
+   el reloj del nuevo agente arranca de cero. Vencido el plazo, el botón sale desactivado con el texto
+   "El plazo para ceder ha vencido: pide a un administrador que la reasigne".
+2. **A quién**: solo agentes de la **misma empresa** de la alerta (por ahora).
+3. **Motivo**: **obligatorio** (por ahora).
+4. **Receptor**: ve "Cedido por {agente} el dd/mm/aaaa" en el detalle y el chip "Cedido" en el listado; no ve
+   el motivo.
+5. **Admin**: notificación `alert_ceded` + bloque "Cesiones recientes" en su Inicio + página de historial.
+   **Nada en el email** por ahora.
+6. **Fecha (punto 1)**: el orden del listado del admin también pasa a la última asignación. Confirmado.
