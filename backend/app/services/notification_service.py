@@ -49,6 +49,9 @@ class NotificationKind:
     FOLLOW_UP_DUE = "follow_up_due"
     ADMIN_NOTE_ADDED = "admin_note_added"
     ALERT_ASSIGNED = "alert_assigned"
+    # Un agente cede su comprador a otro: aviso a los admins de la empresa
+    # (PLAN_CEDER_COMPRADORES.md §5.2; sin campana, se ve en el Inicio del admin)
+    ALERT_CEDED = "alert_ceded"
     # Compradores que requieren atención (PLAN_ALERTAS_DIAS_HABILES.md §2.3)
     BUYER_NO_ACTION = "buyer_no_action"
     # PLAN_RECORDATORIO_SIN_RESPUESTA.md: «volver a llamar» tras «Sin respuesta»
@@ -66,6 +69,7 @@ class NotificationKind:
         FOLLOW_UP_DUE: ("clock", "amber"),
         ADMIN_NOTE_ADDED: ("chat", "gray"),
         ALERT_ASSIGNED: ("user", "blue"),
+        ALERT_CEDED: ("users", "amber"),
         BUYER_NO_ACTION: ("inbox", "amber"),
         BUYER_CALLBACK_DUE: ("clock", "amber"),
         BUYER_STAGE_STALL: ("user", "amber"),
@@ -97,7 +101,7 @@ def users_for_agent(db: Session, agent: Optional[Agent]) -> list:
 
 
 def admins_of_company(db: Session, company_id: int) -> list:
-    """Usuarios admin con pertenencia a la empresa (no se usa en v1: el admin no tiene campana)."""
+    """Usuarios admin con pertenencia a la empresa (avisos `alert_ceded`; el admin no tiene campana)."""
     return (
         db.query(User)
         .join(Role, Role.id == User.role_id)
@@ -319,6 +323,34 @@ def notify_admin_note(db: Session, *, agent, company_id: int, period, report=Non
         url=url,
         actor=actor,
         entity=("performance_report", report.id) if report is not None and report.id else None,
+    )
+
+
+def notify_alert_ceded(db: Session, alert, from_agent, to_agent, *, reason=None, actor=None,
+                       log=None, now: Optional[datetime] = None) -> list:
+    """Cesión de un comprador: `alert_ceded` a todos los admins de la empresa (sin confirmar).
+
+    "{A} ha cedido el comprador {nombre} a {B}", con el motivo en el cuerpo y
+    enlace al detalle. La entidad es la fila del historial (si llega) para que
+    dos cesiones seguidas de la misma alerta no se dedupliquen entre sí.
+    """
+    company_id = alert.company_id
+    if company_id is None:
+        return []
+    from_name = from_agent.name if from_agent is not None else "Un agente"
+    to_name = to_agent.name if to_agent is not None else "otro agente"
+    entity = ("alert_assignment_log", log.id) if log is not None and log.id else ("alert", alert.id)
+    return notify(
+        db,
+        users=admins_of_company(db, company_id),
+        company_id=company_id,
+        kind=NotificationKind.ALERT_CEDED,
+        title=f"{from_name} ha cedido el comprador {alert.lead_name or 'Comprador'} a {to_name}",
+        body=f"Motivo: {reason}" if reason else None,
+        url=f"/alerts/{alert.id}",
+        actor=actor,
+        entity=entity,
+        now=now,
     )
 
 

@@ -6,12 +6,18 @@
     {% from "alerts/assign_fields.html" import assign_fields with context %}
     {{ assign_fields("qa", groups=assignable_groups, is_admin=is_admin) }}
     {{ assign_fields("ra", groups=assignable_groups, is_admin=True, mode="reassign") }}
+    {{ assign_fields("ce", groups=cession_groups, mode="cede") }}
 
   - groups: [{label, agents}] de alert_assignment_service.assignable_agents
     (todas las empresas activas, agrupadas por empresa como el acompañante de visitas).
   - mode "create": el admin elige agente (por defecto el captador) con motivo
     opcional si cambia; el agente solo ve "Se asignará a {captador}".
   - mode "reassign": select obligatorio y motivo opcional siempre visible.
+  - mode "cede" (el agente cede su comprador, PLAN_CEDER_COMPRADORES.md §5):
+    select obligatorio solo con agentes de la empresa de la alerta
+    (alert_assignment_service.assignable_agents_for_cession), motivo
+    obligatorio y aviso ámbar de comisión con la casilla "Entiendo que cedo
+    este comprador", que habilita el botón de enviar del formulario.
   El bloque nace oculto en el alta y se muestra al conocer la propiedad (el JS
   marca el select como obligatorio solo entonces, para no bloquear el envío
   con un campo oculto). Necesita `with context` (lee active_company).
@@ -19,17 +25,17 @@
 {% macro assign_fields(prefix, groups=[], is_admin=False, mode="create") -%}
 {% set input_cls = "w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500" %}
 <div id="{{ prefix }}AssignBlock"
-     class="{% if mode != 'reassign' %}hidden{% endif %} space-y-3"
+     class="{% if mode not in ['reassign', 'cede'] %}hidden{% endif %} space-y-3"
      data-mode="{{ mode }}"
      data-company-id="{{ active_company.id if active_company else '' }}"
      data-company-name="{{ active_company.name if active_company else '' }}">
 
-    {% if is_admin %}
+    {% if is_admin or mode == 'cede' %}
     <div>
         <label for="{{ prefix }}AgentSelect" class="block text-sm font-medium text-gray-700 mb-1">
-            {% if mode == 'reassign' %}Nuevo agente{% else %}Agente asignado{% endif %} <span class="text-red-500" aria-hidden="true">*</span>
+            {% if mode == 'reassign' %}Nuevo agente{% elif mode == 'cede' %}Ceder a{% else %}Agente asignado{% endif %} <span class="text-red-500" aria-hidden="true">*</span>
         </label>
-        <select name="agent_id" id="{{ prefix }}AgentSelect" {% if mode == 'reassign' %}required{% endif %}
+        <select name="agent_id" id="{{ prefix }}AgentSelect" {% if mode in ['reassign', 'cede'] %}required{% endif %}
                 aria-describedby="{{ prefix }}AssignHint" class="{{ input_cls }}">
             <option value="">Selecciona un agente</option>
             {% for group in groups %}
@@ -53,6 +59,29 @@
         </div>
     </div>
 
+    {% if mode == 'cede' %}
+    <div id="{{ prefix }}ReasonWrap">
+        <label for="{{ prefix }}Reason" class="block text-sm font-medium text-gray-700 mb-1">
+            Motivo <span class="text-red-500" aria-hidden="true">*</span>
+        </label>
+        <input type="text" name="assignment_reason" id="{{ prefix }}Reason" maxlength="200" required
+               placeholder="Por qué cedes este comprador" autocomplete="off"
+               aria-describedby="{{ prefix }}ReasonHelp" class="{{ input_cls }}">
+        <p id="{{ prefix }}ReasonHelp" class="text-xs text-gray-500 mt-1">Lo verá el administrador; el agente que lo recibe no.</p>
+    </div>
+
+    <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 flex items-start gap-3" role="status">
+        <svg class="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>
+        <div class="min-w-0 flex-1 space-y-2">
+            <p class="text-sm font-semibold">Los compradores cedidos no te generan comisión en caso de venta</p>
+            <label for="{{ prefix }}CedeConfirm" class="flex items-start gap-2 text-sm text-amber-900 cursor-pointer">
+                <input type="checkbox" name="confirm_cession" value="1" id="{{ prefix }}CedeConfirm" required
+                       class="mt-0.5 w-4 h-4 rounded border-amber-300 text-gray-900 focus:ring-2 focus:ring-amber-500/40">
+                <span>Entiendo que cedo este comprador</span>
+            </label>
+        </div>
+    </div>
+    {% else %}
     <div id="{{ prefix }}ReasonWrap" class="{% if mode != 'reassign' %}hidden{% endif %}">
         <label for="{{ prefix }}Reason" class="block text-sm font-medium text-gray-700 mb-1">
             Motivo <span class="text-gray-500 font-normal">(opcional)</span>
@@ -60,6 +89,7 @@
         <input type="text" name="assignment_reason" id="{{ prefix }}Reason" maxlength="200"
                placeholder="Motivo (opcional)" autocomplete="off" class="{{ input_cls }}">
     </div>
+    {% endif %}
     {% else %}
     <p class="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
         <svg class="w-5 h-5 shrink-0 text-gray-500" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>

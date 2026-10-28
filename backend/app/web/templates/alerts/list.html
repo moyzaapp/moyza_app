@@ -355,6 +355,10 @@
                                             {{ alert.status }}
                                         </span>
                                         {% endif %}
+                                        {# Recibida por cesión de otro agente (PLAN_CEDER_COMPRADORES.md §7-4) #}
+                                        {% if alert.is_ceded %}
+                                        <div class="mt-2">{{ ui.badge("Cedido", "gray", extra="whitespace-nowrap") }}</div>
+                                        {% endif %}
                                     </td>
 
                                     {# Última asignación para todos; el admin ve debajo la creación si difiere (PLAN_CEDER_COMPRADORES.md §1) #}
@@ -386,6 +390,20 @@
                                                 title="Reasignar" aria-label="Reasignar la alerta de {{ alert.lead_name }}">
                                                 <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
                                                 <span class="hidden sm:inline">Reasignar</span>
+                                            </button>
+                                            {% endif %}
+
+                                            {# Ceder (agente): solo las filas que aún puede ceder (PLAN_CEDER_COMPRADORES.md §5) #}
+                                            {% if not is_admin and alert.id in cedable_ids and cession_groups %}
+                                            <button type="button" class="{{ row_btn }} text-gray-700 bg-gray-100 hover:bg-gray-200"
+                                                data-cede
+                                                data-alert-id="{{ alert.id }}"
+                                                data-agent-id="{{ alert.agent_id }}"
+                                                data-agent-name="{{ alert.agent.name if alert.agent else '' }}"
+                                                data-lead="{{ alert.lead_name }} · {{ alert.property.title if alert.property else 'Búsqueda general' }}"
+                                                title="Ceder" aria-label="Ceder el comprador {{ alert.lead_name }} a otro agente">
+                                                <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+                                                <span class="hidden sm:inline">Ceder</span>
                                             </button>
                                             {% endif %}
 
@@ -574,6 +592,20 @@
         <p class="text-sm text-gray-500">La alerta volverá a Pendiente y sin leer para el nuevo agente, que recibirá un aviso. Los seguimientos se conservan.</p>
     </div>
     {{ ui.modal_footer(submit_label="Reasignar") }}
+</form>
+{% endcall %}
+{% endif %}
+
+{% if not is_admin and cedable_ids and cession_groups %}
+<!-- Modal: Ceder comprador (acción de fila del agente; PLAN_CEDER_COMPRADORES.md §5) -->
+{% call ui.modal("cedeModal", "Ceder comprador", size="lg", subtitle=" ") %}
+<form method="POST" action="" id="cedeForm" data-once data-loading-text="Cediendo…">
+    <input type="hidden" name="next" value="/alerts{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+    <div class="p-6 space-y-4">
+        {{ assign_fields("ce", groups=cession_groups, mode="cede") }}
+        <p class="text-sm text-gray-500">El comprador pasará al agente elegido como alerta nueva (Pendiente y sin leer) y dejará de aparecer en tu listado. Los seguimientos se conservan.</p>
+    </div>
+    {{ ui.modal_footer(submit_label="Ceder comprador") }}
 </form>
 {% endcall %}
 {% endif %}
@@ -832,6 +864,25 @@
         if (subtitle) subtitle.textContent = btn.dataset.lead;
         assign.setCurrent(btn.dataset.agentId, btn.dataset.agentName);
         UI.openModal('reassignModal', btn);
+    });
+})();
+</script>
+{% else %}
+<script>
+// ---- Ceder desde el listado (un modal para todas las filas cedibles, solo agente) ----
+(function () {
+    var modal = document.getElementById('cedeModal');
+    if (!modal || !window.AlertAssign) return;
+    var form = document.getElementById('cedeForm');
+    var subtitle = modal.querySelector('#cedeModalTitle + p');
+    var assign = AlertAssign.init('ce');
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-cede]');
+        if (!btn) return;
+        form.action = '/alerts/' + encodeURIComponent(btn.dataset.alertId) + '/cede';
+        if (subtitle) subtitle.textContent = btn.dataset.lead;
+        assign.setCurrent(btn.dataset.agentId, btn.dataset.agentName);
+        UI.openModal('cedeModal', btn);
     });
 })();
 </script>

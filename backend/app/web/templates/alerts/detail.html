@@ -93,7 +93,7 @@
                                 <p class="text-sm text-gray-600">Agente asignado</p>
                                 <p class="text-gray-900 font-medium">{{ alert.agent.name if alert.agent else '—' }}</p>
                                 <p class="text-xs text-gray-500 mt-0.5">
-                                    Asignada{% if alert.assigned_by_user %} por {{ alert.assigned_by_user.full_name or alert.assigned_by_user.email }}{% endif %}
+                                    {{ "Cedida" if alert.is_ceded else "Asignada" }}{% if alert.assigned_by_user %} por {{ alert.assigned_by_user.full_name or alert.assigned_by_user.email }}{% endif %}
                                     el {{ (alert.assigned_at or alert.created_at) | madrid_dt('%d/%m/%Y %H:%M') }}
                                 </p>
                                 {% if not alert.property %}
@@ -125,7 +125,7 @@
                                 <li class="text-sm text-gray-700">
                                     <p>
                                         {% if log.from_agent_id %}
-                                        De <span class="font-medium">{{ log.from_agent.name if log.from_agent else 'agente eliminado' }}</span>
+                                        {{ "Cedida" if log.kind == "ceded" else "Reasignada" }} de <span class="font-medium">{{ log.from_agent.name if log.from_agent else 'agente eliminado' }}</span>
                                         a <span class="font-medium">{{ log.to_agent.name if log.to_agent else 'agente eliminado' }}</span>
                                         {% else %}
                                         Alta asignada a <span class="font-medium">{{ log.to_agent.name if log.to_agent else 'agente eliminado' }}</span>
@@ -315,6 +315,14 @@
                                 Completada
                             </p>
                             {% endif %}
+                            {# Recibida por cesión de otro agente (PLAN_CEDER_COMPRADORES.md §7-4): quién y
+                               cuándo, sin el motivo (el admin lo ve en el historial de asignaciones) #}
+                            {% if alert.is_ceded %}
+                            {{ ui.badge("Cedido", "gray", extra="mt-1 ml-1") }}
+                            <p class="text-xs text-gray-500 mt-1">
+                                Cedido por {{ alert.ceded_by_agent.name if alert.ceded_by_agent else 'un agente' }} el {{ alert.ceded_at | madrid_dt('%d/%m/%Y') }}
+                            </p>
+                            {% endif %}
                         </div>
 
                         {# Plazo en horas hábiles (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.2): la regla
@@ -416,6 +424,19 @@
                         {% endif %}
                         {% endif %}
 
+                        {# Ceder a otro agente de la empresa (PLAN_CEDER_COMPRADORES.md §5): mientras
+                           no venza el plazo de gestión; después, desactivado con el motivo visible #}
+                        {% if show_cede %}
+                        {% if can_cede and cession_groups %}
+                        {{ ui.button("Ceder comprador", "secondary", attrs='data-modal-open="cedeModal"', extra="w-full") }}
+                        {% else %}
+                        {{ ui.button("Ceder comprador", "secondary", attrs='disabled aria-describedby="cedeDisabledHint"', extra="w-full") }}
+                        <p id="cedeDisabledHint" class="text-xs text-gray-500">
+                            {{ cession_expired_message if not can_cede else "No hay otros agentes en " ~ brand_name ~ " a los que ceder el comprador." }}
+                        </p>
+                        {% endif %}
+                        {% endif %}
+
                         {% if is_admin and alert.status == AlertStatus.COMPLETED %}
                         <form method="POST" action="/alerts/{{ alert.id }}/reactivate" onsubmit="return confirm('¿Reactivar esta alerta? Volverá a la cola del agente.');">
                             <button type="submit" class="w-full bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 transition-colors text-sm font-medium">
@@ -458,6 +479,27 @@
 <script>
 (function () {
     var assign = window.AlertAssign && AlertAssign.init('ra');
+    if (assign) assign.setCurrent({{ alert.agent_id | tojson }}, {{ (alert.agent.name if alert.agent else '') | tojson }});
+})();
+</script>
+{% endif %}
+
+{% if can_cede and cession_groups %}
+<!-- Modal Ceder (agente asignado, alerta abierta y en plazo; PLAN_CEDER_COMPRADORES.md §5) -->
+{% call ui.modal("cedeModal", "Ceder comprador", size="lg", subtitle=alert.lead_name ~ " · " ~ alert_subject) %}
+<form method="POST" action="/alerts/{{ alert.id }}/cede" data-once data-loading-text="Cediendo…">
+    <input type="hidden" name="next" value="/alerts/{{ alert.id }}">
+    <div class="p-6 space-y-4">
+        {{ assign_fields("ce", groups=cession_groups, mode="cede") }}
+        <p class="text-sm text-gray-500">El comprador pasará al agente elegido como alerta nueva (Pendiente y sin leer) y dejará de aparecer en tu listado. Los seguimientos se conservan.</p>
+    </div>
+    {{ ui.modal_footer(submit_label="Ceder comprador") }}
+</form>
+{% endcall %}
+<script src="{{ static_url('/static/js/alert-assign.js') }}"></script>
+<script>
+(function () {
+    var assign = window.AlertAssign && AlertAssign.init('ce');
     if (assign) assign.setCurrent({{ alert.agent_id | tojson }}, {{ (alert.agent.name if alert.agent else '') | tojson }});
 })();
 </script>

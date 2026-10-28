@@ -3,6 +3,9 @@
 PLAN_ASIGNACION_ALERTAS.md §2.3. Una fila por cada vez que la alerta se
 asigna: en el alta (`from_agent_id` vacío) y en cada reasignación. Las
 alertas anteriores a esta tabla no tienen filas (nunca se reasignaron).
+
+`kind` (PLAN_CEDER_COMPRADORES.md §5.3): `created` (alta), `reassigned`
+(reasignación del admin) o `ceded` (cesión del propio agente).
 """
 from datetime import datetime
 
@@ -36,6 +39,8 @@ class AlertAssignmentLog(Base):
     assigned_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     reason = Column(String, nullable=True)
+
+    kind = Column(String(20), nullable=False, default="reassigned", server_default="reassigned")
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 

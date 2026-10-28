@@ -797,6 +797,16 @@ async def alerts_page(
     # Se calcula sobre los seguimientos ya cargados de la página, sin consultas nuevas.
     alert_attention = buyer_attention_service.evaluate_alerts(alerts)
 
+    # Ceder desde el listado (PLAN_CEDER_COMPRADORES.md §5): solo el agente y
+    # solo en las filas que aún puede ceder (abiertas, suyas y en plazo).
+    cedable_ids = set()
+    cession_groups = []
+    if agent:
+        now = datetime.utcnow()
+        cedable_ids = {a.id for a in alerts if assignment.can_cede(a, agent.id, now=now)}
+        if cedable_ids:
+            cession_groups = assignment.assignable_agents_for_cession(db, company.id, agent.id)
+
     response = templates.TemplateResponse(
         request=request,
         name="alerts/list.html",
@@ -825,6 +835,8 @@ async def alerts_page(
             "locked_alert_ids": locked_alert_ids,
             "alert_stages": alert_stages,
             "alert_attention": alert_attention,
+            "cedable_ids": cedable_ids,
+            "cession_groups": cession_groups,
             # Columna "Fecha": última asignación para todos; el admin ve debajo
             # "Creada el …" si difiere (PLAN_CEDER_COMPRADORES.md §1)
             "display_dates": {a.id: alert_view.display_date(a) for a in alerts},
@@ -1477,6 +1489,20 @@ async def alert_detail(
 
     can_reassign = admin_view and alert.status in assignment.REASSIGNABLE_STATUSES
 
+    # Ceder (PLAN_CEDER_COMPRADORES.md §5): el agente de una alerta abierta ve
+    # el botón; activo solo mientras su reloj de atención no haya vencido
+    # (si venció, desactivado con el motivo). Destinos: su empresa, sin él.
+    own_agent = None if admin_view else get_agent_from_user(current_user, db)
+    show_cede = (
+        own_agent is not None
+        and alert.agent_id == own_agent.id
+        and alert.status in assignment.REASSIGNABLE_STATUSES
+    )
+    can_cede = show_cede and assignment.can_cede(alert, own_agent.id)
+    cession_groups = (
+        assignment.assignable_agents_for_cession(db, alert.company_id, own_agent.id) if can_cede else []
+    )
+
     company_id = get_active_company(request).id
     search_ctx = _search_context(db, alert, current_user, admin_view, step, confirm_property,
                                  follow_ups, company_id, company_filter=company)
@@ -1508,6 +1534,10 @@ async def alert_detail(
             # reasignación y los del agente anterior no cuentan), para ambos roles
             "can_complete": alert_view.has_follow_up_since_assignment(all_follow_ups, alert),
             "can_reassign": can_reassign,
+            "show_cede": show_cede,
+            "can_cede": can_cede,
+            "cession_groups": cession_groups,
+            "cession_expired_message": assignment.CESSION_EXPIRED_MESSAGE,
             "attention": attention,
             "upcoming_clocks": upcoming_clocks,
             "RULE_CALLBACK": buyer_attention_service.RULE_CALLBACK,
@@ -2189,6 +2219,75 @@ async def reassign_alert(
         message += f". {agent.name} ahora tiene acceso a {result.granted_company.name}"
     response = RedirectResponse(url=back_url, status_code=302)
     set_flash(response, "success", message)
+    return response
+
+
+@router.post("/alerts/{alert_id}/cede")
+async def cede_alert(
+    alert_id: int,
+    request: Request,
+    agent_id: str = Form(None),
+    assignment_reason: str = Form(None),
+    confirm_cession: str = Form(None),
+    next_url: str = Form(None, alias="next"),
+    db: Session = Depends(get_db)
+):
+    """El agente cede su comprador a otro agente de la empresa (PLAN_CEDER_COMPRADORES.md §5).
+
+    Solo el agente asignado, con la alerta abierta y antes de que venza su
+    reloj de atención (§7-1); destino de la empresa de la alerta (§7-2),
+    motivo obligatorio (§7-3) y casilla del aviso de comisión. Efectos de una
+    reasignación más el aviso a los admins. Tras ceder, la alerta ya no es
+    suya: vuelve al listado (o a `next` si es otra página de alertas).
+    """
+    current_user = request.state.user
+    detail_url = f"/alerts/{alert_id}"
+
+    if is_admin(current_user):
+        response = RedirectResponse(url=detail_url, status_code=302)
+        set_flash(response, "error", "Un administrador reasigna la alerta con «Reasignar»")
+        return response
+
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
+    if not alert:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Alerta no encontrada")
+        return response
+
+    back_url = _safe_back_url(next_url, detail_url)
+    own_agent = get_agent_from_user(current_user, db)
+    # Cualquier agente activo: si no es de la empresa de la alerta, validate_cession lo dice
+    to_agent_id = assignment._to_int(agent_id)
+    to_agent = assignment.lookup_any_agent(db)(to_agent_id) if to_agent_id is not None else None
+
+    try:
+        assignment.validate_cession(alert, to_agent, by_agent=own_agent, reason=assignment_reason)
+        if confirm_cession != "1":
+            raise AlertAssignmentError("Marca la casilla «Entiendo que cedo este comprador» para cederlo")
+    except AlertAssignmentError as error:
+        # Si ya no es suya, el detalle redirigiría: mejor al listado
+        error_url = back_url if own_agent is not None and alert.agent_id == own_agent.id else "/alerts"
+        response = RedirectResponse(url=error_url, status_code=302)
+        set_flash(response, "error", str(error))
+        return response
+
+    try:
+        assignment.cede(db, alert, to_agent, current_user, assignment_reason)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error cediendo alerta: alert_id=%s", alert_id)
+        response = RedirectResponse(url=back_url, status_code=302)
+        set_flash(response, "error", "Ocurrió un error al ceder el comprador")
+        return response
+
+    # El reloj arranca de cero con el nuevo agente: los avisos del anterior ya no aplican
+    notification_service.safe_resolve_buyer_notifications(db, alert.id)
+
+    # El detalle de la alerta ya no es accesible para quien la cedió
+    done_url = "/alerts" if back_url.split("?")[0] == detail_url else back_url
+    response = RedirectResponse(url=done_url, status_code=302)
+    set_flash(response, "success", f"Has cedido el comprador {alert.lead_name} a {to_agent.name}")
     return response
 
 
