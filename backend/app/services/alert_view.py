@@ -6,11 +6,13 @@ asignación manual tienen `assigned_at = created_at`). Para el agente, una
 alerta reasignada es nueva: todo lo que ve y todo lo que cuenta para él se
 calcula desde ese momento.
 
+- La fecha que se muestra de la alerta (columna "Fecha" del listado y de la
+  ficha del comprador) es `assignment_start` para todos los roles, así una
+  alerta reasignada aparece a simple vista (PLAN_CEDER_COMPRADORES.md §1).
 - El agente solo ve los seguimientos reales (sin notas del sistema como
-  `REASIGNADA`) registrados desde `assignment_start`, y la fecha que se le
-  muestra es `assignment_start`.
-- El admin lo ve todo: todos los seguimientos y la fecha de creación (la de
-  asignación aparte).
+  `REASIGNADA`) registrados desde `assignment_start`.
+- El admin lo ve todo: todos los seguimientos y, debajo de la fecha, la de
+  creación cuando difiere (`created_label`).
 - La cola secuencial y el cierre (para ambos roles) exigen un seguimiento real
   desde `assignment_start`: una alerta reasignada con seguimientos del agente
   anterior cuenta como "sin gestionar" hasta que el nuevo registre uno.
@@ -56,9 +58,21 @@ def assignment_start_expr():
     return func.coalesce(PropertyAlert.assigned_at, PropertyAlert.created_at)
 
 
-def display_date(alert, is_admin: bool) -> Optional[datetime]:
-    """Fecha de la alerta que se muestra: creación para el admin, asignación para el agente."""
-    return alert.created_at if is_admin else assignment_start(alert)
+def display_date(alert) -> Optional[datetime]:
+    """Fecha de la alerta que se muestra a todos los roles: la de su última asignación."""
+    return assignment_start(alert)
+
+
+def created_label(alert) -> Optional[datetime]:
+    """Fecha de creación para la línea secundaria del admin ("Creada el …").
+
+    None si coincide con `assignment_start` (alerta no reasignada): entonces
+    la fecha principal ya es la de creación y la línea sobra.
+    """
+    created = alert.created_at
+    if created is None or created == assignment_start(alert):
+        return None
+    return created
 
 
 # ---------------------------------------------------------------------------

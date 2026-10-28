@@ -631,10 +631,10 @@ async def alerts_page(
     # paginación sea estable). Propiedad y agente se rellenan con el JOIN
     # que ya hace la consulta, y los seguimientos de la página se cargan en
     # una segunda consulta: sin esto se hacía una consulta por alerta al
-    # pintar la tabla (N+1). La fecha es la que ve cada rol
-    # (PLAN_ALERTA_COMO_NUEVA.md): creación para el admin, asignación para el
-    # agente, así una alerta reasignada se ordena como nueva para él.
-    date_order = PropertyAlert.created_at if admin_view else alert_view.assignment_start_expr()
+    # pintar la tabla (N+1). La fecha es la de la última asignación para
+    # todos los roles (PLAN_CEDER_COMPRADORES.md §1): una alerta reasignada
+    # sube arriba, también para el admin.
+    date_order = alert_view.assignment_start_expr()
     alerts = (
         filtered_query
         .options(
@@ -825,8 +825,12 @@ async def alerts_page(
             "locked_alert_ids": locked_alert_ids,
             "alert_stages": alert_stages,
             "alert_attention": alert_attention,
-            # Columna "Fecha": creación (admin) o asignación (agente)
-            "display_dates": {a.id: alert_view.display_date(a, admin_view) for a in alerts},
+            # Columna "Fecha": última asignación para todos; el admin ve debajo
+            # "Creada el …" si difiere (PLAN_CEDER_COMPRADORES.md §1)
+            "display_dates": {a.id: alert_view.display_date(a) for a in alerts},
+            "created_dates": (
+                {a.id: alert_view.created_label(a) for a in alerts} if admin_view else {}
+            ),
             "is_admin": is_admin(current_user),
             "search_summaries": search_summaries,
             # Alta sin referencia: en estas operaciones no se toma perfil (texto del modal)
@@ -1496,8 +1500,9 @@ async def alert_detail(
             "is_admin": admin_view,
             # Bloque "Agente asignado" (quién, antes, motivo, historial): solo admin
             "show_assignment": admin_view,
-            # Fecha de la caja de estado: creación (admin) o asignación (agente)
-            "display_date": alert_view.display_date(alert, admin_view),
+            # Fecha de la caja de estado del agente (el admin ve creación y
+            # asignación por separado)
+            "display_date": alert_view.display_date(alert),
             "assignment_start": alert_view.assignment_start(alert),
             # Cerrar exige un seguimiento real desde la asignación (la nota de
             # reasignación y los del agente anterior no cuentan), para ambos roles
@@ -2777,19 +2782,18 @@ async def buyer_detail(
     own_agent = None if is_admin(current_user) else get_agent_from_user(current_user, db)
 
     # Pestaña Alertas (PLAN_ALERTA_COMO_NUEVA.md). El admin ve todas las del
-    # comprador con su fecha de creación. El agente solo las suyas (las de
-    # otros agentes no puede abrirlas), con la fecha de su asignación, y las
-    # bloqueadas por su cola salen como "En cola" sin datos ni enlace.
+    # comprador. El agente solo las suyas (las de otros agentes no puede
+    # abrirlas), y las bloqueadas por su cola salen como "En cola" sin datos ni
+    # enlace. Para ambos, fecha y orden por la última asignación
+    # (PLAN_CEDER_COMPRADORES.md §1).
     admin_view = is_admin(current_user)
     buyer_alerts_query = db.query(PropertyAlert).filter(PropertyAlert.buyer_id == buyer_id)
     locked_alert_ids = set()
-    if admin_view:
-        date_order = PropertyAlert.created_at
-    else:
+    date_order = alert_view.assignment_start_expr()
+    if not admin_view:
         buyer_alerts_query = buyer_alerts_query.filter(
             PropertyAlert.agent_id == (own_agent.id if own_agent else -1)
         )
-        date_order = alert_view.assignment_start_expr()
         if own_agent:
             locked_alert_ids = get_locked_alert_ids(own_agent.id, db, company.id)
     buyer_alerts = (
@@ -2819,7 +2823,10 @@ async def buyer_detail(
             "own_agent": own_agent,
             "buyer_alerts": buyer_alerts,
             "locked_alert_ids": locked_alert_ids,
-            "display_dates": {a.id: alert_view.display_date(a, admin_view) for a in buyer_alerts},
+            "display_dates": {a.id: alert_view.display_date(a) for a in buyer_alerts},
+            "created_dates": (
+                {a.id: alert_view.created_label(a) for a in buyer_alerts} if admin_view else {}
+            ),
             "agents": agents,
             "assignable_groups": assignable_groups,
             "location": filter_values["location"],

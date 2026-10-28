@@ -287,12 +287,26 @@ def test_listado_etapa_y_fecha_por_rol(env, reassigned):
     assert reassigned.id not in ctx["alert_stages"]          # "Sin iniciar" para Bea
     assert ctx["display_dates"][reassigned.id] == REASSIGNED_AT
     assert _madrid(REASSIGNED_AT) in html and _madrid(T0) not in html
+    # El agente no ve la línea de creación: para él la alerta es nueva
+    assert ctx["created_dates"] == {} and "Creada el" not in html
 
+    # El admin también ve la última asignación y, debajo, la creación
+    # (PLAN_CEDER_COMPRADORES.md §1)
     response, html = _list(env, env.admin)
     ctx = response.context
     assert ctx["alert_stages"][reassigned.id]["value"] == "PRIMERA_LLAMADA"
-    assert ctx["display_dates"][reassigned.id] == T0
-    assert _madrid(T0) in html
+    assert ctx["display_dates"][reassigned.id] == REASSIGNED_AT
+    assert ctx["created_dates"][reassigned.id] == T0
+    assert _madrid(REASSIGNED_AT) in html
+    assert f"Creada el {_madrid(T0)}" in html
+
+
+def test_listado_admin_sin_linea_de_creacion_si_no_se_reasigno(env):
+    plain = _new_alert(env, "ana", "Comprador Normal", T0)
+    response, html = _list(env, env.admin)
+    assert response.context["display_dates"][plain.id] == T0
+    assert response.context["created_dates"][plain.id] is None
+    assert "Creada el" not in html
 
 
 def test_listado_del_agente_ordena_por_asignacion(env, reassigned):
@@ -300,8 +314,10 @@ def test_listado_del_agente_ordena_por_asignacion(env, reassigned):
     middle = _new_alert(env, "bea", "Comprador Intermedio", T0 + timedelta(days=3))
     response, _ = _list(env, env.users["bea"])
     assert [a.id for a in response.context["alerts"]] == [reassigned.id, middle.id]
+    # El admin también ordena por la última asignación: la reasignada sube
+    # (PLAN_CEDER_COMPRADORES.md §1)
     response, _ = _list(env, env.admin)
-    assert [a.id for a in response.context["alerts"]] == [middle.id, reassigned.id]
+    assert [a.id for a in response.context["alerts"]] == [reassigned.id, middle.id]
 
 
 def test_ficha_del_comprador_por_rol(env):
@@ -340,7 +356,12 @@ def test_ficha_del_comprador_por_rol(env):
     assert {a.id for a in ctx["buyer_alerts"]} == {queued.id, head.id, others.id}
     panel = html[html.index('id="panel-alerts"'):]
     assert "En cola" not in panel and f'href="/alerts/{queued.id}"' in panel
-    assert ctx["display_dates"][queued.id] == T0
+    # El admin también ve la última asignación, con la creación debajo
+    assert ctx["display_dates"][queued.id] == REASSIGNED_AT + timedelta(hours=1)
+    assert ctx["created_dates"][queued.id] == T0
+    assert ctx["created_dates"][head.id] is None
+    assert "Creada el" in panel
+    assert [a.id for a in ctx["buyer_alerts"]][0] == queued.id
 
 
 # ---------------------------------------------------------------------------

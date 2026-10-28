@@ -357,10 +357,14 @@
                                         {% endif %}
                                     </td>
 
-                                    {# Creación para el admin; asignación para el agente (PLAN_ALERTA_COMO_NUEVA.md) #}
+                                    {# Última asignación para todos; el admin ve debajo la creación si difiere (PLAN_CEDER_COMPRADORES.md §1) #}
                                     {% set shown_date = display_dates.get(alert.id) %}
+                                    {% set created_date = created_dates.get(alert.id) %}
                                     <td class="px-6 py-4 text-sm text-gray-600">
                                         {{ shown_date | madrid_dt('%d/%m/%Y %H:%M') if shown_date else '-' }}
+                                        {% if created_date %}
+                                        <span class="block text-xs text-gray-500">Creada el {{ created_date | madrid_dt('%d/%m/%Y %H:%M') }}</span>
+                                        {% endif %}
                                     </td>
 
                                     <td class="px-6 py-4 text-center">
