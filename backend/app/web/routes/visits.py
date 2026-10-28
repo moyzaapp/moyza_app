@@ -24,6 +24,7 @@ from app.models.property import Property
 from app.models.property_visit import PropertyVisit
 from app.services.visit_sheet_generator import generate_visit_sheet
 from app.services.whatsapp import send_report
+from app.core.business_calendar import fmt_madrid
 from app.core.config import settings
 from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, get_agent_from_user
@@ -612,8 +613,9 @@ async def preview_visit(
     brand = branding_for(property_item.company)
 
     # Preparar datos para el template
-    visit_date = visit.created_at.strftime("%d/%m/%Y") if visit.created_at else datetime.now().strftime("%d/%m/%Y")
-    visit_time = visit.created_at.strftime("%H:%M") if visit.created_at else datetime.now().strftime("%H:%M")
+    # Hora de España, igual que la ficha en PDF (PLAN_CEDER_COMPRADORES.md §4)
+    visit_date = fmt_madrid(visit.created_at or datetime.utcnow(), "%d/%m/%Y")
+    visit_time = fmt_madrid(visit.created_at or datetime.utcnow(), "%H:%M")
     # Mismo agente que el PDF: el que realizó la visita (o el captador en
     # visitas antiguas sin atribución) y, si lo hay, el acompañante.
     signing_agent = visit.signing_agent

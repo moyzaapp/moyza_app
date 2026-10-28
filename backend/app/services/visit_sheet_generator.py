@@ -20,6 +20,7 @@ from reportlab.platypus.flowables import HRFlowable
 from reportlab.lib.units import cm
 from xml.sax.saxutils import escape
 
+from app.core.business_calendar import fmt_madrid
 from app.services.company_service import branding_for
 
 
@@ -66,7 +67,7 @@ def _signature_image(path, who):
 def _signature_date(value, style):
     if not value:
         return ""
-    return Paragraph(f"<font size=7>Firmado digitalmente el {value.strftime('%d/%m/%Y %H:%M')}</font>", style)
+    return Paragraph(f"<font size=7>Firmado digitalmente el {fmt_madrid(value)}</font>", style)
 
 
 def _joint_signature_table(visit, agent, agent_name, companion_agent, body_style):
@@ -241,8 +242,9 @@ def generate_visit_sheet(
 
     elements.append(Spacer(1, 10))
 
-    # Fecha
-    visit_date = visit.created_at.strftime("%d/%m/%Y") if visit.created_at else datetime.now().strftime("%d/%m/%Y")
+    # Fecha y horas de la ficha en hora de España: en base de datos van en UTC
+    # naive (PLAN_CEDER_COMPRADORES.md §4)
+    visit_date = fmt_madrid(visit.created_at or datetime.utcnow(), "%d/%m/%Y")
     elements.append(
         Paragraph(
             f"<b>FECHA:</b> {visit_date}",
@@ -393,7 +395,7 @@ def generate_visit_sheet(
     # =========================
 
     agent_name = _safe_text(agent.name) if agent else f"Agente {_safe_text(brand.name)}"
-    visit_time = visit.created_at.strftime("%H:%M") if visit.created_at else datetime.now().strftime("%H:%M")
+    visit_time = fmt_madrid(visit.created_at or datetime.utcnow(), "%H:%M")
 
     # Debe coincidir con templates/visits/preview.html (lo que se firma)
     if companion_agent:
@@ -496,11 +498,11 @@ def generate_visit_sheet(
         agent_signature_date = ""
 
         if visit.signature_captured_at:
-            signature_date = visit.signature_captured_at.strftime("%d/%m/%Y %H:%M")
+            signature_date = fmt_madrid(visit.signature_captured_at)
             buyer_signature_date = Paragraph(f"<font size=7>Firmado digitalmente el {signature_date}</font>", body_style)
 
         if agent and agent.signature_uploaded_at:
-            agent_sig_date = agent.signature_uploaded_at.strftime("%d/%m/%Y %H:%M")
+            agent_sig_date = fmt_madrid(agent.signature_uploaded_at)
             agent_signature_date = Paragraph(f"<font size=7>Firmado digitalmente el {agent_sig_date}</font>", body_style)
 
         signature_data.append([
@@ -609,20 +611,20 @@ def generate_visit_sheet(
 
     validation_metadata = f"""
     <b>METADATOS DE VALIDACIÓN LEGAL</b><br/>
-    Documento generado electrónicamente el {datetime.now().strftime("%d/%m/%Y a las %H:%M UTC")}<br/>
+    Documento generado electrónicamente el {fmt_madrid(datetime.utcnow(), "%d/%m/%Y a las %H:%M")} (hora de España)<br/>
     """
 
     if visit.data_consent_accepted_at:
-        consent_date = visit.data_consent_accepted_at.strftime("%d/%m/%Y %H:%M")
+        consent_date = fmt_madrid(visit.data_consent_accepted_at)
         validation_metadata += f"Consentimiento RGPD aceptado el {consent_date}<br/>"
 
     if visit.signature_captured_at:
-        sig_date = visit.signature_captured_at.strftime("%d/%m/%Y %H:%M")
+        sig_date = fmt_madrid(visit.signature_captured_at)
         validation_metadata += f"Firma digital capturada el {sig_date}<br/>"
 
     agent_signatures_confirmed_at = getattr(visit, "agent_signatures_confirmed_at", None)
     if agent_signatures_confirmed_at:
-        confirmed_date = agent_signatures_confirmed_at.strftime("%d/%m/%Y %H:%M")
+        confirmed_date = fmt_madrid(agent_signatures_confirmed_at)
         validation_metadata += f"Firmas de agentes confirmadas el {confirmed_date}<br/>"
 
     if visit.data_consent_ip:
