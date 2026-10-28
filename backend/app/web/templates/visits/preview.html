@@ -111,12 +111,7 @@ Vista Previa del Documento - Visita
                 <td class="py-2 px-3">{{ visit.garage_feedback or 'No especificado' }}</td>
             </tr>
         </table>
-
-        {% if visit.notes %}
-        <div class="mt-4 p-3 bg-gray-50 rounded">
-            <p class="text-sm"><strong>Observaciones:</strong> {{ visit.notes }}</p>
-        </div>
-        {% endif %}
+        {# Sin observaciones: son internas y el preview es idéntico a la ficha que se firma (PLAN_CEDER_COMPRADORES.md §3) #}
     </div>
 
     <hr class="my-6 border-gray-300">

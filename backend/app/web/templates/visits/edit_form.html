@@ -306,17 +306,21 @@ Editar visita
 
         <div class="md:col-span-2">
 
-            <label class="block text-sm font-medium text-gray-700 mb-2">
-                Observaciones
+            {# Observaciones internas: no salen en la ficha firmada (PLAN_CEDER_COMPRADORES.md §3) #}
+            <label for="notes" class="block text-sm font-medium text-gray-700 mb-2">
+                Observaciones internas
             </label>
 
             <textarea
+                id="notes"
                 name="notes"
-                class="w-full border border-gray-300 p-3 rounded-xl"
-                placeholder="Observaciones adicionales"
+                class="w-full border border-gray-300 p-3 rounded-xl resize-y"
+                placeholder="Lo que el equipo debe saber de esta visita"
                 rows="4"
                 required
+                aria-describedby="notes_help"
             >{{ visit.notes or '' }}</textarea>
+            <p id="notes_help" class="text-xs text-gray-500 mt-1">Solo las ve el equipo en la app; no salen en la ficha que firma el cliente</p>
 
         </div>
 

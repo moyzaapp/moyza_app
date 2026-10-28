@@ -56,7 +56,10 @@
                     </td>
 
                     <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
-                        {{ visit.visitor_name or '-' }}
+                        <div class="flex items-center gap-1">
+                            <span>{{ visit.visitor_name or '-' }}</span>
+                            {% include 'visits/_notes_button.html' %}
+                        </div>
                     </td>
 
                     <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
@@ -203,3 +206,6 @@
     </div>
 
 </div>
+
+{# Observaciones internas: un único panel para toda la tabla #}
+{% include 'visits/_notes_drawer.html' %}

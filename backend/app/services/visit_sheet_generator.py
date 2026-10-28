@@ -383,14 +383,8 @@ def generate_visit_sheet(
 
     elements.append(feedback_table)
 
-    if visit.notes:
-        elements.append(Spacer(1, 10))
-        elements.append(
-            Paragraph(
-                f"<b>Observaciones:</b> {_safe_text(visit.notes)}",
-                body_style
-            )
-        )
+    # Las observaciones (`visit.notes`) son internas: solo se ven en la app y
+    # no salen en la ficha que firma el cliente (PLAN_CEDER_COMPRADORES.md §3)
 
     elements.append(Spacer(1, 20))
 
