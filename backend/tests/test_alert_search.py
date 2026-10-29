@@ -170,12 +170,15 @@ def _complete_profile(env, buyer=None, **fields):
     """Perfil mínimo completo ya guardado (p. ej. desde la ficha del comprador).
 
     PLAN_PERFIL_OBLIGATORIO.md: asociar o cambiar propiedad exige el perfil
-    completo (tipo + precio máximo + ubicación: provincia, población o zona;
-    PLAN_PERFIL_UBICACION.md).
+    completo. Por defecto cumple la regla nueva de PLAN_PERFIL_ZONAS.md (tipo,
+    precio máximo, dormitorios máximos, población concreta), que incluye la antigua (tipo + precio
+    máximo + ubicación): vale con cualquier `created_at` respecto al corte
+    `PROFILE_MINIMUMS_SINCE`.
     """
     from app.models.buyer_search_criteria import BuyerSearchCriteria
     buyer = buyer or env.buyer
-    data = dict(property_type="Piso", max_price=200000, zones=["Centro"], business_type="Venta")
+    data = dict(property_type="Piso", max_price=200000, max_bedrooms=3, cities=["Jaen"], zones=["Centro"],
+                business_type="Venta")
     data.update(fields)
     criteria = BuyerSearchCriteria(buyer_id=buyer.id, **data)
     env.db.add(criteria)
@@ -187,7 +190,7 @@ def _save_profile(env, user, alert, form=None):
     from app.web.routes.alerts import save_alert_search_profile
     form = dict(PROFILE if form is None else form)
     fields = {k: form.get(k) for k in ("property_type", "min_price", "max_price", "min_bedrooms",
-                                       "max_bedrooms", "min_bathrooms", "notes")}
+                                       "max_bedrooms", "min_bathrooms", "elevator", "notes")}
     request = _request(env, user, f"/alerts/{alert.id}/search-profile", "POST", form=form)
     return asyncio.run(save_alert_search_profile(alert.id, request, db=env.db, **fields))
 
@@ -472,7 +475,10 @@ def _add_follow_up(env, user, alert, action_type, notes=None, form=None):
 
 
 # Perfil mínimo tal como lo envía el modal de seguimiento al elegir «Contactado»
-CONTACT_PROFILE = {"zones": ["Centro"], "property_type": "Piso", "max_price": "150000"}
+# Mínimos del perfil (PLAN_PERFIL_ZONAS.md): dormitorios máximos, población
+# concreta y, como Jaen tiene la zona Centro, también la zona
+CONTACT_PROFILE = {"cities": ["Jaen"], "zones": ["Centro"], "property_type": "Piso", "max_price": "150000",
+                   "max_bedrooms": "3"}
 
 
 def test_formulario_rechaza_etapas_heredadas(env):
@@ -717,7 +723,8 @@ def test_detalle_tres_pasos_perfil_sin_m2_sugerencias_y_cambio(env):
     assert '<select name="business_type" id="spBusinessType" required' in html
     assert '<option value="Venta" selected>Venta</option>' in html
     assert "Si la cambias, cambia la operación de la alerta" in html
-    assert 'name="zones" value="Centro"' in html
+    # Sin perfil: poblaciones sin marcar y zonas ocultas hasta marcar una (PLAN_PERFIL_ZONAS.md)
+    assert 'name="cities" value="Jaen"' in html and 'name="zones" value="Centro"' not in html
 
     # Tras guardar el perfil: Propuesta con sugerencias de cualquier agente
     _save_profile(env, env.users["ana"], alert)

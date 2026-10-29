@@ -40,12 +40,13 @@ async def clients_page(request: Request, db: Session = Depends(get_db)):
     # Solo clientes de la empresa activa
     base_query = scope_clients(db.query(Client), company.id)
 
-    # Propiedades que el usuario puede ver en la empresa activa (sin
-    # archivadas): las de su agente, o todas si es admin. Alimentan la
-    # columna "Dirección del inmueble" y la búsqueda por dirección.
+    # Propiedades que el usuario puede ver en la empresa activa: las de su
+    # agente, o todas si es admin. Alimentan la columna "Dirección del
+    # inmueble" y la búsqueda por dirección. Las archivadas también salen,
+    # marcadas (decisión 2026-10-28): un cliente cuyo único inmueble con el
+    # agente está archivado sigue en su lista y no debe quedar sin dirección.
     visible_properties = scope_properties(db.query(Property), company.id).filter(
         Property.client_id.isnot(None),
-        Property.status != PropertyStatus.ARCHIVED,
     )
 
     # Agentes ven solo clientes cuyas propiedades tienen asignadas
@@ -89,13 +90,18 @@ async def clients_page(request: Request, db: Session = Depends(get_db)):
 
     clients = base_query.order_by(Client.name).all()
 
-    # Una sola consulta para las propiedades de todos los clientes listados
+    # Una sola consulta para las propiedades de todos los clientes listados;
+    # las archivadas, al final de cada cliente
     properties_by_client = {}
     if clients:
         rows = (
             visible_properties
             .filter(Property.client_id.in_([c.id for c in clients]))
-            .order_by(Property.address, Property.id)
+            .order_by(
+                (Property.status == PropertyStatus.ARCHIVED).asc(),
+                Property.address,
+                Property.id,
+            )
             .all()
         )
         for prop in rows:
@@ -113,6 +119,7 @@ async def clients_page(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "clients": clients,
             "properties_by_client": properties_by_client,
+            "archived_status": PropertyStatus.ARCHIVED,
             "current_user": current_user,
             "error": error,
             "search": search,

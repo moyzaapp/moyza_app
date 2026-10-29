@@ -88,14 +88,16 @@
                 </td>
 
                 {# Propiedades del cliente que el usuario puede ver (agente: solo las
-                   suyas; admin: todas las de la empresa activa), sin número de calle #}
+                   suyas; admin: todas las de la empresa activa), sin número de calle.
+                   Las archivadas salen al final, con marca #}
                 <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
                     {% set client_properties = properties_by_client.get(client.id, []) %}
                     {% if client_properties %}
                     <ul class="space-y-1">
                         {% for p in client_properties[:3] %}
-                        <li>
+                        <li class="flex flex-wrap items-center gap-1.5">
                             <a href="/properties/{{ p.id }}" title="{{ p.title }}" class="text-blue-600 hover:text-blue-700 hover:underline">{{ p.street or p.title }}</a>
+                            {% if p.status == archived_status %}{{ ui.badge("Archivada", "gray") }}{% endif %}
                         </li>
                         {% endfor %}
                     </ul>
@@ -104,8 +106,9 @@
                         <summary class="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-900">+{{ client_properties | length - 3 }} más</summary>
                         <ul class="mt-1 space-y-1">
                             {% for p in client_properties[3:] %}
-                            <li>
+                            <li class="flex flex-wrap items-center gap-1.5">
                                 <a href="/properties/{{ p.id }}" title="{{ p.title }}" class="text-blue-600 hover:text-blue-700 hover:underline">{{ p.street or p.title }}</a>
+                                {% if p.status == archived_status %}{{ ui.badge("Archivada", "gray") }}{% endif %}
                             </li>
                             {% endfor %}
                         </ul>

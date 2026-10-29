@@ -24,6 +24,7 @@ from app.models.property import Property
 from app.models.property_visit import PropertyVisit
 from app.services.visit_sheet_generator import generate_visit_sheet
 from app.services.whatsapp import send_report
+from app.core.business_calendar import fmt_madrid
 from app.core.config import settings
 from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, get_agent_from_user
@@ -52,8 +53,36 @@ logger = logging.getLogger(__name__)
 # Estados de una visita sin firmar: se edita desde la vista previa y vuelve a ella
 UNSIGNED_VISIT_STATUSES = ("draft", "preview")
 
-# Importe de honorarios: dígitos con separadores opcionales (2500, 2.500, 2500,50)
-PURCHASE_FEES_PATTERN = re.compile(r"\d[\d.,]*")
+# Honorarios: importe o porcentaje, dígitos con separadores opcionales y '%'
+# final si es porcentaje (2500, 2.500, 2500,50, 2%, 2,5%)
+PURCHASE_FEES_PATTERN = re.compile(r"\d[\d.,]*%?")
+
+
+def purchase_fees_from_form(form) -> str:
+    """Honorarios del formulario tal como se guardan: "2500" (euros) o "2%".
+
+    El selector `purchase_fees_unit` ('€' por defecto o '%') pone el signo; si
+    el agente escribe el '%' en el propio campo también vale
+    (PLAN_CEDER_COMPRADORES.md §2).
+    """
+    value = PropertyVisit.clean_purchase_fees(form.get("purchase_fees"))
+    if value and form.get("purchase_fees_unit") == "%" and not value.endswith("%"):
+        value += "%"
+    return value
+
+
+def purchase_fees_error(value: str):
+    """Mensaje de error de unos honorarios ya limpios, o None si son válidos."""
+    if not PURCHASE_FEES_PATTERN.fullmatch(value):
+        return "Los honorarios deben ser solo el importe o el porcentaje (ej: 2500 o 2)"
+    if value.endswith("%"):
+        try:
+            percent = float(value[:-1].replace(",", "."))
+        except ValueError:
+            percent = None
+        if percent is None or not 0 <= percent <= 100:
+            return "El porcentaje de honorarios debe estar entre 0 y 100"
+    return None
 
 
 def _visit_agents_context(request: Request, db: Session, property_item, visit=None) -> dict:
@@ -271,7 +300,7 @@ async def create_visit(
     phone = f"{phone_country_code}{phone_number_digits}" if phone_number_digits else ""
 
     visitor_name = (form.get("visitor_name") or "").strip()
-    purchase_fees = PropertyVisit.clean_purchase_fees(form.get("purchase_fees"))
+    purchase_fees = purchase_fees_from_form(form)
     notes = (form.get("notes") or "").strip()
 
     if not visitor_name or not phone or not purchase_fees or not notes:
@@ -279,9 +308,10 @@ async def create_visit(
         set_flash(response, "error", "Nombre, teléfono, honorarios y observaciones son obligatorios")
         return response
 
-    if not PURCHASE_FEES_PATTERN.fullmatch(purchase_fees):
+    fees_error = purchase_fees_error(purchase_fees)
+    if fees_error:
         response = RedirectResponse(url=f"/visits/new/{property_id}", status_code=302)
-        set_flash(response, "error", "Los honorarios deben ser solo el importe (ej: 2500)")
+        set_flash(response, "error", fees_error)
         return response
 
     try:
@@ -583,8 +613,9 @@ async def preview_visit(
     brand = branding_for(property_item.company)
 
     # Preparar datos para el template
-    visit_date = visit.created_at.strftime("%d/%m/%Y") if visit.created_at else datetime.now().strftime("%d/%m/%Y")
-    visit_time = visit.created_at.strftime("%H:%M") if visit.created_at else datetime.now().strftime("%H:%M")
+    # Hora de España, igual que la ficha en PDF (PLAN_CEDER_COMPRADORES.md §4)
+    visit_date = fmt_madrid(visit.created_at or datetime.utcnow(), "%d/%m/%Y")
+    visit_time = fmt_madrid(visit.created_at or datetime.utcnow(), "%H:%M")
     # Mismo agente que el PDF: el que realizó la visita (o el captador en
     # visitas antiguas sin atribución) y, si lo hay, el acompañante.
     signing_agent = visit.signing_agent
@@ -895,7 +926,7 @@ async def update_visit(
     phone = f"{phone_country_code}{phone_number_digits}" if phone_number_digits else ""
 
     visitor_name = (form.get("visitor_name") or "").strip()
-    purchase_fees = PropertyVisit.clean_purchase_fees(form.get("purchase_fees"))
+    purchase_fees = purchase_fees_from_form(form)
     notes = (form.get("notes") or "").strip()
 
     if not visitor_name or not phone or not purchase_fees or not notes:
@@ -903,9 +934,10 @@ async def update_visit(
         set_flash(response, "error", "Nombre, teléfono, honorarios y observaciones son obligatorios")
         return response
 
-    if not PURCHASE_FEES_PATTERN.fullmatch(purchase_fees):
+    fees_error = purchase_fees_error(purchase_fees)
+    if fees_error:
         response = RedirectResponse(url=f"/visits/edit/{visit_id}", status_code=302)
-        set_flash(response, "error", "Los honorarios deben ser solo el importe (ej: 2500)")
+        set_flash(response, "error", fees_error)
         return response
 
     # Agentes: fijos si la visita ya está firmada/completada (decisión 9)

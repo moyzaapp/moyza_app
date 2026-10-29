@@ -131,11 +131,16 @@ def test_assignment_start_cae_a_created_at():
     assert alert_view.assignment_start(_alert(assigned_at=None)) == T0
 
 
-def test_display_date_por_rol():
-    alert = _alert()
-    assert alert_view.display_date(alert, is_admin=True) == T0
-    assert alert_view.display_date(alert, is_admin=False) == REASSIGNED_AT
-    assert alert_view.display_date(_alert(assigned_at=None), is_admin=False) == T0
+def test_display_date_es_la_ultima_asignacion():
+    # Para todos los roles (PLAN_CEDER_COMPRADORES.md §1)
+    assert alert_view.display_date(_alert()) == REASSIGNED_AT
+    assert alert_view.display_date(_alert(assigned_at=None)) == T0
+
+
+def test_created_label_solo_si_difiere_de_la_asignacion():
+    assert alert_view.created_label(_alert()) == T0
+    assert alert_view.created_label(_alert(assigned_at=T0)) is None
+    assert alert_view.created_label(_alert(assigned_at=None)) is None
 
 
 def test_visible_follow_ups_agente_solo_desde_la_asignacion_y_sin_notas():

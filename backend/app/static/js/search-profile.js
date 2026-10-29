@@ -1,6 +1,7 @@
 /*
  * Perfil de búsqueda del comprador: ubicación en cascada y mínimo de ubicación
- * (PLAN_PERFIL_OBLIGATORIO.md, decisión 4; PLAN_PERFIL_UBICACION.md).
+ * (PLAN_PERFIL_OBLIGATORIO.md, decisión 4; PLAN_PERFIL_UBICACION.md; zonas por
+ * población, PLAN_PERFIL_ZONAS.md).
  *
  * Marcado: macro `search_profile_fields` de
  * templates/components/search_profile_form.html. El bloque de ubicación es
@@ -10,21 +11,30 @@
  *     las poblaciones sin CP válido cuelgan de `data-no-province`, que no es
  *     una provincia elegible);
  *   - `select[data-geo="country"]` y `select[data-geo="province"]`;
- *   - `[data-geo-list="cities"]` y `[data-geo-list="zones"]`: casillas con
- *     "Todas" (`input[data-geo-all]`) y un `[data-geo-empty]` hermano.
+ *   - `[data-geo-list="cities"]`: casillas de población, SIN "Todas"
+ *     (PLAN_PERFIL_ZONAS.md: al menos una concreta), con un `[data-geo-empty]`
+ *     hermano;
+ *   - `[data-geo-zones]`: <fieldset> de Zona, oculto y deshabilitado mientras
+ *     no haya ninguna población marcada. Dentro, `[data-geo-list="zones"]` con
+ *     "Todas" (`input[data-geo-all]`, `name="zones_all"`, en
+ *     `[data-geo-all-wrap]`, que solo se ve si hay zonas) y un grupo
+ *     `[data-geo-group]` por población marcada que tenga zonas (con título si
+ *     hay más de un grupo).
  * El servidor ya pinta el estado inicial (perfil guardado); aquí solo se
  * reconstruyen los niveles cuando el agente cambia uno:
  *   país → provincias (y poblaciones y zonas), provincia → poblaciones (y
- *   zonas), poblaciones → zonas (las de las marcadas, o de todas si "Todas").
- * "Todas" marca y deshabilita las demás casillas (deshabilitadas no se
- * envían: lista vacía = Todas). Desmarcar la última casilla vuelve a "Todas".
+ *   zonas), poblaciones → zonas (solo las de las marcadas, agrupadas).
+ * "Todas" las zonas no se marca nunca sola; marcada, marca y deshabilita las
+ * demás (deshabilitadas no se envían: lista vacía = Todas).
  *
  * Mínimo de ubicación (con `data-places-required`): al enviar, si no hay
- * provincia ni ninguna población o zona concreta marcada, se cancela el envío,
- * se muestra el mensaje (`data-places-error`) y se enfoca la provincia. Se
- * ignora dentro de un <fieldset disabled> (el perfil del modal de seguimiento
- * solo cuenta con «Contactado»). Escucha en captura para adelantarse a la
- * guardia de doble envío de ui.js (`form[data-once]`).
+ * ninguna población marcada se cancela el envío y se muestra el aviso
+ * `data-places-error` ("Marca al menos una población"); si las marcadas tienen
+ * zonas y no hay ninguna zona ni "Todas", el aviso `data-zones-error` ("Elige
+ * al menos una zona o marca Todas"). Se ignora dentro de un <fieldset
+ * disabled> (el perfil del modal de seguimiento solo cuenta con «Contactado»).
+ * Escucha en captura para adelantarse a la guardia de doble envío de ui.js
+ * (`form[data-once]`).
  *
  * El servidor lo valida igualmente (buyer_matching.missing_profile_fields).
  *
@@ -36,15 +46,19 @@
  *   - `data-minimums-if-filled`: perfil opcional que, si se rellena algún dato
  *     (ni país ni operación cuentan), debe ir completo.
  * Al cambiar la operación o los datos se ponen o quitan `required` y el
- * asterisco de los campos `[data-profile-min]` (tipo y precio máximo) y de la
- * ubicación (`[data-profile-mark]`); el mínimo de ubicación solo se comprueba
- * mientras los mínimos se exigen.
+ * asterisco de los campos `[data-profile-min]` (tipo, precio máximo y
+ * dormitorios máximos) y de la
+ * población (`[data-profile-mark]`); el de Zona (`[data-zone-mark]`) solo si
+ * hay zonas que elegir. El mínimo de ubicación solo se comprueba mientras los
+ * mínimos se exigen.
  */
 (function () {
     'use strict';
 
     var LABEL_CLASS = 'inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50';
     var CHECK_CLASS = 'w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900/30';
+    var GROUP_TITLE_CLASS = 'text-xs font-medium text-gray-500 mb-1';
+    var GROUP_BOXES_CLASS = 'flex flex-wrap gap-2';
 
     // Mismo orden que el servidor (buyer_matching._sorted): sin acentos ni
     // mayúsculas y, a igualdad ('Jaen' / 'Jaén'), el texto exacto
@@ -92,6 +106,9 @@
             return result;
         }
 
+        var zonesBlock = block.querySelector('[data-geo-zones]');
+        var allWrap = zonesList.querySelector('[data-geo-all-wrap]');
+
         function allBox(list) { return list.querySelector('input[data-geo-all]'); }
         function items(list) { return Array.prototype.slice.call(list.querySelectorAll('input[type="checkbox"]:not([data-geo-all])')); }
         function checkedValues(list) {
@@ -109,42 +126,83 @@
             });
         }
 
-        // Rehace las casillas de una lista conservando lo marcado que siga existiendo
-        function renderList(list, values, selected) {
-            var name = list.getAttribute('data-geo-list');
-            var all = allBox(list);
-            var keep = selected.filter(function (v) { return values.indexOf(v) !== -1; });
-            items(list).forEach(function (input) { list.removeChild(input.closest('label')); });
-            values.forEach(function (value) {
-                var label = document.createElement('label');
-                label.className = LABEL_CLASS;
-                var input = document.createElement('input');
-                input.type = 'checkbox';
-                input.name = name;
-                input.value = value;
-                input.className = CHECK_CLASS;
-                input.checked = keep.indexOf(value) !== -1;
-                label.appendChild(input);
-                label.appendChild(document.createTextNode(' ' + value));
-                list.appendChild(label);
-            });
-            if (all) all.checked = keep.length === 0;
-            applyAll(list);
-            var empty = list.parentNode.querySelector('[data-geo-empty]');
-            if (empty) empty.classList.toggle('hidden', values.length > 0);
+        function makeBox(name, value, checked) {
+            var label = document.createElement('label');
+            label.className = LABEL_CLASS;
+            var input = document.createElement('input');
+            input.type = 'checkbox';
+            input.name = name;
+            input.value = value;
+            input.className = CHECK_CLASS;
+            input.checked = checked;
+            label.appendChild(input);
+            label.appendChild(document.createTextNode(' ' + value));
+            return label;
         }
 
+        function toggleEmpty(list, hasValues) {
+            var empty = list.parentNode.querySelector('[data-geo-empty]');
+            if (empty) empty.classList.toggle('hidden', hasValues);
+        }
+
+        // Rehace las poblaciones conservando lo marcado que siga existiendo (sin "Todas")
+        function renderCityList(values, selected) {
+            items(citiesList).forEach(function (input) { citiesList.removeChild(input.closest('label')); });
+            values.forEach(function (value) {
+                citiesList.appendChild(makeBox('cities', value, selected.indexOf(value) !== -1));
+            });
+            toggleEmpty(citiesList, values.length > 0);
+        }
+
+        // Zonas de las poblaciones marcadas, en un grupo por población (título si hay
+        // más de uno). Sin poblaciones marcadas el bloque se oculta y deshabilita
+        // (no se envía nada); sin zonas, "Todas" no sale. "Todas" no se marca sola.
         function renderZones() {
             var map = cityZones();
             var chosen = checkedValues(citiesList);
-            var source = chosen.length ? chosen : Object.keys(map);
-            var zones = [];
-            source.forEach(function (city) { (map[city] || []).forEach(function (z) { uniquePush(zones, z); }); });
-            renderList(zonesList, zones.sort(byName), checkedValues(zonesList));
+            var all = allBox(zonesList);
+            var wasAll = !!(all && all.checked);
+            var keep = checkedValues(zonesList);
+            var groups = [];
+            chosen.forEach(function (city) {
+                var zones = (map[city] || []).slice().sort(byName);
+                if (zones.length) groups.push({ city: city, zones: zones });
+            });
+            Array.prototype.slice.call(zonesList.querySelectorAll('[data-geo-group]')).forEach(function (group) {
+                zonesList.removeChild(group);
+            });
+            groups.forEach(function (group) {
+                var wrap = document.createElement('div');
+                wrap.setAttribute('role', 'group');
+                wrap.setAttribute('aria-label', 'Zonas de ' + group.city);
+                wrap.setAttribute('data-geo-group', '');
+                if (groups.length > 1) {
+                    var title = document.createElement('p');
+                    title.className = GROUP_TITLE_CLASS;
+                    title.textContent = group.city;
+                    wrap.appendChild(title);
+                }
+                var boxes = document.createElement('div');
+                boxes.className = GROUP_BOXES_CLASS;
+                group.zones.forEach(function (zone) {
+                    boxes.appendChild(makeBox('zones', zone, keep.indexOf(zone) !== -1));
+                });
+                wrap.appendChild(boxes);
+                zonesList.appendChild(wrap);
+            });
+            var hasZones = groups.length > 0;
+            if (all) all.checked = hasZones && wasAll;
+            if (allWrap) allWrap.classList.toggle('hidden', !hasZones);
+            applyAll(zonesList);
+            toggleEmpty(zonesList, hasZones);
+            if (zonesBlock) {
+                zonesBlock.classList.toggle('hidden', chosen.length === 0);
+                zonesBlock.disabled = chosen.length === 0;
+            }
         }
 
         function renderCities(selected) {
-            renderList(citiesList, Object.keys(cityZones()).sort(byName), selected);
+            renderCityList(Object.keys(cityZones()).sort(byName), selected);
             renderZones();
         }
 
@@ -174,20 +232,22 @@
         }
         provinceSelect.addEventListener('change', function () { renderCities([]); });
 
-        [citiesList, zonesList].forEach(function (list) {
-            list.addEventListener('change', function (e) {
-                var target = e.target;
-                if (!target || target.type !== 'checkbox') return;
-                if (target.hasAttribute('data-geo-all')) {
-                    // Desmarcar "Todas" deja la lista sin marcar para elegir
-                    if (!target.checked) items(list).forEach(function (input) { input.checked = false; });
-                    applyAll(list);
-                } else if (!items(list).some(function (input) { return input.checked; })) {
-                    // Sin ninguna marcada = Todas
-                    var all = allBox(list);
-                    if (all) { all.checked = true; applyAll(list); }
-                }
-                if (list === citiesList) renderZones();
+        citiesList.addEventListener('change', function (e) {
+            if (e.target && e.target.type === 'checkbox') renderZones();
+        });
+
+        zonesList.addEventListener('change', function (e) {
+            var target = e.target;
+            if (!target || target.type !== 'checkbox') return;
+            if (target.hasAttribute('data-geo-all')) {
+                // Desmarcar "Todas" deja la lista sin marcar para elegir
+                if (!target.checked) items(zonesList).forEach(function (input) { input.checked = false; });
+                applyAll(zonesList);
+                return;
+            }
+            // La misma zona en dos poblaciones: las dos casillas van a la par
+            items(zonesList).forEach(function (input) {
+                if (input !== target && input.value === target.value) input.checked = target.checked;
             });
         });
     }
@@ -209,7 +269,8 @@
 
     // Campos que cuentan como "datos del perfil" (mismo criterio que
     // _profile_values_present en routes/alerts.py: ni país ni operación)
-    var VALUE_NAMES = ['property_type', 'min_price', 'max_price', 'min_bedrooms', 'max_bedrooms', 'min_bathrooms', 'province'];
+    var VALUE_NAMES = ['property_type', 'min_price', 'max_price', 'min_bedrooms', 'max_bedrooms', 'min_bathrooms',
+        'elevator', 'province'];
 
     function requiredOperations(root) {
         var raw = root.getAttribute('data-required-operations');
@@ -267,9 +328,14 @@
         Array.prototype.slice.call(root.querySelectorAll('[data-profile-mark]')).forEach(function (mark) {
             mark.classList.toggle('hidden', !on);
         });
+        // Asterisco de Zona: solo si las poblaciones marcadas tienen zonas
+        Array.prototype.slice.call(root.querySelectorAll('[data-geo-cascade]')).forEach(function (block) {
+            var mark = block.querySelector('[data-zone-mark]');
+            if (mark) mark.classList.toggle('hidden', !(on && zonesOffered(block)));
+        });
         if (!on) {
             Array.prototype.slice.call(root.querySelectorAll('[data-places-required]')).forEach(function (block) {
-                showError(block, false);
+                showError(block, null);
             });
         }
     }
@@ -302,21 +368,32 @@
         return minimumsEnforced(block.closest('[data-search-profile]'));
     }
 
-    function errorFor(block) {
-        var id = block.getAttribute('data-places-error');
-        return id ? document.getElementById(id) : null;
+    // ¿Hay zonas que elegir? (bloque Zona visible con alguna casilla de zona)
+    function zonesOffered(block) {
+        var zones = block.querySelector('[data-geo-zones]');
+        return !!zones && !zones.disabled && zones.querySelector('input[name="zones"]') !== null;
     }
 
-    // Provincia elegida, o al menos una población o zona concreta (no "Todas")
-    function hasPlace(block) {
-        var province = block.querySelector('select[data-geo="province"]');
-        if (province && province.value) return true;
-        return block.querySelector('input[type="checkbox"][name]:checked:not(:disabled)') !== null;
+    // Qué falta en la ubicación (PLAN_PERFIL_ZONAS.md): 'cities' si no hay ninguna
+    // población marcada; 'zones' si las marcadas tienen zonas y no hay ninguna zona
+    // marcada ni "Todas"; null si está bien
+    function placeProblem(block) {
+        var cities = block.querySelector('[data-geo-list="cities"]');
+        if (!cities || !cities.querySelector('input[name="cities"]:checked')) return 'cities';
+        if (!zonesOffered(block)) return null;
+        var zones = block.querySelector('[data-geo-list="zones"]');
+        var all = zones.querySelector('input[data-geo-all]');
+        if (all && all.checked) return null;
+        return zones.querySelector('input[name="zones"]:checked') ? null : 'zones';
     }
 
-    function showError(block, visible) {
-        var error = errorFor(block);
-        if (error) error.classList.toggle('hidden', !visible);
+    // Muestra el aviso de población o de zona (y oculta el otro); null oculta los dos
+    function showError(block, problem) {
+        [['cities', 'data-places-error'], ['zones', 'data-zones-error']].forEach(function (pair) {
+            var id = block.getAttribute(pair[1]);
+            var error = id ? document.getElementById(id) : null;
+            if (error) error.classList.toggle('hidden', problem !== pair[0]);
+        });
     }
 
     document.addEventListener('submit', function (e) {
@@ -326,23 +403,25 @@
         for (var i = 0; i < blocks.length; i++) {
             var block = blocks[i];
             if (!isActive(block)) continue;
-            if (hasPlace(block)) {
-                showError(block, false);
-                continue;
-            }
+            var problem = placeProblem(block);
+            showError(block, problem);
+            if (!problem) continue;
             e.preventDefault();
-            showError(block, true);
-            var first = block.querySelector('select[data-geo="province"]') || block.querySelector('input[type="checkbox"]');
+            var list = block.querySelector('[data-geo-list="' + problem + '"]');
+            var first = (list && list.querySelector('input[type="checkbox"]:not(:disabled)'))
+                || block.querySelector('select[data-geo="province"]');
             if (first) first.focus();
             return;
         }
     }, true);
 
-    // En cuanto elige provincia o marca una casilla, el aviso desaparece
+    // En cuanto la ubicación queda bien, el aviso desaparece
     document.addEventListener('change', function (e) {
         var target = e.target;
         if (!target || !target.closest) return;
         var block = target.closest('[data-places-required]');
-        if (block && hasPlace(block)) showError(block, false);
+        if (!block) return;
+        var problem = placeProblem(block);
+        if (!problem) showError(block, null);
     });
 })();

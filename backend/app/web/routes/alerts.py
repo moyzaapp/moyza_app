@@ -1,5 +1,7 @@
 import logging
+from datetime import date
 from datetime import datetime
+from datetime import timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter
@@ -17,6 +19,8 @@ from app.web.template_env import templates
 from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 from sqlalchemy import func, case, or_
 
+from app.core.business_calendar import madrid_today
+from app.core.business_calendar import to_utc
 from app.core.constants import AlertType, PropertyStatus
 from app.core.constants import AlertOrigin
 from app.core.constants import BusinessType
@@ -28,6 +32,7 @@ from app.db.deps import get_db
 
 from app.models.property_alert import PropertyAlert
 from app.models.alert_follow_up import AlertFollowUp
+from app.models.alert_assignment_log import AlertAssignmentLog
 from app.models.property import Property
 from app.models.agent import Agent
 from app.models.user import User
@@ -408,7 +413,10 @@ def _can_hold_profile(alert: PropertyAlert) -> bool:
 # Campos del formulario del perfil (components/search_profile_form.html), sin
 # las listas de poblaciones y zonas ni los imprescindibles, que van aparte.
 # País, provincia y operación (PLAN_PERFIL_UBICACION.md) se leen del formulario.
-PROFILE_TEXT_FIELDS = ("property_type", "min_price", "max_price", "min_bedrooms", "max_bedrooms", "min_bathrooms")
+# `elevator` (PLAN_PERFIL_ZONAS.md, fase C): "yes" / "no" / vacío (indiferente);
+# con valor cuenta como dato del perfil (`_profile_values_present`).
+PROFILE_TEXT_FIELDS = ("property_type", "min_price", "max_price", "min_bedrooms", "max_bedrooms", "min_bathrooms",
+                       "elevator")
 PROFILE_LOCATION_FIELDS = ("country", "province")
 
 
@@ -426,6 +434,9 @@ def _profile_values(form_data, notes_field: str = "notes", **overrides) -> dict:
     values.update({k: v for k, v in overrides.items() if k in values})
     values["zones"] = [z for z in form_data.getlist("zones") if z]
     values["cities"] = [c for c in form_data.getlist("cities") if c]
+    # "Todas" las zonas marcada a propósito (PLAN_PERFIL_ZONAS.md): se guarda como
+    # lista vacía, pero hace falta para validar la zona obligatoria
+    values["zones_all"] = bool(form_data.get("zones_all"))
     return values
 
 
@@ -459,6 +470,7 @@ def _profile_kwargs(alert: PropertyAlert, values: dict, criteria: Optional[Buyer
         min_bedrooms=values["min_bedrooms"],
         max_bedrooms=values["max_bedrooms"],
         min_bathrooms=values["min_bathrooms"],
+        elevator=values["elevator"],
         notes=values["notes"],
         agent_id=alert.agent_id,
     )
@@ -496,16 +508,18 @@ def _join_note(*lines) -> Optional[str]:
     return text or None
 
 
-def _missing_in_profile_form(alert: PropertyAlert, values: dict) -> list:
+def _missing_in_profile_form(db: Session, alert: PropertyAlert, values: dict) -> list:
     """Mínimos que faltan en el perfil enviado, sin tocar el perfil guardado.
 
     Se evalúa sobre un perfil temporal (fuera de la sesión) con el mismo
     parseo que se usará al guardar, así la validación y lo guardado coinciden.
+    Sin `created_at`, se le aplican siempre los mínimos nuevos
+    (PLAN_PERFIL_ZONAS.md §4-4), con la zona según el árbol de ubicaciones.
     """
     preview = buyer_matching.apply_profile(
         BuyerSearchCriteria(), **_profile_kwargs(alert, values, _alert_criteria(alert))
     )
-    return buyer_matching.missing_profile_fields(preview)
+    return buyer_matching.missing_profile_fields(preview, buyer_matching.geo_options(db), values["zones_all"])
 
 
 def _store_alert_profile(db: Session, alert: PropertyAlert, values: dict, now: datetime) -> BuyerSearchCriteria:
@@ -631,10 +645,10 @@ async def alerts_page(
     # paginación sea estable). Propiedad y agente se rellenan con el JOIN
     # que ya hace la consulta, y los seguimientos de la página se cargan en
     # una segunda consulta: sin esto se hacía una consulta por alerta al
-    # pintar la tabla (N+1). La fecha es la que ve cada rol
-    # (PLAN_ALERTA_COMO_NUEVA.md): creación para el admin, asignación para el
-    # agente, así una alerta reasignada se ordena como nueva para él.
-    date_order = PropertyAlert.created_at if admin_view else alert_view.assignment_start_expr()
+    # pintar la tabla (N+1). La fecha es la de la última asignación para
+    # todos los roles (PLAN_CEDER_COMPRADORES.md §1): una alerta reasignada
+    # sube arriba, también para el admin.
+    date_order = alert_view.assignment_start_expr()
     alerts = (
         filtered_query
         .options(
@@ -797,6 +811,16 @@ async def alerts_page(
     # Se calcula sobre los seguimientos ya cargados de la página, sin consultas nuevas.
     alert_attention = buyer_attention_service.evaluate_alerts(alerts)
 
+    # Ceder desde el listado (PLAN_CEDER_COMPRADORES.md §5): solo el agente y
+    # solo en las filas que aún puede ceder (abiertas, suyas y en plazo).
+    cedable_ids = set()
+    cession_groups = []
+    if agent:
+        now = datetime.utcnow()
+        cedable_ids = {a.id for a in alerts if assignment.can_cede(a, agent.id, now=now)}
+        if cedable_ids:
+            cession_groups = assignment.assignable_agents_for_cession(db, company.id, agent.id)
+
     response = templates.TemplateResponse(
         request=request,
         name="alerts/list.html",
@@ -825,8 +849,14 @@ async def alerts_page(
             "locked_alert_ids": locked_alert_ids,
             "alert_stages": alert_stages,
             "alert_attention": alert_attention,
-            # Columna "Fecha": creación (admin) o asignación (agente)
-            "display_dates": {a.id: alert_view.display_date(a, admin_view) for a in alerts},
+            "cedable_ids": cedable_ids,
+            "cession_groups": cession_groups,
+            # Columna "Fecha": última asignación para todos; el admin ve debajo
+            # "Creada el …" si difiere (PLAN_CEDER_COMPRADORES.md §1)
+            "display_dates": {a.id: alert_view.display_date(a) for a in alerts},
+            "created_dates": (
+                {a.id: alert_view.created_label(a) for a in alerts} if admin_view else {}
+            ),
             "is_admin": is_admin(current_user),
             "search_summaries": search_summaries,
             # Alta sin referencia: en estas operaciones no se toma perfil (texto del modal)
@@ -1395,6 +1425,96 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
     return ctx
 
 
+def _parse_day(value: Optional[str]) -> Optional[date]:
+    """'aaaa-mm-dd' del input date, o None si falta o no es válida."""
+    try:
+        return date.fromisoformat((value or "").strip())
+    except ValueError:
+        return None
+
+
+# Página del historial de asignaciones: período por defecto y filas por página
+# (uno de PAGE_SIZES, que es lo que admite paginate_params)
+ASSIGNMENT_HISTORY_DAYS = 30
+ASSIGNMENT_HISTORY_PAGE_SIZE = 50
+
+
+# Antes de /alerts/{alert_id}: si no, "assignments" se tomaría por un id
+@router.get("/alerts/assignments", response_class=HTMLResponse)
+async def alert_assignments_page(
+    request: Request,
+    agent_id: Optional[str] = Query(default=None),
+    kind: Optional[str] = Query(default=None),
+    date_from: Optional[str] = Query(default=None),
+    date_to: Optional[str] = Query(default=None),
+    page: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db)
+):
+    """Historial de cesiones y reasignaciones de la empresa activa (solo admin).
+
+    PLAN_CEDER_COMPRADORES.md §5.2: una fila por asignación (alta, reasignación
+    del admin o cesión del agente) con fecha, comprador, de → a, tipo, motivo
+    y estado actual de la alerta. Filtros por agente (de o a), tipo y rango de
+    fechas (por defecto los últimos 30 días, en hora de Madrid); arriba, las
+    cesiones por agente del período.
+    """
+    current_user = request.state.user
+    if not is_admin(current_user):
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Solo un administrador puede ver el historial de asignaciones")
+        return response
+
+    company = get_active_company(request)
+    today = madrid_today()
+    day_to = _parse_day(date_to) or today
+    day_from = _parse_day(date_from) or (day_to - timedelta(days=ASSIGNMENT_HISTORY_DAYS))
+    if day_from > day_to:
+        day_from, day_to = day_to, day_from
+    # Días de Madrid → UTC naive: desde las 00:00 del primero hasta las 00:00 del siguiente al último
+    start = to_utc(datetime.combine(day_from, datetime.min.time()))
+    end = to_utc(datetime.combine(day_to + timedelta(days=1), datetime.min.time()))
+
+    agent_id_int = assignment._to_int(agent_id)
+    kind_value = kind if kind in assignment.KIND_LABELS else ""
+
+    query = assignment.history_query(db, company.id, start=start, end=end,
+                                     agent_id=agent_id_int, kind=kind_value or None)
+    total = query.with_entities(func.count(AlertAssignmentLog.id)).scalar() or 0
+    pagination = paginate_params(page, ASSIGNMENT_HISTORY_PAGE_SIZE, total)
+    logs = (
+        assignment.with_history_details(query)
+        .offset(pagination["offset"])
+        .limit(pagination["per_page"])
+        .all()
+    )
+
+    filters_active = bool(agent_id_int or kind_value or date_from or date_to)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="alerts/assignments.html",
+        context={
+            "request": request,
+            "current_user": current_user,
+            "is_admin": True,
+            "logs": logs,
+            "pagination": pagination,
+            "summary": assignment.cession_summary(db, company.id, start=start, end=end),
+            "agents": scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all(),
+            "kind_labels": assignment.KIND_LABELS,
+            "selected_agent_id": agent_id_int,
+            "selected_kind": kind_value,
+            "date_from": day_from.isoformat(),
+            "date_to": day_to.isoformat(),
+            "date_from_label": day_from.strftime("%d/%m/%Y"),
+            "date_to_label": day_to.strftime("%d/%m/%Y"),
+            "default_days": ASSIGNMENT_HISTORY_DAYS,
+            "filters_active": filters_active,
+            "AlertStatus": AlertStatus,
+        }
+    )
+
+
 @router.get("/alerts/{alert_id}", response_class=HTMLResponse)
 async def alert_detail(
     alert_id: int,
@@ -1473,6 +1593,20 @@ async def alert_detail(
 
     can_reassign = admin_view and alert.status in assignment.REASSIGNABLE_STATUSES
 
+    # Ceder (PLAN_CEDER_COMPRADORES.md §5): el agente de una alerta abierta ve
+    # el botón; activo solo mientras su reloj de atención no haya vencido
+    # (si venció, desactivado con el motivo). Destinos: su empresa, sin él.
+    own_agent = None if admin_view else get_agent_from_user(current_user, db)
+    show_cede = (
+        own_agent is not None
+        and alert.agent_id == own_agent.id
+        and alert.status in assignment.REASSIGNABLE_STATUSES
+    )
+    can_cede = show_cede and assignment.can_cede(alert, own_agent.id)
+    cession_groups = (
+        assignment.assignable_agents_for_cession(db, alert.company_id, own_agent.id) if can_cede else []
+    )
+
     company_id = get_active_company(request).id
     search_ctx = _search_context(db, alert, current_user, admin_view, step, confirm_property,
                                  follow_ups, company_id, company_filter=company)
@@ -1496,13 +1630,18 @@ async def alert_detail(
             "is_admin": admin_view,
             # Bloque "Agente asignado" (quién, antes, motivo, historial): solo admin
             "show_assignment": admin_view,
-            # Fecha de la caja de estado: creación (admin) o asignación (agente)
-            "display_date": alert_view.display_date(alert, admin_view),
+            # Fecha de la caja de estado del agente (el admin ve creación y
+            # asignación por separado)
+            "display_date": alert_view.display_date(alert),
             "assignment_start": alert_view.assignment_start(alert),
             # Cerrar exige un seguimiento real desde la asignación (la nota de
             # reasignación y los del agente anterior no cuentan), para ambos roles
             "can_complete": alert_view.has_follow_up_since_assignment(all_follow_ups, alert),
             "can_reassign": can_reassign,
+            "show_cede": show_cede,
+            "can_cede": can_cede,
+            "cession_groups": cession_groups,
+            "cession_expired_message": assignment.CESSION_EXPIRED_MESSAGE,
             "attention": attention,
             "upcoming_clocks": upcoming_clocks,
             "RULE_CALLBACK": buyer_attention_service.RULE_CALLBACK,
@@ -1829,6 +1968,7 @@ async def save_alert_search_profile(
     min_bedrooms: str = Form(None),
     max_bedrooms: str = Form(None),
     min_bathrooms: str = Form(None),
+    elevator: str = Form(None),
     notes: str = Form(None),
     db: Session = Depends(get_db)
 ):
@@ -1838,9 +1978,10 @@ async def save_alert_search_profile(
     comprador (uno por comprador, sin m²) con la operación y el agente de la
     alerta. Vale para cualquier alerta, con o sin referencia.
 
-    PLAN_PERFIL_OBLIGATORIO.md: el perfil debe traer los mínimos (tipo,
-    precio máximo y ubicación; PLAN_PERFIL_UBICACION.md: provincia, o al
-    menos una población o una zona); si no, no se guarda nada. Si el perfil del
+    PLAN_PERFIL_OBLIGATORIO.md: el perfil debe traer los mínimos
+    (`buyer_matching.missing_profile_fields`; desde PLAN_PERFIL_ZONAS.md tipo,
+    precio máximo, dormitorios máximos, población y zona si la población tiene
+    zonas); si no, no se guarda nada. Si el perfil del
     comprador aún NO estaba completo, guardarlo registra un seguimiento
     CONTACTADO (perfil = contactado, avanza la etapa); si ya lo estaba, es una
     edición y registra PERFIL_GUARDADO (no mueve la etapa). En ambos casos el
@@ -1892,7 +2033,8 @@ async def save_alert_search_profile(
     form_data = await request.form()
     values = _profile_values(
         form_data, property_type=property_type, min_price=min_price, max_price=max_price,
-        min_bedrooms=min_bedrooms, max_bedrooms=max_bedrooms, min_bathrooms=min_bathrooms, notes=notes,
+        min_bedrooms=min_bedrooms, max_bedrooms=max_bedrooms, min_bathrooms=min_bathrooms, elevator=elevator,
+        notes=notes,
     )
 
     # Operación elegida en el perfil (si cambia, cambia la de la alerta). Se lee
@@ -1911,7 +2053,7 @@ async def save_alert_search_profile(
     profile_sent = (_profile_values_present(values)
                     and buyer_matching.profile_applies(new_operation or alert.business_type))
     if profile_sent or buyer_matching.profile_required(alert, new_operation):
-        missing = _missing_in_profile_form(alert, values)
+        missing = _missing_in_profile_form(db, alert, values)
         if missing:
             response = RedirectResponse(url=_profile_step_url(alert_id), status_code=302)
             set_flash(response, "error",
@@ -2187,6 +2329,75 @@ async def reassign_alert(
     return response
 
 
+@router.post("/alerts/{alert_id}/cede")
+async def cede_alert(
+    alert_id: int,
+    request: Request,
+    agent_id: str = Form(None),
+    assignment_reason: str = Form(None),
+    confirm_cession: str = Form(None),
+    next_url: str = Form(None, alias="next"),
+    db: Session = Depends(get_db)
+):
+    """El agente cede su comprador a otro agente de la empresa (PLAN_CEDER_COMPRADORES.md §5).
+
+    Solo el agente asignado, con la alerta abierta y antes de que venza su
+    reloj de atención (§7-1); destino de la empresa de la alerta (§7-2),
+    motivo obligatorio (§7-3) y casilla del aviso de comisión. Efectos de una
+    reasignación más el aviso a los admins. Tras ceder, la alerta ya no es
+    suya: vuelve al listado (o a `next` si es otra página de alertas).
+    """
+    current_user = request.state.user
+    detail_url = f"/alerts/{alert_id}"
+
+    if is_admin(current_user):
+        response = RedirectResponse(url=detail_url, status_code=302)
+        set_flash(response, "error", "Un administrador reasigna la alerta con «Reasignar»")
+        return response
+
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
+    if not alert:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Alerta no encontrada")
+        return response
+
+    back_url = _safe_back_url(next_url, detail_url)
+    own_agent = get_agent_from_user(current_user, db)
+    # Cualquier agente activo: si no es de la empresa de la alerta, validate_cession lo dice
+    to_agent_id = assignment._to_int(agent_id)
+    to_agent = assignment.lookup_any_agent(db)(to_agent_id) if to_agent_id is not None else None
+
+    try:
+        assignment.validate_cession(alert, to_agent, by_agent=own_agent, reason=assignment_reason)
+        if confirm_cession != "1":
+            raise AlertAssignmentError("Marca la casilla «Entiendo que cedo este comprador» para cederlo")
+    except AlertAssignmentError as error:
+        # Si ya no es suya, el detalle redirigiría: mejor al listado
+        error_url = back_url if own_agent is not None and alert.agent_id == own_agent.id else "/alerts"
+        response = RedirectResponse(url=error_url, status_code=302)
+        set_flash(response, "error", str(error))
+        return response
+
+    try:
+        assignment.cede(db, alert, to_agent, current_user, assignment_reason)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error cediendo alerta: alert_id=%s", alert_id)
+        response = RedirectResponse(url=back_url, status_code=302)
+        set_flash(response, "error", "Ocurrió un error al ceder el comprador")
+        return response
+
+    # El reloj arranca de cero con el nuevo agente: los avisos del anterior ya no aplican
+    notification_service.safe_resolve_buyer_notifications(db, alert.id)
+
+    # El detalle de la alerta ya no es accesible para quien la cedió
+    done_url = "/alerts" if back_url.split("?")[0] == detail_url else back_url
+    response = RedirectResponse(url=done_url, status_code=302)
+    set_flash(response, "success", f"Has cedido el comprador {alert.lead_name} a {to_agent.name}")
+    return response
+
+
 @router.post("/alerts/{alert_id}/mark-read")
 async def mark_alert_read(
     alert_id: int,
@@ -2356,7 +2567,7 @@ async def add_follow_up(
             missing = []
         elif _profile_values_present(values):
             # Con datos: deben cumplir los mínimos (también si el perfil es opcional)
-            missing = _missing_in_profile_form(alert, values)
+            missing = _missing_in_profile_form(db, alert, values)
             profile_values = values
         else:
             # Sin datos: vale si el perfil ya estaba completo (no se toca) o no
@@ -2777,19 +2988,18 @@ async def buyer_detail(
     own_agent = None if is_admin(current_user) else get_agent_from_user(current_user, db)
 
     # Pestaña Alertas (PLAN_ALERTA_COMO_NUEVA.md). El admin ve todas las del
-    # comprador con su fecha de creación. El agente solo las suyas (las de
-    # otros agentes no puede abrirlas), con la fecha de su asignación, y las
-    # bloqueadas por su cola salen como "En cola" sin datos ni enlace.
+    # comprador. El agente solo las suyas (las de otros agentes no puede
+    # abrirlas), y las bloqueadas por su cola salen como "En cola" sin datos ni
+    # enlace. Para ambos, fecha y orden por la última asignación
+    # (PLAN_CEDER_COMPRADORES.md §1).
     admin_view = is_admin(current_user)
     buyer_alerts_query = db.query(PropertyAlert).filter(PropertyAlert.buyer_id == buyer_id)
     locked_alert_ids = set()
-    if admin_view:
-        date_order = PropertyAlert.created_at
-    else:
+    date_order = alert_view.assignment_start_expr()
+    if not admin_view:
         buyer_alerts_query = buyer_alerts_query.filter(
             PropertyAlert.agent_id == (own_agent.id if own_agent else -1)
         )
-        date_order = alert_view.assignment_start_expr()
         if own_agent:
             locked_alert_ids = get_locked_alert_ids(own_agent.id, db, company.id)
     buyer_alerts = (
@@ -2819,7 +3029,10 @@ async def buyer_detail(
             "own_agent": own_agent,
             "buyer_alerts": buyer_alerts,
             "locked_alert_ids": locked_alert_ids,
-            "display_dates": {a.id: alert_view.display_date(a, admin_view) for a in buyer_alerts},
+            "display_dates": {a.id: alert_view.display_date(a) for a in buyer_alerts},
+            "created_dates": (
+                {a.id: alert_view.created_label(a) for a in buyer_alerts} if admin_view else {}
+            ),
             "agents": agents,
             "assignable_groups": assignable_groups,
             "location": filter_values["location"],
@@ -2904,6 +3117,7 @@ async def save_search_criteria(
     min_bedrooms: str = Form(None),
     max_bedrooms: str = Form(None),
     min_bathrooms: str = Form(None),
+    elevator: str = Form(None),
     notes: str = Form(None),
     db: Session = Depends(get_db)
 ):
@@ -2914,9 +3128,10 @@ async def save_search_criteria(
     (PLAN_ALERTA_SIN_REFERENCIA.md, decisión cerrada 5): los valores antiguos
     se conservan en la base de datos, pero ya no se editan ni filtran.
 
-    PLAN_PERFIL_UBICACION.md: mismos mínimos que el perfil de la alerta (tipo,
-    precio máximo y ubicación; `buyer_matching.missing_profile_fields`), con
-    país y provincia de la cascada. Aquí no hay alerta: la operación se edita
+    PLAN_PERFIL_UBICACION.md: mismos mínimos que el perfil de la alerta
+    (`buyer_matching.missing_profile_fields`; desde PLAN_PERFIL_ZONAS.md tipo,
+    precio máximo, población y zona si la población tiene zonas), con país y
+    provincia de la cascada. Aquí no hay alerta: la operación se edita
     como siempre y no se registra ningún seguimiento.
 
     PLAN_PERFIL_SOLO_VENTA.md: los mínimos solo se exigen si la operación
@@ -2966,15 +3181,20 @@ async def save_search_criteria(
         min_bedrooms=min_bedrooms,
         max_bedrooms=max_bedrooms,
         min_bathrooms=min_bathrooms,
+        elevator=elevator,
         notes=notes,
         agent_id=agent_id,
     )
 
     # Mínimos del perfil, evaluados sobre un perfil temporal con el mismo parseo;
     # solo si la operación enviada los exige (Venta; PLAN_PERFIL_SOLO_VENTA.md)
+    # (siempre con los mínimos nuevos y la zona según el árbol: PLAN_PERFIL_ZONAS.md)
     missing = []
     if buyer_matching.profile_required_for_business_type(business_type):
-        missing = buyer_matching.missing_profile_fields(buyer_matching.apply_profile(BuyerSearchCriteria(), **profile))
+        missing = buyer_matching.missing_profile_fields(
+            buyer_matching.apply_profile(BuyerSearchCriteria(), **profile),
+            buyer_matching.geo_options(db), bool(form_data.get("zones_all")),
+        )
     if missing:
         response = RedirectResponse(url=f"/buyers/{buyer_id}?tab=criteria", status_code=302)
         set_flash(response, "error",

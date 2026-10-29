@@ -76,11 +76,9 @@ def _seed_companies():
             'created_at': now,
         },
         {
-            # ATENCIÓN: datos legales PROVISIONALES copiados de MOYZA.
-            # Deben sustituirse por los reales de MOES PREMIUM (razón social,
-            # CIF, domicilio fiscal, teléfonos, texto RGPD y logo) en cuanto
-            # se reciban:
-            #   UPDATE companies SET legal_name=..., tax_id=..., ... WHERE code='MOES';
+            # Datos legales PROVISIONALES copiados de MOYZA. Los reales
+            # (razón social, CIF, teléfono, logo y domicilio fiscal de ambas)
+            # los pone la migración de datos `d3e4f5a6b7c8_moes_company_data`.
             'code': 'MOES',
             'name': 'MOES PREMIUM',
             'legal_name': 'Moyza 2012 S.L.',                         # TODO: real de MOES

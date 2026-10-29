@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block title %}Historial de cesiones - {{ brand_name }}{% endblock %}
+
+{#
+  Historial de cesiones y reasignaciones de compradores de la empresa activa
+  (solo admin, PLAN_CEDER_COMPRADORES.md §5.2). Una fila por asignación:
+  alta, reasignación del admin o cesión del agente. Resumen de cesiones por
+  agente del período arriba; filtros por agente (de o a), tipo y fechas.
+#}
+{% block content %}
+{% import "components/ui_macros.html" as ui %}
+{% set kind_tones = {"ceded": "amber", "reassigned": "blue", "created": "gray"} %}
+
+<div class="max-w-7xl mx-auto space-y-6">
+
+    {% call ui.page_header("Historial de cesiones", "Cesiones entre agentes y reasignaciones de compradores de " ~ brand_name) %}
+        {{ ui.button("Volver a compradores", "secondary", href="/alerts", full_mobile=True) }}
+    {% endcall %}
+
+    {# ------------------------------------------------------------ Filtros #}
+    <form method="GET" action="/alerts/assignments" class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+            <div>
+                <label for="hAgent" class="block text-sm font-medium text-gray-700 mb-1">Agente</label>
+                <select id="hAgent" name="agent_id" class="{{ ui.input_class }}" aria-describedby="hAgentHelp">
+                    <option value="">Todos</option>
+                    {% for agent in agents %}
+                    <option value="{{ agent.id }}" {% if agent.id == selected_agent_id %}selected{% endif %}>{{ agent.name }}</option>
+                    {% endfor %}
+                </select>
+                <p id="hAgentHelp" class="text-xs text-gray-500 mt-1">Cede o recibe</p>
+            </div>
+            <div>
+                <label for="hKind" class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                <select id="hKind" name="kind" class="{{ ui.input_class }}">
+                    <option value="">Todos</option>
+                    {% for value, label in kind_labels.items() %}
+                    <option value="{{ value }}" {% if value == selected_kind %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="hFrom" class="block text-sm font-medium text-gray-700 mb-1">Desde</label>
+                <input type="date" id="hFrom" name="date_from" value="{{ date_from }}" class="{{ ui.input_class }}">
+            </div>
+            <div>
+                <label for="hTo" class="block text-sm font-medium text-gray-700 mb-1">Hasta</label>
+                <input type="date" id="hTo" name="date_to" value="{{ date_to }}" class="{{ ui.input_class }}">
+            </div>
+            <div class="flex flex-col sm:flex-row gap-3">
+                {{ ui.button("Filtrar", "secondary", type="submit", full_mobile=True) }}
+                {% if filters_active %}
+                {{ ui.button("Limpiar", "text", href="/alerts/assignments", extra="self-center") }}
+                {% endif %}
+            </div>
+        </div>
+        {% if not filters_active %}
+        <p class="text-xs text-gray-500 mt-3">Por defecto, los últimos {{ default_days }} días.</p>
+        {% endif %}
+    </form>
+
+    {# ------------------------------------------------------------ Resumen por agente #}
+    <section class="bg-white rounded-2xl border border-gray-200 overflow-hidden" aria-labelledby="summaryTitle">
+        <header class="px-4 sm:px-6 py-4 border-b border-gray-200">
+            <h2 id="summaryTitle" class="text-lg font-bold text-gray-900">Cesiones por agente</h2>
+            <p class="text-xs text-gray-500 mt-0.5">Del {{ date_from_label }} al {{ date_to_label }}</p>
+        </header>
+        {% if summary %}
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[420px] text-sm">
+                <thead class="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                        <th scope="col" class="text-left px-4 sm:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Agente</th>
+                        <th scope="col" class="text-right px-4 sm:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Cedidas</th>
+                        <th scope="col" class="text-right px-4 sm:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Recibidas</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for row in summary %}
+                    <tr class="hover:bg-gray-50 transition-colors">
+                        <td class="px-4 sm:px-6 py-3 text-gray-900 font-medium">
+                            <a href="/alerts/assignments?agent_id={{ row.agent_id }}&kind=ceded&date_from={{ date_from }}&date_to={{ date_to }}" class="hover:text-blue-600">{{ row.name }}</a>
+                        </td>
+                        <td class="px-4 sm:px-6 py-3 text-right tabular-nums text-gray-900">{{ row.ceded }}</td>
+                        <td class="px-4 sm:px-6 py-3 text-right tabular-nums text-gray-900">{{ row.received }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="px-4 sm:px-6 py-4 text-sm text-gray-500">Ningún agente ha cedido compradores en este período.</p>
+        {% endif %}
+    </section>
+
+    {# ------------------------------------------------------------ Historial #}
+    <section class="bg-white rounded-2xl border border-gray-200 overflow-hidden" aria-labelledby="historyTitle">
+        <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 px-4 sm:px-6 py-4 border-b border-gray-200">
+            <h2 id="historyTitle" class="text-lg font-bold text-gray-900">Asignaciones</h2>
+            <p class="text-sm text-gray-500">{{ ui.pagination_summary(pagination, "asignaciones") }}</p>
+        </header>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[880px] text-sm">
+                <thead class="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                        <th scope="col" class="text-left px-4 sm:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha</th>
+                        <th scope="col" class="text-left px-4 sm:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Comprador</th>
+                        <th scope="col" class="text-left px-4 sm:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">De → a</th>
+                        <th scope="col" class="text-center px-4 sm:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Tipo</th>
+                        <th scope="col" class="text-left px-4 sm:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Motivo</th>
+                        <th scope="col" class="text-center px-4 sm:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">Estado actual</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for log in logs %}
+                    {% set alert = log.alert %}
+                    <tr class="hover:bg-gray-50 transition-colors">
+                        <td class="px-4 sm:px-6 py-3 text-gray-700 whitespace-nowrap tabular-nums">{{ log.created_at | madrid_dt('%d/%m/%Y %H:%M') }}</td>
+                        <td class="px-4 sm:px-6 py-3 text-gray-700">
+                            <a href="/alerts/{{ alert.id }}" class="font-medium text-gray-900 hover:text-blue-600">{{ alert.lead_name or "Comprador" }}</a>
+                            <p class="text-xs text-gray-500">{{ alert.property.title if alert.property else "Búsqueda general" }}</p>
+                        </td>
+                        <td class="px-4 sm:px-6 py-3 text-gray-700">
+                            {% if log.from_agent_id %}
+                            {{ log.from_agent.name if log.from_agent else "Agente eliminado" }}
+                            <span class="text-gray-500" aria-hidden="true">→</span><span class="sr-only"> a </span>
+                            {% endif %}
+                            <span class="font-medium text-gray-900">{{ log.to_agent.name if log.to_agent else "Agente eliminado" }}</span>
+                            {% if log.kind != "ceded" and log.assigned_by_user %}
+                            <p class="text-xs text-gray-500">por {{ log.assigned_by_user.full_name or log.assigned_by_user.email }}</p>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 sm:px-6 py-3 text-center">{{ ui.badge(kind_labels.get(log.kind, log.kind), kind_tones.get(log.kind, "gray")) }}</td>
+                        <td class="px-4 sm:px-6 py-3 text-gray-700">{{ log.reason or "—" }}</td>
+                        <td class="px-4 sm:px-6 py-3 text-center">
+                            {{ ui.status_badge("alert", alert.status) }}
+                            {% if alert.agent_id != log.to_agent_id %}
+                            <p class="text-xs text-gray-500 mt-1">Ahora: {{ alert.agent.name if alert.agent else "sin agente" }}</p>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    {{ ui.empty_state("No hay asignaciones con estos filtros",
+                                      "Prueba con otro agente, otro tipo o un rango de fechas más amplio.", colspan=6) }}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {{ ui.pagination(pagination, request.query_params, param="page", label="asignaciones") }}
+    </section>
+</div>
+{% endblock %}

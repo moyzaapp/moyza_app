@@ -181,6 +181,20 @@ class PropertyAlert(Base):
         nullable=True
     )
 
+    # Última cesión (PLAN_CEDER_COMPRADORES.md §5.2): fecha y agente que cedió
+    # la alerta al agente actual. Se vacían si el admin la reasigna después:
+    # el distintivo «Cedido» dice cómo llegó al agente que la tiene ahora.
+    ceded_at = Column(
+        DateTime,
+        nullable=True
+    )
+
+    ceded_by_agent_id = Column(
+        Integer,
+        ForeignKey("agents.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
     # Relaciones. `property` puede ser None (búsqueda sin propiedad asociada):
     # todo acceso a `alert.property.<algo>` debe protegerse.
     property = relationship(
@@ -190,7 +204,7 @@ class PropertyAlert(Base):
 
     company = relationship("Company")
 
-    # `foreign_keys` explícito: property_alerts tiene dos FK a agents
+    # `foreign_keys` explícito: property_alerts tiene varias FK a agents
     agent = relationship(
         "Agent",
         foreign_keys=[agent_id],
@@ -200,6 +214,11 @@ class PropertyAlert(Base):
     previous_agent = relationship(
         "Agent",
         foreign_keys=[previous_agent_id]
+    )
+
+    ceded_by_agent = relationship(
+        "Agent",
+        foreign_keys=[ceded_by_agent_id]
     )
 
     assigned_by_user = relationship(
@@ -239,6 +258,11 @@ class PropertyAlert(Base):
         decide qué pasos ni acciones tiene la alerta.
         """
         return self.origin == AlertOrigin.SEARCH
+
+    @builtins.property
+    def is_ceded(self) -> bool:
+        """El agente actual recibió la alerta por cesión de otro agente."""
+        return self.ceded_at is not None
 
     @validates("property")
     def _sync_company_from_property(self, key, property_item):

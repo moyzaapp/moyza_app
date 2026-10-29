@@ -43,6 +43,14 @@
         .sidebar-mobile {
             transition: transform 0.3s ease;
         }
+
+        /* Un contenedor con scroll horizontal (tablas) debe estar posicionado: si no, sus
+           descendientes absolutos (sr-only, badges) se colocan respecto a la página y la
+           ensanchan. Chrome lo tapa con el overflow-x del body; Safari en iPhone no, y
+           aparece una franja blanca a la derecha y los modales se descolocan. */
+        .overflow-x-auto {
+            position: relative;
+        }
     </style>
 
 </head>
@@ -51,8 +59,10 @@
 
     {% include 'components/sidebar.html' %}
 
-    <!-- Main content con responsive margin -->
-    <div class="lg:ml-64 min-h-screen">
+    <!-- Main content con responsive margin. `relative overflow-x-clip`: red de seguridad en móvil;
+         recorta cualquier desbordamiento horizontal sin crear un contenedor de scroll (el navbar
+         sticky sigue funcionando y los modales fixed no se ven afectados). -->
+    <div class="relative lg:ml-64 min-h-screen overflow-x-clip">
 
         {% include 'components/navbar.html' %}
 

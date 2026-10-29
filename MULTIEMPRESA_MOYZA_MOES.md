@@ -103,9 +103,13 @@ tabla `companies`. No toca el resto de datos.
 
 ## 4. Datos de MOES PREMIUM
 
-La migración crea MOES PREMIUM con los datos legales de MOYZA de forma
-**provisional** (marcados `TODO` en la migración). En cuanto se tengan los
-reales, se actualizan en base de datos sin tocar código:
+La migración `r1s2t3u4v5w6` creó MOES PREMIUM con los datos legales de MOYZA
+de forma provisional. **Los reales los pone la migración de datos
+`d3e4f5a6b7c8_moes_company_data` (2026-10-28, ver §20)**: razón social
+"MOES 2024 S.L.U.", CIF B70662390, teléfono 722 877 402, logo
+`/static/logo_moes.png` y domicilio fiscal "Avenida de Madrid 37, 23009 Jaén",
+que también pasa a ser el de MOYZA. Cualquier cambio posterior se hace igual,
+con una migración de datos o con un UPDATE como este:
 
 ```sql
 UPDATE companies SET
@@ -479,7 +483,8 @@ docker exec moyza_backend python -m pytest tests/test_business_calendar.py tests
 
 ## 13. Pendientes conocidos
 
-- Datos legales y logo reales de MOES PREMIUM (sección 4).
+- Texto RGPD propio de MOES PREMIUM (hoy es el de MOYZA con el nombre
+  cambiado; los datos legales y el logo ya son los reales, §4 y §20).
 - Eliminar las columnas heredadas `users.company` y `agents.company` cuando ya
   no las lea nada.
 - `/activity-logs` no filtra por empresa a propósito: la actividad de
@@ -667,3 +672,79 @@ Tras desplegar: recompilar Tailwind (lo hace el build de Docker) y reiniciar.
 Nota conocida: las fechas de las filas se muestran en hora de Madrid, pero el
 período se corta en UTC (regla previa del contador). Un registro de las 22:00
 a 24:00 UTC del último día puede verse con fecha del día siguiente en el panel.
+
+## 19. Ceder compradores entre agentes e historial de cesiones (2026-10-28)
+
+PLAN_CEDER_COMPRADORES.md §5 y §7. Migración `c2d3e4f5a6b7` (sin
+dependencias ni variables de entorno nuevas): `alert_assignment_logs.kind`
+(`created` / `reassigned` / `ceded`, NOT NULL con valor por defecto
+`reassigned`; las filas sin agente de origen pasan a `created`) y
+`property_alerts.ceded_at` + `ceded_by_agent_id` (FK a agents, ON DELETE SET
+NULL). Downgrade limpio (borra las tres columnas).
+
+- El agente de una alerta abierta puede **cederla** (`POST /alerts/{id}/cede`,
+  desde el detalle o la acción de fila del listado) a otro agente **de la
+  empresa de la alerta**, con motivo obligatorio y la casilla del aviso de
+  comisión, mientras no venza su reloj de atención (R1 / R3; sin reloj por el
+  corte del §17, 48 h hábiles desde la asignación). Vencido, el botón sale
+  desactivado: "El plazo para ceder ha vencido: pide a un administrador que la
+  reasigne". Efectos de una reasignación (Pendiente, sin leer, reloj de cero,
+  avisos del anterior resueltos) y aviso "Te han cedido un comprador" al nuevo.
+- Distintivo «Cedido» en el listado y el detalle (admin y receptor); el
+  receptor ve quién y cuándo, no el motivo. Una reasignación posterior del
+  admin quita la marca.
+- Admins de la empresa: notificación `alert_ceded` (queda en `/notifications`),
+  bloque "Cesiones recientes" (7 días) en su Inicio y página
+  `GET /alerts/assignments` (solo admin, empresa activa) con el historial de
+  altas, reasignaciones y cesiones, filtros y resumen por agente. Nada por email.
+
+Tras desplegar: `alembic upgrade head`, recompilar Tailwind (lo hace el build de
+Docker) y reiniciar.
+
+## 20. Datos legales reales de MOES PREMIUM (2026-10-28)
+
+Migración de datos `d3e4f5a6b7c8_moes_company_data` (sin cambios de esquema,
+idempotente, downgrade a los valores de la siembra):
+
+| Empresa | Campo | Valor |
+|---|---|---|
+| MOES | `legal_name` | MOES 2024 S.L.U. |
+| MOES | `tax_id` | B70662390 |
+| MOES | `phone` | 722 877 402 |
+| MOES | `logo_path` | `/static/logo_moes.png` (1254×1254, ya en el repo) |
+| MOES y MOYZA | `fiscal_address` | Avenida de Madrid 37, 23009 Jaén |
+
+Lo usan la ficha de visita (cabecera con logo, texto legal con razón social,
+CIF y domicilio) y la vista previa que se firma. Los PDF ya generados no se
+regeneran. El texto RGPD de MOES sigue siendo el de MOYZA con el nombre
+cambiado (§13).
+
+Tras desplegar: `alembic upgrade head` (aplica `d3e4f5a6b7c8`); no hace falta
+tocar nada a mano en producción.
+
+## 21. Perfil del comprador: zonas por población, mínimos nuevos y ascensor (2026-10-29)
+
+`PLAN_PERFIL_ZONAS.md` (fases A a D). Afecta a las dos empresas por igual (el
+árbol de poblaciones y zonas sale de las propiedades de ambas, §16).
+
+| Fase | Cambio | Despliegue |
+|---|---|---|
+| A | Población sin "Todas" (al menos una); Zona solo con poblaciones marcadas, agrupada por población, sin "Todas" por defecto y obligatoria si la población tiene zonas | Nada |
+| B | Dormitorios máx. obligatorio | Nada |
+| C | Filtro "Ascensor" (Indiferente / Con ascensor / Sin ascensor) | Migración `e4f5a6b7c8d9_criteria_elevator` (columna `buyer_search_criteria.elevator`, Boolean nullable; NULL = indiferente) |
+| D | Grafía oficial de las poblaciones ("Jaen" → "Jaén") al guardar la propiedad | Script de datos una vez |
+
+Los mínimos nuevos (A y B) solo cuentan para los perfiles creados desde
+`PROFILE_MINIMUMS_SINCE` (00:00 de Madrid; por defecto 2026-10-29): los
+anteriores siguen con la regla antigua y no pasan a incompletos. El formulario
+exige los nuevos siempre que se guarda.
+
+Tras desplegar:
+
+1. `alembic upgrade head` (aplica `e4f5a6b7c8d9`).
+2. Si el despliegue **no** es el 2026-10-29, poner en el `.env`
+   `PROFILE_MINIMUMS_SINCE=AAAA-MM-DD` con el día del despliegue y reiniciar.
+3. Unificar la grafía de las poblaciones ya guardadas (fase D), primero en
+   prueba y después de verdad:
+   `docker exec <backend> python scripts/normalize_city_names.py` y
+   `docker exec <backend> python scripts/normalize_city_names.py --apply`.

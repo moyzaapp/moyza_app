@@ -410,7 +410,8 @@ class TestVisitSheetSignatures:
         assert "Luis Acompañante" in names[4]
         assert "size=8" in names[4]
         dates = [_cell_text(c) for c in table._cellvalues[5]]
-        assert "02/01/2026 10:00" in dates[2] and "04/03/2026 11:00" in dates[4]
+        # Hora de España (PLAN_CEDER_COMPRADORES.md §4): 10:00 y 11:00 UTC en invierno
+        assert "02/01/2026 11:00" in dates[2] and "04/03/2026 12:00" in dates[4]
 
     def test_acompanante_sin_archivo_deja_la_linea_vacia(self, monkeypatch, tmp_path, pdf_visit, pdf_agents):
         principal, companion = pdf_agents
@@ -424,7 +425,8 @@ class TestVisitSheetSignatures:
         assert "Firmas de agentes confirmadas" not in _metadata_text(
             _pdf_elements(monkeypatch, tmp_path, pdf_visit, principal, companion))
         pdf_visit.agent_signatures_confirmed_at = datetime(2026, 10, 16, 12, 7)
-        assert "Firmas de agentes confirmadas el 16/10/2026 12:07" in _metadata_text(
+        # 12:07 UTC en octubre (horario de verano) son las 14:07 en España
+        assert "Firmas de agentes confirmadas el 16/10/2026 14:07" in _metadata_text(
             _pdf_elements(monkeypatch, tmp_path, pdf_visit, principal, companion))
 
     def test_pdf_extraido_con_pypdf(self, monkeypatch, tmp_path, pdf_visit, pdf_agents):

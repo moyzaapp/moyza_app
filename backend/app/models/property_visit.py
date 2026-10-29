@@ -244,17 +244,37 @@ class PropertyVisit(Base):
 
     @staticmethod
     def clean_purchase_fees(value):
-        """Deja solo el importe: quita '€', '+ IVA' y espacios que algunos agentes escriben."""
+        """Deja el importe o el porcentaje: quita '€', '+ IVA' y espacios que algunos
+        agentes escriben y conserva el '%' ("2 % + IVA" -> "2%").
+
+        Se guarda así en `purchase_fees`: "2500" son euros (también los valores
+        antiguos, que eran solo dígitos) y "2%" un porcentaje
+        (PLAN_CEDER_COMPRADORES.md §2).
+        """
         if not value:
             return ""
         return re.sub(r"(?i)iva|€|\+|\s", "", value)
 
     # builtins.property porque el atributo 'property' (relación) tapa al decorador
     @builtins.property
+    def purchase_fees_unit(self):
+        """Unidad de los honorarios para el selector del formulario: '€' o '%'."""
+        return "%" if self.clean_purchase_fees(self.purchase_fees).endswith("%") else "€"
+
+    @builtins.property
+    def purchase_fees_amount(self):
+        """Honorarios sin signo para el input del formulario ("2500", "2")."""
+        return self.clean_purchase_fees(self.purchase_fees).rstrip("%")
+
+    @builtins.property
     def purchase_fees_display(self):
-        """Honorarios para el informe, siempre con el formato '€2500 + IVA'."""
-        amount = self.clean_purchase_fees(self.purchase_fees)
-        return f"€{amount} + IVA" if amount else None
+        """Honorarios para el informe: '€2500 + IVA' o '2% + IVA'."""
+        amount = self.purchase_fees_amount
+        if not amount:
+            return None
+        if self.purchase_fees_unit == "%":
+            return f"{amount}% + IVA"
+        return f"€{amount} + IVA"
 
     @builtins.property
     def signing_agent(self):

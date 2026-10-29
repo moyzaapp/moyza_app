@@ -6,7 +6,7 @@ Logs de Auditoría
 
 {% block content %}
 
-<div class="flex items-center justify-between mb-8">
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
     <div>
         <h1 class="text-3xl font-bold text-gray-800">
             Logs de Auditoría
@@ -26,25 +26,25 @@ Logs de Auditoría
     {% endif %}
 </div>
 
-{# ── Tabs ── #}
-<div class="flex gap-1 mb-6 border-b border-gray-200">
+{# ── Tabs (en móvil se desplazan en horizontal en vez de ensanchar la página) ── #}
+<div class="flex gap-1 mb-6 border-b border-gray-200 overflow-x-auto">
     <a
         href="/report-logs?tab=reports"
-        class="px-5 py-3 text-sm font-medium rounded-t-lg transition-colors
+        class="px-5 py-3 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap shrink-0
                {% if active_tab == 'reports' %}bg-white border border-b-white border-gray-200 text-gray-900 -mb-px{% else %}text-gray-500 hover:text-gray-700{% endif %}"
     >
         Reportes Automáticos
     </a>
     <a
         href="/report-logs?tab=reminders"
-        class="px-5 py-3 text-sm font-medium rounded-t-lg transition-colors
+        class="px-5 py-3 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap shrink-0
                {% if active_tab == 'reminders' %}bg-white border border-b-white border-gray-200 text-gray-900 -mb-px{% else %}text-gray-500 hover:text-gray-700{% endif %}"
     >
         Recordatorios de Compradores
     </a>
     <a
         href="/report-logs?tab=visit_whatsapp"
-        class="px-5 py-3 text-sm font-medium rounded-t-lg transition-colors
+        class="px-5 py-3 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap shrink-0
                {% if active_tab == 'visit_whatsapp' %}bg-white border border-b-white border-gray-200 text-gray-900 -mb-px{% else %}text-gray-500 hover:text-gray-700{% endif %}"
     >
         Fichas de Visita (WhatsApp)

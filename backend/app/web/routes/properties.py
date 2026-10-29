@@ -16,6 +16,7 @@ from sqlalchemy import or_, cast, Integer, case, func
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 
+from app.core import geo
 from app.core.constants import PropertyInteractionType
 from app.core.constants import PropertyStatus
 from app.core.constants import ReportType
@@ -420,7 +421,8 @@ async def create_property(
         property_item = Property(
             title=title,
             address=address,
-            city=city,
+            # Grafía oficial de la población ("Jaen" → "Jaén"; PLAN_PERFIL_ZONAS.md, fase D)
+            city=geo.normalize_city(city),
             price=price,
             description=description,
             client_id=client_id,
@@ -514,7 +516,8 @@ async def update_property(
             "client_id": client_id,
             "agent_id": agent_id,
             "address": address,
-            "city": city,
+            # Grafía oficial de la población (PLAN_PERFIL_ZONAS.md, fase D)
+            "city": geo.normalize_city(city),
             "description": description,
             "status": status,
             "auto_send_report": auto_send_report,

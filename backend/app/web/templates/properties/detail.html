@@ -656,7 +656,10 @@ Detalle Propiedad
                             {{ visit.created_at | madrid_dt('%d/%m/%Y %H:%M') if visit.created_at else '-' }}
                         </td>
                         <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
-                            {{ visit.visitor_name or '-' }}
+                            <div class="flex items-center gap-1">
+                                <span>{{ visit.visitor_name or '-' }}</span>
+                                {% include 'visits/_notes_button.html' %}
+                            </div>
                         </td>
                         <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                             {% if visit.agent %}
@@ -757,6 +760,9 @@ Detalle Propiedad
         </div>
     </div>
 </div>
+
+{# Observaciones internas de las visitas: un único panel para la tabla (PLAN_CEDER_COMPRADORES.md §3) #}
+{% include 'visits/_notes_drawer.html' %}
 
 <!-- Historial de cambios -->
 <div class="mt-6 sm:mt-8">

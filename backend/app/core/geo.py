@@ -7,6 +7,11 @@ o cuyo prefijo no esté en la tabla no tiene provincia ("Sin provincia").
 El país vacío de una propiedad se trata como España (la gran mayoría no lo
 tiene relleno); `normalize_country` unifica además las variantes habituales
 ("españa", "Spain", "ES"…) para que no salgan repetidas en la cascada.
+
+La población de una propiedad es texto libre: "Jaen" y "Jaén" salían como dos
+poblaciones distintas. `normalize_city` (PLAN_PERFIL_ZONAS.md, fase D) pone la
+grafía oficial de las poblaciones de la tabla `CITY_SPELLINGS` al guardar la
+propiedad; `scripts/normalize_city_names.py` lo aplica a lo ya guardado.
 """
 import unicodedata
 from typing import Optional
@@ -111,3 +116,38 @@ def provincia_for(pais: Optional[str], cp: Optional[str]) -> Optional[str]:
 def cp_prefix_for_provincia(nombre: Optional[str]) -> Optional[str]:
     """'Jaén' → '23'. None si el nombre no es una provincia de la tabla."""
     return _PREFIJO_POR_PROVINCIA.get((nombre or "").strip())
+
+
+# Grafía oficial de las poblaciones de la provincia de Jaén más habituales
+# (PLAN_PERFIL_ZONAS.md, fase D). Clave: `city_key` (sin acentos, minúsculas y
+# espacios simples). Solo se corrige lo que está en la tabla; el resto se
+# respeta (con los espacios limpios). Para añadir una población basta con su
+# nombre oficial: la clave se calcula.
+_JAEN_CITIES = (
+    "Jaén", "Mancha Real", "Torredelcampo", "Torredonjimeno", "Martos", "Mengíbar", "Villatorres",
+    "Los Villares", "La Guardia de Jaén", "Fuerte del Rey", "Jamilena", "Linares", "Úbeda", "Baeza",
+    "Andújar", "Alcalá la Real", "Bailén", "Cazorla", "Villacarrillo", "Pegalajar", "Cambil",
+    "Valdepeñas de Jaén", "Campillo de Arenas", "Noalejo", "Huelma", "Jódar", "Bedmar y Garcíez",
+    "Albanchez de Mágina", "Torres", "Jimena", "Puente del Obispo", "Las Infantas",
+)
+
+
+def _clean_spaces(text: Optional[str]) -> str:
+    return " ".join((text or "").split())
+
+
+def city_key(text: Optional[str]) -> str:
+    """Clave de comparación de una población: sin acentos, minúsculas y espacios simples."""
+    return sort_key(_clean_spaces(text))
+
+
+CITY_SPELLINGS = {city_key(name): name for name in _JAEN_CITIES}
+
+
+def normalize_city(text: Optional[str]) -> str:
+    """Grafía oficial si la población está en `CITY_SPELLINGS` ('jaen ' → 'Jaén'); si no, el texto con los espacios limpios.
+
+    Vacío o None → cadena vacía.
+    """
+    cleaned = _clean_spaces(text)
+    return CITY_SPELLINGS.get(city_key(cleaned), cleaned)

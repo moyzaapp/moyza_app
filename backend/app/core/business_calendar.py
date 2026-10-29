@@ -85,6 +85,17 @@ def to_madrid(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC).astimezone(MADRID).replace(tzinfo=None)
 
 
+def fmt_madrid(value: Optional[datetime], fmt: str = "%d/%m/%Y %H:%M") -> str:
+    """UTC naive -> texto en hora de Madrid; "" si no hay fecha.
+
+    Para documentos generados fuera de las plantillas (ficha de visita en PDF),
+    donde no está el filtro `madrid_dt` (PLAN_CEDER_COMPRADORES.md §4).
+    """
+    if value is None:
+        return ""
+    return to_madrid(value).strftime(fmt)
+
+
 def to_utc(local: datetime) -> datetime:
     """Hora local de Madrid (naive) -> UTC naive."""
     return local.replace(tzinfo=MADRID).astimezone(UTC).replace(tzinfo=None)

@@ -155,8 +155,10 @@ def test_edicion_de_criterios_exige_operacion(db):
     name = f"{TAG} EDICION"
     client.post("/buyers/create", {"name": name})
     buyer = _buyers(db, name)[0]
-    # Mínimos del perfil también en la ficha (PLAN_PERFIL_UBICACION.md): tipo, precio máximo y ubicación
-    minimums = {"property_type": "Piso", "max_price": "150000", "country": "España", "province": "Jaén"}
+    # Mínimos del perfil también en la ficha (PLAN_PERFIL_ZONAS.md): tipo, precio máximo,
+    # dormitorios máximos, población y zona ("Todas", por si la población tiene zonas)
+    minimums = {"property_type": "Piso", "max_price": "150000", "max_bedrooms": "3", "country": "España",
+                "province": "Jaén", "cities": "Jaén", "zones_all": "1"}
     client.post(f"/buyers/{buyer.id}/search-criteria", {"business_type": "Venta", **minimums})
     db.expire_all()
     assert buyer.search_criteria.business_type == "Venta"

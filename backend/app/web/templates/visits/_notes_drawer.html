@@ -1,0 +1,24 @@
+{#
+  Panel lateral con las observaciones internas de una visita (PLAN_CEDER_COMPRADORES.md §3).
+  Uno por página: lo abren los botones de `visits/_notes_button.html`, que llevan el
+  texto en data-*. Se rellena con textContent (nunca innerHTML) para no interpretar HTML.
+#}
+{% import "components/ui_macros.html" as ui %}
+{% call ui.drawer("visitNotesDrawer", "Observaciones internas", size="lg", subtitle_id="visitNotesDrawerSubtitle") %}
+<div class="p-4 sm:p-6 space-y-4">
+    <p id="visitNotesDrawerBody" class="text-sm text-gray-800 whitespace-pre-line break-words"></p>
+    <p class="text-xs text-gray-500">Solo las ve el equipo en la app; no salen en la ficha que firma el cliente.</p>
+</div>
+{% endcall %}
+<script>
+document.addEventListener('click', function (e) {
+    var button = e.target.closest('[data-visit-notes]');
+    if (!button) return;
+    var visitor = button.getAttribute('data-visit-visitor');
+    var date = button.getAttribute('data-visit-date');
+    document.getElementById('visitNotesDrawerBody').textContent = button.getAttribute('data-visit-notes');
+    document.getElementById('visitNotesDrawerSubtitle').textContent =
+        [visitor, date ? 'Visita del ' + date : ''].filter(Boolean).join(' · ');
+    UI.openModal('visitNotesDrawer', button);
+});
+</script>

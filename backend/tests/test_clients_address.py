@@ -15,6 +15,7 @@ Ejecución dentro del contenedor:
     docker exec moyza_backend python -m pytest tests/test_clients_address.py -q
 """
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -174,9 +175,12 @@ def test_agente_solo_ve_sus_clientes_y_sus_direcciones(db, data):
     prop_a = next(p for p in data["mixed"].properties if p.title.endswith(" A"))
     assert f'href="/properties/{prop_a.id}"' in html
 
-    # La propiedad del otro agente y la archivada no salen
+    # La propiedad del otro agente no sale; la archivada sí, con marca
+    # (decisión 2026-10-28) y después de las activas
     assert "Avenida Pytest Otro Agente" not in html
-    assert "Calle Pytest Archivada" not in html
+    assert "Calle Pytest Archivada" in html
+    assert re.search(r">\s*Archivada\s*<", html), "falta la marca Archivada"
+    assert html.index("Calle Fuente del Peral") < html.index("Calle Pytest Archivada")
 
 
 def test_admin_ve_todos_los_clientes_de_la_empresa(db, data):
@@ -190,7 +194,8 @@ def test_admin_ve_todos_los_clientes_de_la_empresa(db, data):
     assert "Calle Fuente del Peral" in html
     assert "Avenida Pytest Otro Agente" in html
     assert "Calle Pytest Solo B" in html
-    assert "Calle Pytest Archivada" not in html
+    assert "Calle Pytest Archivada" in html
+    assert re.search(r">\s*Archivada\s*<", html), "falta la marca Archivada"
     assert ", 8" not in html and ", 21" not in html
 
 
@@ -228,3 +233,8 @@ def test_buscar_por_direccion(db, data):
     # El admin sí
     status, html = admin.get("/clients", {"search": "Pytest Solo B"})
     assert f"{TAG} SOLO B" in html
+
+    # La dirección de una propiedad archivada también encuentra al cliente
+    status, html = agent.get("/clients", {"search": "Pytest Archivada"})
+    assert status == 200
+    assert f"{TAG} MIXTO" in html
