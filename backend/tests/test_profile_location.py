@@ -41,10 +41,11 @@ PROFILE_STEP = "?step=profile#propuesta"
 
 
 def _prop(env, title, city, zona, cp=None, pais=None, price=100000, company=None, status="Activa",
-          agent="ana", business_type="Venta"):
+          agent="ana", business_type="Venta", bedrooms=2):
     from app.models.property import Property
     prop = Property(title=title, address=f"Calle {title}", city=city, zona=zona, cod_postal=cp, pais=pais,
                     property_type="Piso", business_type=business_type, price=price, status=status,
+                    num_dormitorios=bedrooms,
                     company_id=(company or env.moyza).id, agent_id=env.agents[agent].id)
     env.db.add(prop)
     env.db.commit()
@@ -286,7 +287,8 @@ def test_zona_obligatoria_si_la_poblacion_tiene_zonas(env, cities, zones, zones_
     _prop(env, "Torre", "Torredelcampo", None, "23640")
     tree = buyer_matching.geo_options(env.db)
     criteria = buyer_matching.apply_profile(BuyerSearchCriteria(), country="España", province="Jaén",
-                                            cities=cities, zones=zones, property_type="Piso", max_price="150000")
+                                            cities=cities, zones=zones, property_type="Piso", max_price="150000",
+                                            max_bedrooms="3")
     assert buyer_matching.missing_profile_fields(criteria, tree, zones_all) == missing
     # Ya guardado (sin árbol) la lista de zonas vacía es "Todas": no falta la zona
     assert "zona" not in buyer_matching.missing_profile_fields(criteria)
@@ -327,7 +329,8 @@ def test_paso_perfil_exige_poblacion_y_zona(env):
     zonas hay que marcar zonas o "Todas" a propósito."""
     _jaen_and_more(env)
     alert = _property_alert(env, "ana", "ana")
-    base = {"country": "España", "province": "Jaén", "property_type": "Piso", "max_price": "200000"}
+    base = {"country": "España", "province": "Jaén", "property_type": "Piso", "max_price": "200000",
+            "max_bedrooms": "3"}
 
     response = _save_profile(env, env.users["ana"], alert, form=base)
     assert response.headers["location"] == f"/alerts/{alert.id}{PROFILE_STEP}"
@@ -347,7 +350,7 @@ def test_paso_perfil_exige_poblacion_y_zona(env):
     assert buyer_matching.profile_is_complete(criteria)
     [follow_up] = _reload(env, alert).follow_ups
     assert follow_up.action_type == "CONTACTADO"
-    assert follow_up.notes == "Perfil de búsqueda: Piso · Jaén · Jaén, Martos · ≤ 200.000 €."
+    assert follow_up.notes == "Perfil de búsqueda: Piso · Jaén · Jaén, Martos · ≤ 3 dorm · ≤ 200.000 €."
     assert "4 propiedades sugeridas" in _flash(response)["message"]
 
 
@@ -355,7 +358,7 @@ def test_paso_perfil_poblacion_sin_zonas_no_pide_zona(env):
     _prop(env, "Torre", "Torredelcampo", None, "23640")
     alert = _property_alert(env, "ana", "ana")
     form = {"country": "España", "province": "Jaén", "cities": ["Torredelcampo"],
-            "property_type": "Piso", "max_price": "200000"}
+            "property_type": "Piso", "max_price": "200000", "max_bedrooms": "3"}
     response = _save_profile(env, env.users["ana"], alert, form=form)
     assert response.headers["location"] == f"/alerts/{alert.id}?step=proposal"
     assert _criteria(env).cities == ["Torredelcampo"] and _criteria(env).zones is None
@@ -366,7 +369,8 @@ def test_paso_perfil_solo_pais_falta_poblacion(env):
     response = _save_profile(env, env.users["ana"], alert,
                              form={"country": "España", "property_type": "Piso", "max_price": "200000"})
     assert response.headers["location"] == f"/alerts/{alert.id}{PROFILE_STEP}"
-    assert _flash(response) == {"category": "error", "message": "Faltan datos del perfil: población"}
+    assert _flash(response) == {"category": "error",
+                                "message": "Faltan datos del perfil: dormitorios máximos, población"}
     assert _criteria(env) is None and _reload(env, alert).follow_ups == []
 
 
@@ -374,7 +378,7 @@ def test_contactado_con_provincia(env):
     _jaen_and_more(env)
     alert = _property_alert(env, "ana", "ana")
     form = {"country": "España", "province": "Jaén", "cities": ["Martos"], "property_type": "Piso",
-            "max_price": "200000", "business_type": "Venta"}
+            "max_price": "200000", "max_bedrooms": "3", "business_type": "Venta"}
     # Martos tiene zonas: sin zona ni "Todas", rechazado (PLAN_PERFIL_ZONAS.md)
     response = _add_follow_up(env, env.users["ana"], alert, "CONTACTADO", notes="Hablado", form=form)
     assert _flash(response)["message"].endswith("Falta: zona")
@@ -385,7 +389,7 @@ def test_contactado_con_provincia(env):
     assert (criteria.province, criteria.cities, criteria.zones) == ("Jaén", ["Martos"], ["Norte"])
     [follow_up] = _reload(env, alert).follow_ups
     # Misma operación: sin línea de operación
-    assert follow_up.notes == "Hablado\nPerfil de búsqueda: Piso · Jaén · Martos · Zona Norte · ≤ 200.000 €."
+    assert follow_up.notes == "Hablado\nPerfil de búsqueda: Piso · Jaén · Martos · Zona Norte · ≤ 3 dorm · ≤ 200.000 €."
 
 
 # ---------------------------------------------------------------------------
@@ -493,7 +497,7 @@ def test_ficha_del_comprador_sin_minimos_no_guarda(env):
     response = _save_buyer_profile(env, env.admin, {"business_type": "Venta", "country": "España"})
     assert response.headers["location"] == f"/buyers/{env.buyer.id}?tab=criteria"
     assert _flash(response) == {"category": "error",
-                                "message": "Faltan datos del perfil: tipo de inmueble, precio máximo, población"}
+                                "message": "Faltan datos del perfil: tipo de inmueble, precio máximo, dormitorios máximos, población"}
     assert _criteria(env) is None
 
     # La operación se sigue validando antes que nada
@@ -525,7 +529,8 @@ def test_ficha_del_comprador_render_con_minimos(env):
     response = asyncio.run(buyer_detail(env.buyer.id, request, tab="criteria", db=env.db))
     html = response.body.decode("utf-8")
     assert response.status_code == 200
-    for text in ("Datos mínimos: tipo, precio máximo, población y zona (si la población tiene zonas)",
+    for text in ("Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)",
+                 'id="bcMaxBedrooms" name="max_bedrooms" value="3" placeholder="–" required',
                  'id="geoData-bc"', 'id="bcCountry"', 'id="bcProvince"', "data-places-required",
                  'id="bcPropertyType" name="property_type" required', "/static/js/search-profile.js",
                  '<option value="Jaén" selected>Jaén</option>', "Provincia: Jaén"):

@@ -76,7 +76,7 @@ poblaciones distintas (ver §4-5).
 | Fase | Contenido | Commit |
 |---|---|---|
 | A | Zonas por población, zona sin "Todas" por defecto, población y zona obligatorias — **IMPLEMENTADO** | `feat(perfil): zonas por población, obligatorias sin marcar todas por defecto` |
-| B | Dormitorios máx. obligatorio | `feat(perfil): dormitorios máximos obligatorios` |
+| B | Dormitorios máx. obligatorio — **IMPLEMENTADO** | `feat(perfil): dormitorios máximos obligatorios` |
 | C | Filtro de ascensor (migración) | `feat(perfil): filtro de ascensor en el perfil del comprador` |
 
 ## 4. Decisiones (2026-10-28)
@@ -143,3 +143,19 @@ Las decisiones de §4 no se han cambiado. Donde el plan dejaba margen:
 - **Tests**: `_complete_profile` y `CONTACT_PROFILE` (tests/test_alert_search.py) llevan ahora población
   (Jaen) además de la zona, para cumplir las dos reglas sea cual sea el día. Los tests de mínimos fijan el
   corte con el fixture `cutoff` (tests/test_profile_required.py) y `created_at` explícito.
+
+### Fase B
+
+- **Dormitorios máx.** entra en la regla nueva con la etiqueta "dormitorios máximos" (orden de los
+  mensajes: tipo, precio máximo, dormitorios máximos, población, zona). **0 vale** (estudio); solo falta si
+  está vacío. Los perfiles anteriores al corte no lo exigen (§4-4).
+- Formulario: `required` + asterisco + `data-profile-min` (el JS lo pone y quita con la operación, como tipo
+  y precio máximo). Textos "Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la
+  población tiene zonas)" y el estado vacío de la Propuesta ("tipo, precio, dormitorios y ubicación").
+- **Cruce sin cambios**: `_matching_filters` ya filtraba `num_dormitorios <= max_bedrooms`, así que una
+  propiedad **sin dormitorios registrados** (NULL: locales, garajes, terrenos o fichas incompletas) no sale
+  en las sugerencias de un perfil nuevo. No se ha tocado porque el plan no lo pide; si se quiere, el cambio
+  es tratar NULL como compatible en ese filtro.
+- `tests/test_buyer_business_type.py::test_edicion_de_criterios_exige_operacion` (pega a la app levantada)
+  se actualiza aquí a los mínimos nuevos: con la fase A ya fallaba tras reiniciar el contenedor (antes de
+  reiniciar, la app seguía con el código anterior).

@@ -46,7 +46,8 @@
  *   - `data-minimums-if-filled`: perfil opcional que, si se rellena algún dato
  *     (ni país ni operación cuentan), debe ir completo.
  * Al cambiar la operación o los datos se ponen o quitan `required` y el
- * asterisco de los campos `[data-profile-min]` (tipo y precio máximo) y de la
+ * asterisco de los campos `[data-profile-min]` (tipo, precio máximo y
+ * dormitorios máximos) y de la
  * población (`[data-profile-mark]`); el de Zona (`[data-zone-mark]`) solo si
  * hay zonas que elegir. El mínimo de ubicación solo se comprueba mientras los
  * mínimos se exigen.

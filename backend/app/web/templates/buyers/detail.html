@@ -145,7 +145,7 @@
                         {# Mismos mínimos que en la alerta (PLAN_PERFIL_UBICACION.md); aquí no se registra seguimiento.
                            Solo obligatorios con las operaciones que lo exigen (Venta; PLAN_PERFIL_SOLO_VENTA.md):
                            al cambiar la operación el JS pone o quita los asteriscos #}
-                        <p class="text-sm font-medium text-gray-900">Datos mínimos: tipo, precio máximo, población y zona (si la población tiene zonas)</p>
+                        <p class="text-sm font-medium text-gray-900">Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)</p>
                         {% set optional_operations = BusinessType.values() | reject("in", profile_required_operations) | list %}
                         <p class="text-sm text-gray-500 mb-4">Obligatorios en {{ profile_required_operations | join(" y ") | lower }}{% if optional_operations %}; en {{ optional_operations | join(" y ") | lower }}, opcionales{% endif %}.</p>
                         {% call search_profile_fields(criteria, location, property_types, prefix="bc",

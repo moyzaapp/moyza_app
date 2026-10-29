@@ -10,8 +10,8 @@ PLAN_PERFIL_OBLIGATORIO.md también las creadas con referencia):
   tests. Hay dos reglas según la fecha del perfil (PLAN_PERFIL_ZONAS.md §4-4,
   "solo perfiles nuevos"; corte `settings.PROFILE_MINIMUMS_SINCE`, 00:00 de
   Madrid, por defecto 2026-10-29):
-  · Regla nueva: tipo de inmueble + precio máximo + al menos una población
-    concreta + zona (alguna zona o "Todas" marcada a propósito) si alguna
+  · Regla nueva: tipo de inmueble + precio máximo + dormitorios máximos +
+    al menos una población concreta + zona (alguna zona o "Todas" marcada a propósito) si alguna
     población marcada tiene zonas registradas. Se aplica a los perfiles
     creados en el corte o después, a `criteria` None (perfil por crear) y a
     los perfiles temporales sin `created_at` con los que las rutas validan lo
@@ -77,7 +77,7 @@ SUMMARY_MAX_PLACES = 2
 # Nombres de los mínimos tal como se leen en los mensajes ("Falta: …").
 # Regla nueva (PLAN_PERFIL_ZONAS.md): la zona solo se pide si alguna población
 # marcada tiene zonas (ZONE_LABEL, va la última).
-PROFILE_MINIMUM_LABELS = ("tipo de inmueble", "precio máximo", "población")
+PROFILE_MINIMUM_LABELS = ("tipo de inmueble", "precio máximo", "dormitorios máximos", "población")
 ZONE_LABEL = "zona"
 # Regla antigua (perfiles anteriores a `settings.PROFILE_MINIMUMS_SINCE`)
 LEGACY_PROFILE_MINIMUM_LABELS = ("tipo de inmueble", "precio máximo", "ubicación")
@@ -137,34 +137,37 @@ def missing_profile_fields(criteria: Optional[BuyerSearchCriteria], geo_tree: Op
     """Mínimos del perfil que faltan, en el orden de los mensajes (vacío = completo).
 
     Regla según `uses_new_minimums` (ver el docstring del módulo):
-    - Nueva: tipo de inmueble + precio máximo (mayor que 0) + al menos una
-      población concreta + zona si procede. La zona solo se comprueba con
+    - Nueva: tipo de inmueble + precio máximo (mayor que 0) + dormitorios
+      máximos (0 vale: estudio) + al menos una población concreta + zona si
+      procede. La zona solo se comprueba con
       `geo_tree` (árbol de `geo_options`; al validar el formulario): falta si
       alguna población marcada tiene zonas y no hay ninguna zona concreta ni
       `zones_all` ("Todas" marcada a propósito). Sin `geo_tree` (perfil ya
       guardado), una lista de zonas vacía se lee como "Todas".
     - Antigua (perfiles guardados antes del corte): tipo + precio máximo +
       ubicación (`has_location`).
-    Dormitorios mín., baños, precio mínimo e imprescindibles son opcionales.
+    Dormitorios mín., baños, precio mínimo e imprescindibles son opcionales
+    (dormitorios máx. solo cuenta en la regla nueva, PLAN_PERFIL_ZONAS.md fase B).
     Sin perfil, faltan todos los de la regla nueva (la zona no: depende de la
     población).
     """
     if criteria is None:
         return list(PROFILE_MINIMUM_LABELS)
     new_rule = uses_new_minimums(criteria)
-    labels = PROFILE_MINIMUM_LABELS if new_rule else LEGACY_PROFILE_MINIMUM_LABELS
-    property_type_label, max_price_label, location_label = labels
     missing = []
     if not (criteria.property_type or "").strip():
-        missing.append(property_type_label)
+        missing.append(PROFILE_MINIMUM_LABELS[0])
     if criteria.max_price is None or criteria.max_price <= 0:
-        missing.append(max_price_label)
+        missing.append(PROFILE_MINIMUM_LABELS[1])
     if not new_rule:
         if not has_location(criteria):
-            missing.append(location_label)
+            missing.append(LEGACY_PROFILE_MINIMUM_LABELS[2])
         return missing
+    bedrooms_label, city_label = PROFILE_MINIMUM_LABELS[2:]
+    if criteria.max_bedrooms is None:
+        missing.append(bedrooms_label)
     if not any(city for city in (criteria.cities or [])):
-        missing.append(location_label)
+        missing.append(city_label)
     elif (geo_tree is not None and not zones_all and not any(z for z in (criteria.zones or []))
           and zone_required(criteria, geo_tree)):
         missing.append(ZONE_LABEL)

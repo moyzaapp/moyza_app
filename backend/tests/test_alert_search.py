@@ -171,13 +171,14 @@ def _complete_profile(env, buyer=None, **fields):
 
     PLAN_PERFIL_OBLIGATORIO.md: asociar o cambiar propiedad exige el perfil
     completo. Por defecto cumple la regla nueva de PLAN_PERFIL_ZONAS.md (tipo,
-    precio máximo, población concreta), que incluye la antigua (tipo + precio
+    precio máximo, dormitorios máximos, población concreta), que incluye la antigua (tipo + precio
     máximo + ubicación): vale con cualquier `created_at` respecto al corte
     `PROFILE_MINIMUMS_SINCE`.
     """
     from app.models.buyer_search_criteria import BuyerSearchCriteria
     buyer = buyer or env.buyer
-    data = dict(property_type="Piso", max_price=200000, cities=["Jaen"], zones=["Centro"], business_type="Venta")
+    data = dict(property_type="Piso", max_price=200000, max_bedrooms=3, cities=["Jaen"], zones=["Centro"],
+                business_type="Venta")
     data.update(fields)
     criteria = BuyerSearchCriteria(buyer_id=buyer.id, **data)
     env.db.add(criteria)
@@ -474,9 +475,10 @@ def _add_follow_up(env, user, alert, action_type, notes=None, form=None):
 
 
 # Perfil mínimo tal como lo envía el modal de seguimiento al elegir «Contactado»
-# Mínimos del perfil (PLAN_PERFIL_ZONAS.md): población concreta y, como Jaen
-# tiene la zona Centro, también la zona
-CONTACT_PROFILE = {"cities": ["Jaen"], "zones": ["Centro"], "property_type": "Piso", "max_price": "150000"}
+# Mínimos del perfil (PLAN_PERFIL_ZONAS.md): dormitorios máximos, población
+# concreta y, como Jaen tiene la zona Centro, también la zona
+CONTACT_PROFILE = {"cities": ["Jaen"], "zones": ["Centro"], "property_type": "Piso", "max_price": "150000",
+                   "max_bedrooms": "3"}
 
 
 def test_formulario_rechaza_etapas_heredadas(env):

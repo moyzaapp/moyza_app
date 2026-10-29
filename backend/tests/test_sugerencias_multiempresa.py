@@ -362,7 +362,7 @@ def test_alerta_de_moes_ve_las_de_moyza_con_su_distintivo(env):
     env.db.add(buyer)
     env.db.flush()
     env.db.add(BuyerSearchCriteria(buyer_id=buyer.id, property_type="Piso", business_type="Venta",
-                                   max_price=200000, cities=["Jaen"], zones=["Centro"]))
+                                   max_price=200000, max_bedrooms=3, cities=["Jaen"], zones=["Centro"]))
     alert = PropertyAlert(company_id=env.moes.id, origin="search", buyer_id=buyer.id, lead_name=buyer.name,
                           business_type="Venta", status="PENDING", priority="NORMAL",
                           created_by=env.admin.id, created_at=T0)

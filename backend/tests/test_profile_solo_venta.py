@@ -322,7 +322,7 @@ def test_detalle_venta_sin_perfil_como_antes(env):
     assert "Cambiar propiedad" not in html
     assert "const PROFILE_BLOCKS_STAGES = true" in html
     assert 'id="fuPropertyType" name="property_type" required' in html
-    assert "Datos mínimos: tipo, precio máximo, población y zona (si la población tiene zonas)." in html
+    assert "Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)." in html
 
     _add_follow_up(env, env.users["ana"], alert, "SIN_RESPUESTA")
     response, html = _detail(env, env.users["ana"], alert)
@@ -382,7 +382,7 @@ def test_ficha_alquiler_sin_minimos_se_guarda(env):
 def test_ficha_venta_sin_minimos_rechazada(env):
     response = _save_buyer_profile(env, env.admin, {"business_type": "Venta", "property_type": "Piso"})
     assert response.headers["location"] == f"/buyers/{env.buyer.id}?tab=criteria"
-    assert _flash(response) == {"category": "error", "message": "Faltan datos del perfil: precio máximo, población"}
+    assert _flash(response) == {"category": "error", "message": "Faltan datos del perfil: precio máximo, dormitorios máximos, población"}
     assert _criteria(env) is None
 
 

@@ -34,8 +34,8 @@
     precargado con ella y avisa de que cambiarla cambia la de la alerta. Sin
     ella (ficha del comprador), precargado con la del perfil.
   - required: marca los mínimos del perfil (PLAN_PERFIL_OBLIGATORIO.md, decisión 4,
-    con los de PLAN_PERFIL_ZONAS.md): tipo de inmueble y precio máximo con
-    `required`, y "al menos una población; si alguna marcada tiene zonas,
+    con los de PLAN_PERFIL_ZONAS.md): tipo de inmueble, precio máximo y
+    dormitorios máximos con `required`, y "al menos una población; si alguna marcada tiene zonas,
     alguna zona o Todas" con `data-places-required` (lo valida
     /static/js/search-profile.js al enviar, con los avisos `data-places-error`
     de población y `data-zones-error` de zona; el servidor lo valida igualmente
@@ -193,9 +193,11 @@
             {{ ui.field("min_bedrooms", "Dormitorios mín.", type="number",
                         value=(c.min_bedrooms if c and c.min_bedrooms is not none else ""),
                         placeholder="–", attrs='min="0" max="20" inputmode="numeric"', id=prefix ~ "MinBedrooms") }}
-            {{ ui.field("max_bedrooms", "Dormitorios máx.", type="number",
+            {# Mínimo del perfil (PLAN_PERFIL_ZONAS.md, fase B); "Dormitorios mín." sigue opcional #}
+            {{ ui.field("max_bedrooms", "Dormitorios máx.", type="number", required=required,
                         value=(c.max_bedrooms if c and c.max_bedrooms is not none else ""),
-                        placeholder="–", attrs='min="0" max="20" inputmode="numeric"', id=prefix ~ "MaxBedrooms") }}
+                        placeholder="–", attrs=('min="0" max="20" inputmode="numeric"' ~ (' data-profile-min' if validated else '')),
+                        id=prefix ~ "MaxBedrooms") }}
         </div>
 
         {{ ui.field("min_bathrooms", "Baños mín.", type="number",

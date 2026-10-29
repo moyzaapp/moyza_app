@@ -88,19 +88,28 @@ def test_perfil_antiguo_con_la_regla_antigua(cutoff, fields, missing):
     assert buyer_matching.profile_is_complete(criteria) is (not missing)
 
 
+ALL_NEW = ["tipo de inmueble", "precio máximo", "dormitorios máximos", "población"]
+NEW_OK = {"property_type": "Piso", "max_price": 150000, "max_bedrooms": 3, "cities": ["Jaen"]}
+
+
 @pytest.mark.parametrize("fields, missing", [
-    (None, ["tipo de inmueble", "precio máximo", "población"]),
-    ({}, ["tipo de inmueble", "precio máximo", "población"]),
-    ({"property_type": "Piso"}, ["precio máximo", "población"]),
-    ({"property_type": "  ", "max_price": 150000, "cities": ["Jaen"]}, ["tipo de inmueble"]),
-    ({"property_type": "Piso", "max_price": 0, "cities": ["Jaen"]}, ["precio máximo"]),
+    (None, ALL_NEW),
+    ({}, ALL_NEW),
+    ({"property_type": "Piso"}, ["precio máximo", "dormitorios máximos", "población"]),
+    (dict(NEW_OK, property_type="  "), ["tipo de inmueble"]),
+    (dict(NEW_OK, max_price=0), ["precio máximo"]),
+    # Dormitorios máx. obligatorio (fase B); 0 vale (estudio); dormitorios mín. no cuenta
+    (dict(NEW_OK, max_bedrooms=None, min_bedrooms=2), ["dormitorios máximos"]),
+    (dict(NEW_OK, max_bedrooms=0), []),
     # Provincia o zonas sin población ya no bastan
-    ({"property_type": "Piso", "max_price": 150000, "province": "Jaén"}, ["población"]),
-    ({"property_type": "Piso", "max_price": 150000, "zones": ["Centro"]}, ["población"]),
-    ({"property_type": "Piso", "max_price": 150000, "cities": [""]}, ["población"]),
+    (dict(NEW_OK, cities=None, province="Jaén"), ["población"]),
+    (dict(NEW_OK, cities=None, zones=["Centro"]), ["población"]),
+    (dict(NEW_OK, cities=[""]), ["población"]),
     # Ya guardado (sin árbol): zonas vacías = "Todas"
-    ({"property_type": "Piso", "max_price": 150000, "cities": ["Jaen"]}, []),
-    ({"property_type": "Piso", "max_price": 150000, "cities": ["Jaen"], "zones": ["Centro"]}, []),
+    (NEW_OK, []),
+    (dict(NEW_OK, zones=["Centro"]), []),
+    # Opcionales: no cuentan
+    ({"min_price": 1, "min_bedrooms": 2, "min_bathrooms": 1, "notes": "Terraza"}, ALL_NEW),
 ])
 @pytest.mark.parametrize("created_at", [None, AFTER_CUTOFF])
 def test_perfil_nuevo_con_la_regla_nueva(cutoff, fields, missing, created_at):
@@ -228,7 +237,7 @@ def test_contactado_sin_campos_ni_perfil_rechazado(env):
     assert _flash(response) == {
         "category": "error",
         "message": "Para registrar «Contactado» completa el perfil del comprador. "
-                   "Falta: tipo de inmueble, precio máximo, población",
+                   "Falta: tipo de inmueble, precio máximo, dormitorios máximos, población",
     }
     assert _reload(env, alert).follow_ups == [] and _criteria(env) is None
 
@@ -237,7 +246,7 @@ def test_contactado_con_perfil_a_medias_rechazado(env):
     alert = _property_alert(env, "ana", "ana")
     response = _add_follow_up(env, env.users["ana"], alert, "CONTACTADO",
                               form={"property_type": "Piso", "min_bedrooms": "2"})
-    assert _flash(response)["message"].endswith("Falta: precio máximo, población")
+    assert _flash(response)["message"].endswith("Falta: precio máximo, dormitorios máximos, población")
     assert _reload(env, alert).follow_ups == [] and _criteria(env) is None
 
 
@@ -264,7 +273,7 @@ def test_contactado_con_minimos_guarda_perfil_y_un_solo_seguimiento(env):
     assert [f.action_type for f in stored.follow_ups] == ["CONTACTADO"]   # sin PERFIL_GUARDADO aparte
     note = stored.follow_ups[0].notes
     assert note == ("Le interesa la zona\n"
-                    "Perfil de búsqueda: Piso · Centro, Jaen · ≥ 2 dorm · ≤ 150.000 €. Imprescindibles: Con ascensor")
+                    "Perfil de búsqueda: Piso · Centro, Jaen · 2-3 dorm · ≤ 150.000 €. Imprescindibles: Con ascensor")
     assert stored.status == AlertStatus.IN_PROGRESS
     # Gestión real: desbloquea la cola
     assert alert_view.get_locked_alert_ids(env.agents["ana"].id, env.db, env.moyza.id) == set()
@@ -277,7 +286,7 @@ def test_contactado_sin_nota_del_agente_lleva_solo_el_resumen(env):
     alert = _property_alert(env, "ana", "ana")
     _add_follow_up(env, env.users["ana"], alert, "CONTACTADO", form=CONTACT_PROFILE)
     [follow_up] = _reload(env, alert).follow_ups
-    assert follow_up.notes == "Perfil de búsqueda: Piso · Centro, Jaen · ≤ 150.000 €."
+    assert follow_up.notes == "Perfil de búsqueda: Piso · Centro, Jaen · ≤ 3 dorm · ≤ 150.000 €."
 
 
 def test_contactado_con_perfil_completo_y_campos_vacios_no_borra_el_perfil(env):
@@ -307,7 +316,7 @@ def test_contactado_no_deja_un_perfil_completo_a_medias(env):
     alert = _property_alert(env, "ana", "ana")
     # Desmarca zonas y ciudades pero envía el resto: la edición dejaría el perfil incompleto
     response = _add_follow_up(env, env.users["ana"], alert, "CONTACTADO",
-                              form={"property_type": "Piso", "max_price": "150000"})
+                              form={"property_type": "Piso", "max_price": "150000", "max_bedrooms": "3"})
     assert _flash(response)["message"].endswith("Falta: población")
     assert _criteria(env).zones == ["Centro"] and _reload(env, alert).follow_ups == []
 
@@ -344,7 +353,8 @@ def test_paso_perfil_sin_minimos_no_guarda(env):
     response = _save_profile(env, env.users["ana"], alert,
                              form={"property_type": "Piso", "max_price": "150000"})
     assert response.headers["location"] == f"/alerts/{alert.id}{PROFILE_STEP}"
-    assert _flash(response) == {"category": "error", "message": "Faltan datos del perfil: población"}
+    assert _flash(response) == {"category": "error",
+                                "message": "Faltan datos del perfil: dormitorios máximos, población"}
     assert _criteria(env) is None and _reload(env, alert).follow_ups == []
 
 
@@ -405,7 +415,7 @@ def test_detalle_con_referencia_sin_perfil(env):
     assert response.status_code == 200
     assert ctx["show_steps"] is True and ctx["step"] == "contact"
     assert ctx["profile_complete"] is False
-    assert ctx["profile_missing"] == ["tipo de inmueble", "precio máximo", "población"]
+    assert ctx["profile_missing"] == ["tipo de inmueble", "precio máximo", "dormitorios máximos", "población"]
 
     # Indicador de pasos, banner y tarjeta de la propiedad ARRIBA de los pasos
     for text in ("1. Contactar", "2. Perfil", "3. Propuesta", "Perfil pendiente",
@@ -439,7 +449,7 @@ def test_propuesta_sin_perfil_estado_vacio(env):
     # Por defecto, con gestión y sin perfil: paso Perfil con los mínimos marcados
     response, html = _detail(env, env.users["ana"], alert)
     assert response.context["step"] == "profile"
-    assert "Datos mínimos: tipo, precio máximo, población y zona (si la población tiene zonas)" in html
+    assert "Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)" in html
     assert "Al guardar se registra el seguimiento «Contactado»" in html
     assert 'id="spPropertyType" name="property_type" required' in html
     assert 'id="spMaxPrice" name="max_price"' in html and 'data-places-error="spPlacesError"' in html
@@ -464,7 +474,7 @@ def test_detalle_con_referencia_tras_contactado_con_perfil(env):
     assert "Asociada ahora" in html and html.count("Asociar a esta alerta") >= 1
     assert "¿No está en la lista?" in html
     # El historial muestra la nota del agente y el resumen en otra línea
-    assert "Hablado\nPerfil de búsqueda: Piso · Centro, Jaen · ≤ 150.000 €." in html
+    assert "Hablado\nPerfil de búsqueda: Piso · Centro, Jaen · ≤ 3 dorm · ≤ 150.000 €." in html
     # Modal: perfil precargado y opcional; las etapas ya no se bloquean
     assert "const PROFILE_BLOCKS_STAGES = false" in html
     assert "Su perfil guardado; cámbialo si te ha contado algo nuevo." in html

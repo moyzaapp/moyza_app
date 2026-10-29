@@ -131,10 +131,10 @@
         <form method="POST" action="/alerts/{{ alert.id }}/search-profile" data-once data-loading-text="Guardando…">
             <div class="mb-5 space-y-1">
                 {% if profile_required %}
-                <p class="text-sm font-medium text-gray-900">Datos mínimos: tipo, precio máximo, población y zona (si la población tiene zonas)</p>
+                <p class="text-sm font-medium text-gray-900">Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)</p>
                 {% else %}
                 <p class="text-sm font-medium text-gray-900">Opcional{{ optional_where }}: si lo registras verás propiedades sugeridas</p>
-                <p class="text-sm text-gray-500">Si lo rellenas, incluye tipo, precio máximo, población y zona (si la población tiene zonas).</p>
+                <p class="text-sm text-gray-500">Si lo rellenas, incluye tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas).</p>
                 {% endif %}
                 <p class="text-sm text-gray-500">
                     Pregúntale qué busca{% if criteria %}; sale su perfil guardado, cámbialo si hace falta{% endif %}.
@@ -158,7 +158,7 @@
             {{ operation_warning() }}
             {{ profile_status() }}
             <div class="rounded-2xl border border-gray-200">
-                {{ ui.empty_state("Aún no hay propuesta", "Las propiedades sugeridas salen del perfil del comprador: tipo, precio máximo y ubicación.") }}
+                {{ ui.empty_state("Aún no hay propuesta", "Las propiedades sugeridas salen del perfil del comprador: tipo, precio, dormitorios y ubicación.") }}
             </div>
         </div>
         {% else %}

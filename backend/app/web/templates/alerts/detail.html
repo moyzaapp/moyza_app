@@ -541,7 +541,7 @@
         <fieldset id="followUpProfile" class="hidden rounded-xl border border-gray-200 p-4" disabled>
             <legend class="px-1 text-sm font-semibold text-gray-900">Perfil del comprador</legend>
             <p class="text-xs text-gray-500 mb-4">
-                {% if profile_complete %}Su perfil guardado; cámbialo si te ha contado algo nuevo.{% elif profile_required %}Datos mínimos: tipo, precio máximo, población y zona (si la población tiene zonas).{% else %}Opcional{{ (" en " ~ (alert.business_type | lower)) if alert.business_type else "" }}: si lo rellenas, incluye tipo, precio máximo, población y zona (si la población tiene zonas).{% endif %}
+                {% if profile_complete %}Su perfil guardado; cámbialo si te ha contado algo nuevo.{% elif profile_required %}Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas).{% else %}Opcional{{ (" en " ~ (alert.business_type | lower)) if alert.business_type else "" }}: si lo rellenas, incluye tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas).{% endif %}
             </p>
             {{ search_profile_fields(criteria, location, property_types,
                                      alert_operation=(alert.business_type or ""),

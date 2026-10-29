@@ -325,8 +325,8 @@ class FollowUpActionType:
     PERFIL_GUARDADO = "PERFIL_GUARDADO"
 
     # Etapas que exigen el perfil del comprador completo (PLAN_PERFIL_OBLIGATORIO.md,
-    # decisión 2): sin tipo, precio máximo y ubicación (provincia, población o
-    # zona; PLAN_PERFIL_UBICACION.md) no se pueden registrar. Sin respuesta y los cierres negativos sí se registran sin
+    # decisión 2): sin los mínimos del perfil (buyer_matching.missing_profile_fields;
+    # PLAN_PERFIL_ZONAS.md) no se pueden registrar. Sin respuesta y los cierres negativos sí se registran sin
     # perfil (decisión 3); Contactado lleva el perfil dentro.
     PROFILE_REQUIRED_STAGES = {"VISITA_PROGRAMADA", "OFERTA", "CERRADO"}
 

@@ -1973,9 +1973,10 @@ async def save_alert_search_profile(
     comprador (uno por comprador, sin m²) con la operación y el agente de la
     alerta. Vale para cualquier alerta, con o sin referencia.
 
-    PLAN_PERFIL_OBLIGATORIO.md: el perfil debe traer los mínimos (tipo,
-    precio máximo y ubicación; PLAN_PERFIL_UBICACION.md: provincia, o al
-    menos una población o una zona); si no, no se guarda nada. Si el perfil del
+    PLAN_PERFIL_OBLIGATORIO.md: el perfil debe traer los mínimos
+    (`buyer_matching.missing_profile_fields`; desde PLAN_PERFIL_ZONAS.md tipo,
+    precio máximo, dormitorios máximos, población y zona si la población tiene
+    zonas); si no, no se guarda nada. Si el perfil del
     comprador aún NO estaba completo, guardarlo registra un seguimiento
     CONTACTADO (perfil = contactado, avanza la etapa); si ya lo estaba, es una
     edición y registra PERFIL_GUARDADO (no mueve la etapa). En ambos casos el
