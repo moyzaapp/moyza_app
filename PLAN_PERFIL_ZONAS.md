@@ -101,7 +101,7 @@ poblaciones distintas (ver §4-5).
 
 | Fase | Contenido | Commit |
 |---|---|---|
-| D | Unificar grafía de poblaciones | `fix(propiedades): unificar la grafía de las poblaciones (Jaén)` |
+| D | Unificar grafía de poblaciones — **IMPLEMENTADO** | `fix(propiedades): unificar la grafía de las poblaciones (Jaén)` |
 
 ## 5. Notas de implementación (2026-10-29)
 
@@ -175,3 +175,20 @@ Las decisiones de §4 no se han cambiado. Donde el plan dejaba margen:
   dato cuenta como "sin ascensor"). Resumen: "con ascensor" / "sin ascensor" detrás de los baños.
 - Nota de despliegue en `MULTIEMPRESA_MOYZA_MOES.md` §21 (migración, `PROFILE_MINIMUMS_SINCE` y script de
   la fase D).
+
+### Fase D
+
+- `app/core/geo.py`: `CITY_SPELLINGS` se construye desde la lista de nombres oficiales (32 poblaciones de la
+  provincia de Jaén del plan) con `city_key` (sin acentos, minúsculas y espacios simples), así que añadir
+  una población es escribir su nombre. `normalize_city` devuelve la grafía oficial si la clave coincide y,
+  si no, el texto con los espacios limpios (vacío o None → ""). Solo compara la población entera: "Jaén
+  Norte" no se toca.
+- Se aplica en el alta y la edición de propiedades (`routes/properties.py`, único sitio que escribe
+  `Property.city`). Editar una propiedad antigua con "Jaen" deja en su historial de cambios "Jaen → Jaén".
+- `scripts/normalize_city_names.py` (dry-run por defecto, `--apply`, `--examples N`): `properties.city` y
+  `buyer_search_criteria.cities` (cada población normalizada y sin repetidas, en su orden; una lista que
+  quedara vacía pasa a NULL). Escribe sin pasar por el historial de cambios de la propiedad (corrección de
+  datos). Es idempotente: una segunda pasada no cambia nada.
+- En local: dry-run 78 propiedades "Jaen" → "Jaén" y 0 perfiles; `--apply` las cambió (79 "Jaén" en total) y
+  una segunda pasada da 0. Las poblaciones de prueba de otros países ("Bogota" / "Bogotá", "Medellin" /
+  "Medellín") no están en la tabla y siguen como estaban.
