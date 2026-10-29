@@ -21,6 +21,7 @@ import pytest
 from app.core import geo
 from app.core.constants import AlertStatus, FollowUpActionType
 from app.services import buyer_matching
+from tests.test_profile_required import BEFORE_CUTOFF, cutoff  # noqa: F401  (cutoff es un fixture)
 from tests.test_alert_search import (  # noqa: F401  (env es un fixture)
     BACKEND,
     CONTACT_PROFILE,
@@ -169,25 +170,57 @@ def test_geo_choices_estado_inicial(env):
     _jaen_and_more(env)
     tree = buyer_matching.geo_options(env.db, env.moyza.id)
 
-    # Sin perfil: España preseleccionada, todas las provincias, Todas las poblaciones y zonas
+    # Sin perfil: España preseleccionada, todas las provincias, ninguna población
+    # marcada (sin "Todas", PLAN_PERFIL_ZONAS.md) y sin bloque de zonas
     empty = buyer_matching.geo_choices(tree, None)
     assert empty["country"] == "España" and empty["province"] == ""
     assert empty["provinces"] == ["Jaén", "Madrid"]
-    assert empty["cities_all"] and empty["zones_all"]
     assert empty["cities"] == ["Jaen", "Jaén", "Madrid", "Martos", "Úbeda"]
+    assert empty["selected_cities"] == [] and not empty["show_zones"]
+    assert empty["zone_groups"] == [] and empty["zones"] == [] and not empty["zones_all"]
 
-    # Provincia y dos poblaciones: las zonas son solo las de esas dos
+    # Provincia y dos poblaciones: solo sus zonas, en un grupo por población
     criteria = BuyerSearchCriteria(country="España", province="Jaén", cities=["Jaén", "Martos"], zones=["Centro"])
     choices = buyer_matching.geo_choices(tree, criteria)
     assert choices["cities"] == ["Jaén", "Martos", "Úbeda"]
-    assert choices["selected_cities"] == ["Jaén", "Martos"] and not choices["cities_all"]
+    assert choices["selected_cities"] == ["Jaén", "Martos"] and choices["show_zones"]
+    assert choices["zone_groups"] == [{"city": "Jaén", "zones": ["Bulevar", "Centro"]},
+                                      {"city": "Martos", "zones": ["Centro", "Norte"]}]
     assert choices["zones"] == ["Bulevar", "Centro", "Norte"] and choices["selected_zones"] == ["Centro"]
+    assert not choices["zones_all"]
+
+    # Guardado con poblaciones y la lista de zonas vacía: así se guarda "Todas"
+    criteria.zones = None
+    assert buyer_matching.geo_choices(tree, criteria)["zones_all"]
+    # Población sin zonas: ni grupos ni "Todas"
+    criteria.cities = ["Madrid"]
+    criteria.province = "Madrid"
+    choices = buyer_matching.geo_choices(tree, criteria)
+    assert choices["zone_groups"] == [{"city": "Madrid", "zones": ["Sol"]}]
+    criteria.cities, criteria.province = ["Úbeda"], "Jaén"
+    assert buyer_matching.geo_choices(tree, criteria)["zone_groups"] == [{"city": "Úbeda", "zones": ["Casco"]}]
 
     # Un perfil antiguo (sin país ni provincia) conserva lo que tenía, aunque ya no exista
     old = BuyerSearchCriteria(cities=["Jaen", "Baeza"], zones=["Ronda"])
     choices = buyer_matching.geo_choices(tree, old)
     assert choices["country"] == "España" and choices["province"] == ""
     assert choices["cities"][-1] == "Baeza" and "Ronda" in choices["zones"]
+    assert choices["zone_groups"] == [{"city": "Jaen", "zones": ["Centro"]},
+                                      {"city": buyer_matching.SAVED_ZONES_GROUP, "zones": ["Ronda"]}]
+
+    # Perfil antiguo con "Todas" las poblaciones: ninguna marcada y sin zonas
+    choices = buyer_matching.geo_choices(tree, BuyerSearchCriteria(country="España", province="Jaén"))
+    assert choices["selected_cities"] == [] and not choices["show_zones"] and not choices["zones_all"]
+
+
+def test_zonas_de_cada_poblacion(env):
+    _jaen_and_more(env)
+    tree = buyer_matching.geo_options(env.db, env.moyza.id)
+    zones = buyer_matching.city_zones(tree, "España", "Jaén")
+    assert zones == {"Jaén": ["Bulevar", "Centro"], "Martos": ["Centro", "Norte"], "Úbeda": ["Casco"]}
+    # Sin provincia: todas las del país (también las sin CP); sin país, de todos
+    assert buyer_matching.city_zones(tree, "España", "")["Jaen"] == ["Centro"]
+    assert "Lisboa" in buyer_matching.city_zones(tree)
 
 
 # ---------------------------------------------------------------------------
@@ -228,11 +261,35 @@ def test_matching_por_provincia_poblaciones_y_zonas(env):
     ({"zones": ["Centro"]}, True),
     ({"cities": [], "zones": []}, False),
 ])
-def test_minimo_de_ubicacion(location, complete):
+def test_minimo_de_ubicacion_en_perfiles_antiguos(cutoff, location, complete):
+    """Regla antigua: solo perfiles guardados antes del corte (PLAN_PERFIL_ZONAS.md §4-4)."""
     from app.models.buyer_search_criteria import BuyerSearchCriteria
-    criteria = BuyerSearchCriteria(property_type="Piso", max_price=150000, **location)
+    criteria = BuyerSearchCriteria(property_type="Piso", max_price=150000, created_at=BEFORE_CUTOFF, **location)
     assert buyer_matching.profile_is_complete(criteria) is complete
     assert buyer_matching.missing_profile_fields(criteria) == ([] if complete else ["ubicación"])
+
+
+@pytest.mark.parametrize("cities, zones, zones_all, missing", [
+    ([], [], False, ["población"]),
+    (["Úbeda"], [], False, ["zona"]),                  # Úbeda tiene zonas: hay que elegir
+    (["Úbeda"], [], True, []),                         # "Todas" marcada a propósito
+    (["Úbeda"], ["Casco"], False, []),
+    (["Jaén", "Martos"], ["Norte"], False, []),        # basta una zona de cualquiera
+    (["Torredelcampo"], [], False, []),                # población sin zonas: no bloquea
+    (["Torredelcampo", "Martos"], [], False, ["zona"]),
+    (["Baeza"], [], False, []),                        # guardada y ya sin propiedades
+])
+def test_zona_obligatoria_si_la_poblacion_tiene_zonas(env, cities, zones, zones_all, missing):
+    """Regla nueva (PLAN_PERFIL_ZONAS.md): la zona se valida al guardar, con el árbol."""
+    from app.models.buyer_search_criteria import BuyerSearchCriteria
+    _jaen_and_more(env)
+    _prop(env, "Torre", "Torredelcampo", None, "23640")
+    tree = buyer_matching.geo_options(env.db)
+    criteria = buyer_matching.apply_profile(BuyerSearchCriteria(), country="España", province="Jaén",
+                                            cities=cities, zones=zones, property_type="Piso", max_price="150000")
+    assert buyer_matching.missing_profile_fields(criteria, tree, zones_all) == missing
+    # Ya guardado (sin árbol) la lista de zonas vacía es "Todas": no falta la zona
+    assert "zona" not in buyer_matching.missing_profile_fields(criteria)
 
 
 def test_apply_profile_pais_y_provincia():
@@ -247,6 +304,9 @@ def test_apply_profile_pais_y_provincia():
     assert (c.country, c.province) == ("España", None)
     c = buyer_matching.apply_profile(BuyerSearchCriteria(), country="Portugal", province="Jaén")
     assert (c.country, c.province) == ("Portugal", None)
+    # La misma zona en dos grupos llega dos veces: se guarda una
+    c = buyer_matching.apply_profile(BuyerSearchCriteria(), cities=["Jaén", "Martos", "Jaén"], zones=["Centro", "Centro"])
+    assert (c.cities, c.zones) == (["Jaén", "Martos"], ["Centro"])
 
 
 def test_resumen_con_provincia():
@@ -262,27 +322,51 @@ def test_resumen_con_provincia():
     assert buyer_matching.criteria_summary(c) == "Portugal · Lisboa"
 
 
-def test_paso_perfil_con_provincia_y_todas_las_poblaciones(env):
+def test_paso_perfil_exige_poblacion_y_zona(env):
+    """PLAN_PERFIL_ZONAS.md: la provincia sola ya no basta; con poblaciones con
+    zonas hay que marcar zonas o "Todas" a propósito."""
     _jaen_and_more(env)
     alert = _property_alert(env, "ana", "ana")
-    form = {"country": "España", "province": "Jaén", "property_type": "Piso", "max_price": "200000"}
-    response = _save_profile(env, env.users["ana"], alert, form=form)
+    base = {"country": "España", "province": "Jaén", "property_type": "Piso", "max_price": "200000"}
+
+    response = _save_profile(env, env.users["ana"], alert, form=base)
+    assert response.headers["location"] == f"/alerts/{alert.id}{PROFILE_STEP}"
+    assert _flash(response) == {"category": "error", "message": "Faltan datos del perfil: población"}
+
+    response = _save_profile(env, env.users["ana"], alert, form=dict(base, cities=["Jaén", "Martos"]))
+    assert _flash(response) == {"category": "error", "message": "Faltan datos del perfil: zona"}
+    assert _criteria(env) is None and _reload(env, alert).follow_ups == []
+
+    # "Todas" las zonas marcada: se guarda la lista vacía
+    response = _save_profile(env, env.users["ana"], alert,
+                             form=dict(base, cities=["Jaén", "Martos"], zones_all="1"))
     assert response.headers["location"] == f"/alerts/{alert.id}?step=proposal"
     criteria = _criteria(env)
-    assert (criteria.country, criteria.province, criteria.cities, criteria.zones) == ("España", "Jaén", None, None)
+    assert (criteria.country, criteria.province, criteria.cities, criteria.zones) == \
+        ("España", "Jaén", ["Jaén", "Martos"], None)
     assert buyer_matching.profile_is_complete(criteria)
     [follow_up] = _reload(env, alert).follow_ups
     assert follow_up.action_type == "CONTACTADO"
-    assert follow_up.notes == "Perfil de búsqueda: Piso · Jaén · Todas las poblaciones · ≤ 200.000 €."
-    assert "5 propiedades sugeridas" in _flash(response)["message"]
+    assert follow_up.notes == "Perfil de búsqueda: Piso · Jaén · Jaén, Martos · ≤ 200.000 €."
+    assert "4 propiedades sugeridas" in _flash(response)["message"]
 
 
-def test_paso_perfil_solo_pais_falta_ubicacion(env):
+def test_paso_perfil_poblacion_sin_zonas_no_pide_zona(env):
+    _prop(env, "Torre", "Torredelcampo", None, "23640")
+    alert = _property_alert(env, "ana", "ana")
+    form = {"country": "España", "province": "Jaén", "cities": ["Torredelcampo"],
+            "property_type": "Piso", "max_price": "200000"}
+    response = _save_profile(env, env.users["ana"], alert, form=form)
+    assert response.headers["location"] == f"/alerts/{alert.id}?step=proposal"
+    assert _criteria(env).cities == ["Torredelcampo"] and _criteria(env).zones is None
+
+
+def test_paso_perfil_solo_pais_falta_poblacion(env):
     alert = _property_alert(env, "ana", "ana")
     response = _save_profile(env, env.users["ana"], alert,
                              form={"country": "España", "property_type": "Piso", "max_price": "200000"})
     assert response.headers["location"] == f"/alerts/{alert.id}{PROFILE_STEP}"
-    assert _flash(response) == {"category": "error", "message": "Faltan datos del perfil: ubicación"}
+    assert _flash(response) == {"category": "error", "message": "Faltan datos del perfil: población"}
     assert _criteria(env) is None and _reload(env, alert).follow_ups == []
 
 
@@ -291,13 +375,17 @@ def test_contactado_con_provincia(env):
     alert = _property_alert(env, "ana", "ana")
     form = {"country": "España", "province": "Jaén", "cities": ["Martos"], "property_type": "Piso",
             "max_price": "200000", "business_type": "Venta"}
+    # Martos tiene zonas: sin zona ni "Todas", rechazado (PLAN_PERFIL_ZONAS.md)
     response = _add_follow_up(env, env.users["ana"], alert, "CONTACTADO", notes="Hablado", form=form)
+    assert _flash(response)["message"].endswith("Falta: zona")
+    response = _add_follow_up(env, env.users["ana"], alert, "CONTACTADO", notes="Hablado",
+                              form=dict(form, zones=["Norte"]))
     assert _flash(response)["category"] == "success"
     criteria = _criteria(env)
-    assert (criteria.province, criteria.cities) == ("Jaén", ["Martos"])
+    assert (criteria.province, criteria.cities, criteria.zones) == ("Jaén", ["Martos"], ["Norte"])
     [follow_up] = _reload(env, alert).follow_ups
     # Misma operación: sin línea de operación
-    assert follow_up.notes == "Hablado\nPerfil de búsqueda: Piso · Jaén · Martos · ≤ 200.000 €."
+    assert follow_up.notes == "Hablado\nPerfil de búsqueda: Piso · Jaén · Martos · Zona Norte · ≤ 200.000 €."
 
 
 # ---------------------------------------------------------------------------
@@ -405,7 +493,7 @@ def test_ficha_del_comprador_sin_minimos_no_guarda(env):
     response = _save_buyer_profile(env, env.admin, {"business_type": "Venta", "country": "España"})
     assert response.headers["location"] == f"/buyers/{env.buyer.id}?tab=criteria"
     assert _flash(response) == {"category": "error",
-                                "message": "Faltan datos del perfil: tipo de inmueble, precio máximo, ubicación"}
+                                "message": "Faltan datos del perfil: tipo de inmueble, precio máximo, población"}
     assert _criteria(env) is None
 
     # La operación se sigue validando antes que nada
@@ -437,7 +525,7 @@ def test_ficha_del_comprador_render_con_minimos(env):
     response = asyncio.run(buyer_detail(env.buyer.id, request, tab="criteria", db=env.db))
     html = response.body.decode("utf-8")
     assert response.status_code == 200
-    for text in ("Datos mínimos: tipo, precio máximo y ubicación (provincia, población o zona)",
+    for text in ("Datos mínimos: tipo, precio máximo, población y zona (si la población tiene zonas)",
                  'id="geoData-bc"', 'id="bcCountry"', 'id="bcProvince"', "data-places-required",
                  'id="bcPropertyType" name="property_type" required', "/static/js/search-profile.js",
                  '<option value="Jaén" selected>Jaén</option>', "Provincia: Jaén"):
@@ -473,20 +561,29 @@ def test_partial_precargado_con_provincia_y_dos_poblaciones(env):
     assert '<option value="">Todas las provincias</option>' in html
     assert "Sin provincia</option>" not in html                         # no es una provincia elegible
 
-    # Dos listas con "Todas"
+    # Población sin "Todas"; Zona con "Todas" (PLAN_PERFIL_ZONAS.md)
     assert 'data-geo-list="cities"' in html and 'data-geo-list="zones"' in html
-    section = html[html.index('id="spCitiesList"'):]
-    assert section.count("data-geo-all") >= 2
-    # Poblaciones de Jaén: Jaén y Martos marcadas (activas), Úbeda sin marcar; "Todas" sin marcar
+    cities_html = html.split('id="spCitiesList"')[1].split("</fieldset>")[0]
+    assert "data-geo-all" not in cities_html and "Todas" not in cities_html
+    # Poblaciones de Jaén: Jaén y Martos marcadas (activas), Úbeda sin marcar
     assert _checkbox(html, "cities", "Jaén") == (True, False)
     assert _checkbox(html, "cities", "Martos") == (True, False)
     assert _checkbox(html, "cities", "Úbeda") == (False, False)
-    assert 'name="cities" value="Madrid"' not in html.split('id="spZonesList"')[0].split('id="spCitiesList"')[1]
-    # Zonas: las de Jaén y Martos, con "Todas" (marcadas y deshabilitadas: no se envían)
+    assert 'name="cities" value="Madrid"' not in cities_html
+    assert "Marca al menos una población" in cities_html
+    # Zonas: visibles, en un grupo por población con título; guardado con la lista
+    # vacía = "Todas" marcada (las demás marcadas y deshabilitadas: no se envían)
+    zones_tag = html.split('id="spZonesList"')[0].rsplit("<fieldset", 1)[1].split(">")[0]
+    assert zones_tag == " data-geo-zones"                               # visible y activo
     zones_html = html.split('id="spZonesList"')[1].split("</fieldset>")[0]
+    assert re.search(r'name="zones_all" value="1" data-geo-all checked', zones_html)
+    assert zones_html.count("data-geo-group") == 2
+    assert zones_html.index('aria-label="Zonas de Jaén"') < zones_html.index('aria-label="Zonas de Martos"')
+    assert '<p class="text-xs font-medium text-gray-500 mb-1">Martos</p>' in zones_html
     for zone in ("Bulevar", "Centro", "Norte"):
         assert _checkbox(zones_html, "zones", zone) == (True, True), zone
     assert 'value="Casco"' not in zones_html
+    assert "Elige al menos una zona o marca Todas" in zones_html
 
     # JSON del árbol para el JS, con la provincia deducida del CP
     raw = html.split('<script type="application/json" id="geoData-sp">')[1].split("</script>")[0]
@@ -497,8 +594,8 @@ def test_partial_precargado_con_provincia_y_dos_poblaciones(env):
     # Operación precargada con la de la alerta, editable, y mínimos marcados
     assert '<option value="Venta" selected>Venta</option>' in html
     assert "Si la cambias, cambia la operación de la alerta" in html
-    assert 'data-places-error="spPlacesError"' in html
-    assert "Elige la provincia, o al menos una población o zona" in html
+    assert 'data-places-error="spPlacesError" data-zones-error="spZonesError"' in html
+    assert "Ubicación · marca al menos una población; si tiene zonas, elige las zonas o Todas" in html
 
     # El modal de seguimiento lleva su propia copia (ids distintos)
     assert 'id="geoData-fu"' in html and 'id="fuProvince"' in html
@@ -512,8 +609,12 @@ def test_partial_un_solo_pais_fijo(env):
     assert re.search(r'<select id="spCountry" name="country"\s+data-geo="country" disabled', html)
     assert '<input type="hidden" name="country" value="España" data-geo="country-fixed">' in html
     assert '<option value="">Todos los países</option>' not in html
-    # Sin perfil: Todas las poblaciones (Jaen, sin CP) y Todas las zonas
-    assert _checkbox(html, "cities", "Jaen") == (True, True)
+    # Sin perfil: ninguna población marcada y el bloque de zonas oculto y deshabilitado
+    assert _checkbox(html, "cities", "Jaen") == (False, False)
+    zones_tag = html.split('id="spZonesList"')[0].rsplit("<fieldset", 1)[1].split(">")[0]
+    assert zones_tag == ' data-geo-zones class="hidden" disabled'
+    zones_html = html.split('id="spZonesList"')[1].split("</fieldset>")[0]
+    assert "data-geo-group" not in zones_html and "checked" not in zones_html
 
 
 # ---------------------------------------------------------------------------

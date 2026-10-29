@@ -431,6 +431,9 @@ def _profile_values(form_data, notes_field: str = "notes", **overrides) -> dict:
     values.update({k: v for k, v in overrides.items() if k in values})
     values["zones"] = [z for z in form_data.getlist("zones") if z]
     values["cities"] = [c for c in form_data.getlist("cities") if c]
+    # "Todas" las zonas marcada a propósito (PLAN_PERFIL_ZONAS.md): se guarda como
+    # lista vacía, pero hace falta para validar la zona obligatoria
+    values["zones_all"] = bool(form_data.get("zones_all"))
     return values
 
 
@@ -501,16 +504,18 @@ def _join_note(*lines) -> Optional[str]:
     return text or None
 
 
-def _missing_in_profile_form(alert: PropertyAlert, values: dict) -> list:
+def _missing_in_profile_form(db: Session, alert: PropertyAlert, values: dict) -> list:
     """Mínimos que faltan en el perfil enviado, sin tocar el perfil guardado.
 
     Se evalúa sobre un perfil temporal (fuera de la sesión) con el mismo
     parseo que se usará al guardar, así la validación y lo guardado coinciden.
+    Sin `created_at`, se le aplican siempre los mínimos nuevos
+    (PLAN_PERFIL_ZONAS.md §4-4), con la zona según el árbol de ubicaciones.
     """
     preview = buyer_matching.apply_profile(
         BuyerSearchCriteria(), **_profile_kwargs(alert, values, _alert_criteria(alert))
     )
-    return buyer_matching.missing_profile_fields(preview)
+    return buyer_matching.missing_profile_fields(preview, buyer_matching.geo_options(db), values["zones_all"])
 
 
 def _store_alert_profile(db: Session, alert: PropertyAlert, values: dict, now: datetime) -> BuyerSearchCriteria:
@@ -2041,7 +2046,7 @@ async def save_alert_search_profile(
     profile_sent = (_profile_values_present(values)
                     and buyer_matching.profile_applies(new_operation or alert.business_type))
     if profile_sent or buyer_matching.profile_required(alert, new_operation):
-        missing = _missing_in_profile_form(alert, values)
+        missing = _missing_in_profile_form(db, alert, values)
         if missing:
             response = RedirectResponse(url=_profile_step_url(alert_id), status_code=302)
             set_flash(response, "error",
@@ -2555,7 +2560,7 @@ async def add_follow_up(
             missing = []
         elif _profile_values_present(values):
             # Con datos: deben cumplir los mínimos (también si el perfil es opcional)
-            missing = _missing_in_profile_form(alert, values)
+            missing = _missing_in_profile_form(db, alert, values)
             profile_values = values
         else:
             # Sin datos: vale si el perfil ya estaba completo (no se toca) o no
@@ -3115,9 +3120,10 @@ async def save_search_criteria(
     (PLAN_ALERTA_SIN_REFERENCIA.md, decisión cerrada 5): los valores antiguos
     se conservan en la base de datos, pero ya no se editan ni filtran.
 
-    PLAN_PERFIL_UBICACION.md: mismos mínimos que el perfil de la alerta (tipo,
-    precio máximo y ubicación; `buyer_matching.missing_profile_fields`), con
-    país y provincia de la cascada. Aquí no hay alerta: la operación se edita
+    PLAN_PERFIL_UBICACION.md: mismos mínimos que el perfil de la alerta
+    (`buyer_matching.missing_profile_fields`; desde PLAN_PERFIL_ZONAS.md tipo,
+    precio máximo, población y zona si la población tiene zonas), con país y
+    provincia de la cascada. Aquí no hay alerta: la operación se edita
     como siempre y no se registra ningún seguimiento.
 
     PLAN_PERFIL_SOLO_VENTA.md: los mínimos solo se exigen si la operación
@@ -3173,9 +3179,13 @@ async def save_search_criteria(
 
     # Mínimos del perfil, evaluados sobre un perfil temporal con el mismo parseo;
     # solo si la operación enviada los exige (Venta; PLAN_PERFIL_SOLO_VENTA.md)
+    # (siempre con los mínimos nuevos y la zona según el árbol: PLAN_PERFIL_ZONAS.md)
     missing = []
     if buyer_matching.profile_required_for_business_type(business_type):
-        missing = buyer_matching.missing_profile_fields(buyer_matching.apply_profile(BuyerSearchCriteria(), **profile))
+        missing = buyer_matching.missing_profile_fields(
+            buyer_matching.apply_profile(BuyerSearchCriteria(), **profile),
+            buyer_matching.geo_options(db), bool(form_data.get("zones_all")),
+        )
     if missing:
         response = RedirectResponse(url=f"/buyers/{buyer_id}?tab=criteria", status_code=302)
         set_flash(response, "error",

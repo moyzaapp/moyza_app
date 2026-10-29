@@ -5,10 +5,26 @@ detalle de cualquier alerta (pasos "Perfil" y "Propuesta"; desde
 PLAN_PERFIL_OBLIGATORIO.md también las creadas con referencia):
 
 - `profile_is_complete` / `missing_profile_fields`: ÚNICA definición de
-  "perfil completo" (tipo de inmueble + precio máximo + ubicación: provincia,
-  o al menos una población o una zona; PLAN_PERFIL_UBICACION.md, decisión 4).
-  La usan las rutas (bloqueo de etapas, Contactado, Propuesta, asociar
-  propiedad, ficha del comprador), las plantillas y los tests.
+  "perfil completo". La usan las rutas (bloqueo de etapas, Contactado,
+  Propuesta, asociar propiedad, ficha del comprador), las plantillas y los
+  tests. Hay dos reglas según la fecha del perfil (PLAN_PERFIL_ZONAS.md §4-4,
+  "solo perfiles nuevos"; corte `settings.PROFILE_MINIMUMS_SINCE`, 00:00 de
+  Madrid, por defecto 2026-10-29):
+  · Regla nueva: tipo de inmueble + precio máximo + al menos una población
+    concreta + zona (alguna zona o "Todas" marcada a propósito) si alguna
+    población marcada tiene zonas registradas. Se aplica a los perfiles
+    creados en el corte o después, a `criteria` None (perfil por crear) y a
+    los perfiles temporales sin `created_at` con los que las rutas validan lo
+    que llega del formulario: así el formulario exige SIEMPRE los mínimos
+    nuevos al guardar, también al editar un perfil antiguo.
+  · Regla antigua (PLAN_PERFIL_UBICACION.md, decisión 4): tipo + precio
+    máximo + ubicación (provincia, o al menos una población o una zona). Solo
+    para perfiles guardados con `created_at` anterior al corte: no pasan a
+    incompletos ni bloquean etapas hasta que el agente los edita.
+  La zona solo se puede comprobar con el árbol de ubicaciones y sabiendo si
+  se marcó "Todas" (lista guardada vacía = "Todas"), así que solo se valida al
+  guardar el formulario (`geo_tree` + `zones_all`); un perfil ya guardado con
+  poblaciones y sin zonas se lee como "Todas".
 - `profile_required` / `profile_required_for_business_type`: ÚNICA
   definición de "hace falta el perfil" (PLAN_PERFIL_SOLO_VENTA.md): solo en
   Venta y con comprador; en Alquiler el perfil es opcional (si existe, sugiere
@@ -39,7 +55,9 @@ from typing import Iterable, Optional
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.core import business_calendar as bc
 from app.core import geo
+from app.core.config import settings
 from app.core.constants import BusinessType, PropertyStatus
 from app.models.buyer_search_criteria import BuyerSearchCriteria
 from app.models.company import Company
@@ -56,12 +74,41 @@ SUMMARY_MAX_PLACES = 2
 # Perfil completo (PLAN_PERFIL_OBLIGATORIO.md, decisión 4)
 # ---------------------------------------------------------------------------
 
-# Nombres de los mínimos tal como se leen en los mensajes ("Falta: …")
-PROFILE_MINIMUM_LABELS = ("tipo de inmueble", "precio máximo", "ubicación")
+# Nombres de los mínimos tal como se leen en los mensajes ("Falta: …").
+# Regla nueva (PLAN_PERFIL_ZONAS.md): la zona solo se pide si alguna población
+# marcada tiene zonas (ZONE_LABEL, va la última).
+PROFILE_MINIMUM_LABELS = ("tipo de inmueble", "precio máximo", "población")
+ZONE_LABEL = "zona"
+# Regla antigua (perfiles anteriores a `settings.PROFILE_MINIMUMS_SINCE`)
+LEGACY_PROFILE_MINIMUM_LABELS = ("tipo de inmueble", "precio máximo", "ubicación")
+
+
+def minimums_since() -> Optional[datetime]:
+    """Corte de los mínimos nuevos en UTC naive (00:00 de Madrid del día del ajuste), o None.
+
+    Se lee del ajuste en cada llamada (los tests lo cambian con monkeypatch).
+    """
+    since = settings.PROFILE_MINIMUMS_SINCE
+    if since is None:
+        return None
+    return bc.to_utc(datetime(since.year, since.month, since.day))
+
+
+def uses_new_minimums(criteria: Optional[BuyerSearchCriteria]) -> bool:
+    """¿Se le exigen a este perfil los mínimos nuevos? (PLAN_PERFIL_ZONAS.md §4-4)
+
+    Sí si no hay perfil (se va a crear), si es un perfil temporal sin
+    `created_at` (validación del formulario), si no hay corte o si se creó en
+    el corte o después. No, solo para perfiles guardados antes del corte.
+    """
+    if criteria is None or criteria.created_at is None:
+        return True
+    since = minimums_since()
+    return since is None or criteria.created_at >= since
 
 
 def has_location(criteria: Optional[BuyerSearchCriteria]) -> bool:
-    """Mínimo de ubicación (PLAN_PERFIL_UBICACION.md, decisión 4).
+    """Mínimo de ubicación de la regla antigua (PLAN_PERFIL_UBICACION.md, decisión 4).
 
     Provincia elegida (aunque sea con "Todas" las poblaciones), o al menos una
     población, o al menos una zona. El país solo no basta.
@@ -73,24 +120,54 @@ def has_location(criteria: Optional[BuyerSearchCriteria]) -> bool:
     return any(p for p in list(criteria.zones or []) + list(criteria.cities or []))
 
 
-def missing_profile_fields(criteria: Optional[BuyerSearchCriteria]) -> list:
-    """Mínimos del perfil que faltan, en el orden del formulario (vacío = completo).
+def zone_required(criteria: Optional[BuyerSearchCriteria], geo_tree: dict) -> bool:
+    """¿Alguna población marcada del perfil tiene zonas registradas en el árbol?
 
-    Perfil mínimo = tipo de inmueble + precio máximo (mayor que 0) + ubicación
-    (`has_location`: provincia, o al menos una población o una zona).
-    Dormitorios, baños, precio mínimo e imprescindibles son opcionales.
-    Sin perfil, faltan todos.
+    Las zonas de cada población salen del país y la provincia del perfil
+    (`city_zones`, mismo criterio que el JS del formulario).
+    """
+    if criteria is None:
+        return False
+    zones_by_city = city_zones(geo_tree, criteria.country or "", criteria.province or "")
+    return any(zones_by_city.get(city) for city in (criteria.cities or []) if city)
+
+
+def missing_profile_fields(criteria: Optional[BuyerSearchCriteria], geo_tree: Optional[dict] = None,
+                           zones_all: bool = False) -> list:
+    """Mínimos del perfil que faltan, en el orden de los mensajes (vacío = completo).
+
+    Regla según `uses_new_minimums` (ver el docstring del módulo):
+    - Nueva: tipo de inmueble + precio máximo (mayor que 0) + al menos una
+      población concreta + zona si procede. La zona solo se comprueba con
+      `geo_tree` (árbol de `geo_options`; al validar el formulario): falta si
+      alguna población marcada tiene zonas y no hay ninguna zona concreta ni
+      `zones_all` ("Todas" marcada a propósito). Sin `geo_tree` (perfil ya
+      guardado), una lista de zonas vacía se lee como "Todas".
+    - Antigua (perfiles guardados antes del corte): tipo + precio máximo +
+      ubicación (`has_location`).
+    Dormitorios mín., baños, precio mínimo e imprescindibles son opcionales.
+    Sin perfil, faltan todos los de la regla nueva (la zona no: depende de la
+    población).
     """
     if criteria is None:
         return list(PROFILE_MINIMUM_LABELS)
-    property_type_label, max_price_label, location_label = PROFILE_MINIMUM_LABELS
+    new_rule = uses_new_minimums(criteria)
+    labels = PROFILE_MINIMUM_LABELS if new_rule else LEGACY_PROFILE_MINIMUM_LABELS
+    property_type_label, max_price_label, location_label = labels
     missing = []
     if not (criteria.property_type or "").strip():
         missing.append(property_type_label)
     if criteria.max_price is None or criteria.max_price <= 0:
         missing.append(max_price_label)
-    if not has_location(criteria):
+    if not new_rule:
+        if not has_location(criteria):
+            missing.append(location_label)
+        return missing
+    if not any(city for city in (criteria.cities or [])):
         missing.append(location_label)
+    elif (geo_tree is not None and not zones_all and not any(z for z in (criteria.zones or []))
+          and zone_required(criteria, geo_tree)):
+        missing.append(ZONE_LABEL)
     return missing
 
 
@@ -353,17 +430,49 @@ def _add_missing(options: list, saved) -> list:
     return options + [v for v in (saved or []) if v and v not in options]
 
 
+def city_zones(tree: dict, country: str = "", province: str = "") -> dict:
+    """`{población: [zonas]}` del país (vacío = todos) y la provincia (vacía = todas).
+
+    Mismo criterio que `cityZones()` de static/js/search-profile.js; lo usan
+    el estado inicial del formulario (`geo_choices`) y la validación de la
+    zona (`zone_required`). Una población con el mismo nombre en dos
+    provincias junta sus zonas.
+    """
+    scope = [tree.get(country, {})] if country else list(tree.values())
+    result: dict = {}
+    for branch in scope:
+        for name, cities in branch.items():
+            if province and name != province:
+                continue
+            for city, zones in cities.items():
+                result.setdefault(city, [])
+                result[city] += [z for z in zones if z not in result[city]]
+    return result
+
+
+# Título del grupo de zonas guardadas que ya no salen en las propiedades
+SAVED_ZONES_GROUP = "Otras zonas guardadas"
+
+
 def geo_choices(tree: dict, criteria: Optional[BuyerSearchCriteria] = None) -> dict:
     """Estado inicial de la cascada para pintar el formulario (el JS hace lo mismo al cambiar).
 
     - País: el guardado; si no hay, España si existe o el único que haya.
     - Provincias: las del país (sin "Sin provincia"). Provincia vacía = todas
       las poblaciones del país.
-    - Poblaciones: las de la provincia (o del país); `cities_all` si el perfil
-      no tiene ninguna marcada ("Todas").
-    - Zonas: las de las poblaciones marcadas (o de todas las mostradas).
+    - Poblaciones (PLAN_PERFIL_ZONAS.md): las de la provincia (o del país),
+      sin casilla "Todas"; marcadas las del perfil (un perfil antiguo con la
+      lista vacía sale sin ninguna marcada).
+    - Zonas: solo con alguna población marcada (`show_zones`). `zone_groups`:
+      las zonas de cada población marcada que tenga, en el orden de las
+      poblaciones (`[{"city": …, "zones": […]}]`; el formulario pone título a
+      cada grupo cuando hay más de uno). `zones`: todas juntas, sin repetir.
+      `zones_all` ("Todas" marcada) solo al editar un perfil guardado con
+      poblaciones y la lista de zonas vacía (así se guarda "Todas"); un
+      perfil nuevo sale sin marcar: el agente elige zonas o "Todas" a propósito.
     Los valores guardados que ya no existen en las propiedades se añaden al
-    final para que guardar de nuevo no los pierda.
+    final (las zonas, en el grupo `SAVED_ZONES_GROUP`) para que guardar de
+    nuevo no los pierda.
     """
     saved_country = geo.normalize_country(criteria.country) if criteria is not None and criteria.country else None
     province = (criteria.province or "") if criteria is not None else ""
@@ -386,21 +495,20 @@ def geo_choices(tree: dict, criteria: Optional[BuyerSearchCriteria] = None) -> d
         provinces += [p for p in branch if p != geo.NO_PROVINCE and p not in provinces]
     provinces = _add_missing(provinces, [province])
 
-    city_zones: dict = {}
-    for branch in scope:
-        for name, cities in branch.items():
-            if province and name != province:
-                continue
-            for city, zones in cities.items():
-                city_zones.setdefault(city, [])
-                city_zones[city] += [z for z in zones if z not in city_zones[city]]
+    zones_by_city = city_zones(tree, country, province)
 
-    cities = _add_missing(_sorted(city_zones), saved_cities)
-    zone_source = [c for c in saved_cities if c in city_zones] if saved_cities else list(city_zones)
+    cities = _add_missing(_sorted(zones_by_city), saved_cities)
+    zone_groups = [
+        {"city": city, "zones": _sorted(zones_by_city[city])}
+        for city in cities if city in saved_cities and zones_by_city.get(city)
+    ]
     zones = []
-    for city in zone_source:
-        zones += [z for z in city_zones[city] if z not in zones]
-    zones = _add_missing(_sorted(zones), saved_zones)
+    for group in zone_groups:
+        zones += [z for z in group["zones"] if z not in zones]
+    lost = [z for z in _add_missing(zones, saved_zones) if z not in zones]
+    if lost:
+        zone_groups.append({"city": SAVED_ZONES_GROUP, "zones": lost})
+        zones += lost
 
     return {
         "no_province": geo.NO_PROVINCE,
@@ -410,10 +518,11 @@ def geo_choices(tree: dict, criteria: Optional[BuyerSearchCriteria] = None) -> d
         "province": province,
         "cities": cities,
         "selected_cities": saved_cities,
-        "cities_all": not saved_cities,
+        "show_zones": bool(saved_cities),
+        "zone_groups": zone_groups,
         "zones": zones,
         "selected_zones": saved_zones,
-        "zones_all": not saved_zones,
+        "zones_all": criteria is not None and bool(saved_cities) and not saved_zones and bool(zones),
     }
 
 
@@ -458,7 +567,9 @@ def apply_profile(
     Ubicación (PLAN_PERFIL_UBICACION.md): el país se normaliza (variantes de
     España → "España"); la provincia solo se guarda si es una de la tabla de
     `app/core/geo.py` y el país es España (si no hay país, queda España).
-    Poblaciones y zonas vacías = "Todas".
+    Zonas vacías = "Todas" (PLAN_PERFIL_ZONAS.md: con la regla nueva hay que
+    marcar al menos una población; la lista vacía de poblaciones solo queda
+    en perfiles antiguos, donde sigue significando "Todas").
     """
     criteria.agent_id = agent_id or None
     country = (country or "").strip()
@@ -469,8 +580,10 @@ def apply_profile(
     criteria.province = province or None
     if criteria.province and not criteria.country:
         criteria.country = geo.SPAIN
-    criteria.zones = [z for z in zones if z] or None
-    criteria.cities = [c for c in cities if c] or None
+    # Sin repetir: una zona con el mismo nombre en dos poblaciones sale en los
+    # dos grupos del formulario (PLAN_PERFIL_ZONAS.md) y llega dos veces
+    criteria.zones = list(dict.fromkeys(z for z in zones if z)) or None
+    criteria.cities = list(dict.fromkeys(c for c in cities if c)) or None
     criteria.property_type = (property_type or "").strip() or None
     criteria.business_type = (business_type or "").strip() or None
     criteria.min_price = to_decimal(min_price)

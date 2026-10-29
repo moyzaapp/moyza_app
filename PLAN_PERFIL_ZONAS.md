@@ -75,7 +75,7 @@ poblaciones distintas (ver §4-5).
 
 | Fase | Contenido | Commit |
 |---|---|---|
-| A | Zonas por población, zona sin "Todas" por defecto, población y zona obligatorias | `feat(perfil): zonas por población, obligatorias sin marcar todas por defecto` |
+| A | Zonas por población, zona sin "Todas" por defecto, población y zona obligatorias — **IMPLEMENTADO** | `feat(perfil): zonas por población, obligatorias sin marcar todas por defecto` |
 | B | Dormitorios máx. obligatorio | `feat(perfil): dormitorios máximos obligatorios` |
 | C | Filtro de ascensor (migración) | `feat(perfil): filtro de ascensor en el perfil del comprador` |
 
@@ -102,3 +102,44 @@ poblaciones distintas (ver §4-5).
 | Fase | Contenido | Commit |
 |---|---|---|
 | D | Unificar grafía de poblaciones | `fix(propiedades): unificar la grafía de las poblaciones (Jaén)` |
+
+## 5. Notas de implementación (2026-10-29)
+
+Las decisiones de §4 no se han cambiado. Donde el plan dejaba margen:
+
+### Fase A
+
+- **Dos reglas de mínimos** en `buyer_matching.missing_profile_fields` (documentado en el docstring del
+  módulo): `uses_new_minimums(criteria)` es True sin perfil, con un perfil temporal sin `created_at` (las
+  rutas validan lo que llega del formulario sobre un `BuyerSearchCriteria()` nuevo, así el formulario exige
+  siempre los mínimos nuevos, también al editar un perfil antiguo), sin corte o con `created_at` en el corte
+  o después. El corte (`settings.PROFILE_MINIMUMS_SINCE`, por defecto 2026-10-29) es a las 00:00 de Madrid
+  en UTC naive (`minimums_since`, como `buyer_attention_service.attention_since`); vacío o inválido en el
+  `.env` = sin corte (todos con la regla nueva).
+- **Etiquetas**: "ubicación" se desglosa en **"población"** y **"zona"** en la regla nueva
+  (`PROFILE_MINIMUM_LABELS` + `ZONE_LABEL`); la antigua conserva "ubicación"
+  (`LEGACY_PROFILE_MINIMUM_LABELS`). Orden de los mensajes: tipo, precio máximo, población, zona.
+- **Zona obligatoria solo al guardar**: con la lista vacía guardada no se distingue "Todas" de "sin
+  elegir", así que la zona se comprueba solo al validar el formulario, con el árbol de `geo_options` y el
+  campo nuevo `zones_all` (la casilla "Todas" de Zona ahora tiene `name="zones_all" value="1"`). Un perfil
+  ya guardado con poblaciones y sin zonas se lee como "Todas" (completo). Basta una zona de cualquiera de
+  las poblaciones marcadas (no se exige una por población). Las zonas de cada población salen del país y
+  la provincia del perfil (`buyer_matching.city_zones`, mismo criterio que `cityZones()` del JS).
+- **"Todas" en Zona al editar** (`geo_choices["zones_all"]`): marcada solo si el perfil está guardado,
+  tiene poblaciones, la lista de zonas está vacía y las poblaciones tienen zonas. No depende de la fecha de
+  corte: con poblaciones marcadas, la lista vacía solo puede venir de "Todas" (regla nueva) o del "Todas"
+  por defecto de antes (regla antigua), y en los dos casos significa lo mismo. Un perfil antiguo con la
+  lista de poblaciones vacía abre sin ninguna marcada y sin bloque de zonas (§4-1).
+- **Formulario**: Población sin "Todas", con asterisco (`data-profile-mark`) y aviso propio "Marca al
+  menos una población"; Zona es un `<fieldset data-geo-zones>` oculto **y deshabilitado** sin poblaciones
+  marcadas (no envía nada), con un grupo por población que tenga zonas (`role="group"`, título pequeño
+  solo si hay más de un grupo), "Todas" solo visible si hay zonas, asterisco (`data-zone-mark`) solo si
+  hay zonas que elegir, y aviso "Elige al menos una zona o marca Todas". "Todas" ya no se marca sola al
+  desmarcar la última zona. Una zona con el mismo nombre en dos poblaciones sale en los dos grupos: las
+  dos casillas van a la par y `apply_profile` guarda las listas sin repetir. Las zonas guardadas que ya
+  no salen en las propiedades van en un grupo "Otras zonas guardadas" (para no perderlas al guardar).
+- **Textos**: "Datos mínimos: tipo, precio máximo, población y zona (si la población tiene zonas)" en el
+  paso Perfil, el modal de seguimiento y la ficha del comprador.
+- **Tests**: `_complete_profile` y `CONTACT_PROFILE` (tests/test_alert_search.py) llevan ahora población
+  (Jaen) además de la zona, para cumplir las dos reglas sea cual sea el día. Los tests de mínimos fijan el
+  corte con el fixture `cutoff` (tests/test_profile_required.py) y `created_at` explícito.

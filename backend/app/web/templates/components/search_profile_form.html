@@ -7,13 +7,22 @@
   del perfil en toda la app (decisión cerrada 5).
 
   Ubicación en cascada (PLAN_PERFIL_UBICACION.md): País y Provincia como
-  desplegables; Población y Zona como listas de casillas con "Todas", cada
-  nivel filtrado por el anterior. La provincia de una propiedad se deduce de
-  su código postal. El servidor pinta el estado inicial (`location`, de
+  desplegables; Población y Zona como listas de casillas, cada nivel filtrado
+  por el anterior. La provincia de una propiedad se deduce de su código
+  postal. El servidor pinta el estado inicial (`location`, de
   `_property_filter_values` en routes/alerts.py) y /static/js/search-profile.js
   rellena los niveles al cambiar, con el árbol incrustado como JSON
-  (`<script type="application/json" id="geoData-{prefix}">`). "Todas" marca y
-  deshabilita las demás casillas: no se envían y la lista queda vacía (= Todas).
+  (`<script type="application/json" id="geoData-{prefix}">`).
+  Zonas por población (PLAN_PERFIL_ZONAS.md):
+  - Población no tiene "Todas": hay que marcar al menos una concreta.
+  - El bloque Zona (`[data-geo-zones]`, un <fieldset> que va oculto y
+    deshabilitado) solo aparece con alguna población marcada y muestra solo
+    las zonas de las marcadas, en grupos por población (`[data-geo-group]`,
+    con título si hay más de un grupo).
+  - "Todas" las zonas (`name="zones_all"`, `data-geo-all`) NO viene marcada en
+    un perfil nuevo; marcada, deshabilita las demás casillas (no se envían y la
+    lista queda vacía = Todas; `zones_all` le dice al servidor que se marcó a
+    propósito). Solo sale si las poblaciones marcadas tienen zonas.
 
   Uso (dentro de un <form>):
     {% from "components/search_profile_form.html" import search_profile_fields %}
@@ -25,10 +34,12 @@
     precargado con ella y avisa de que cambiarla cambia la de la alerta. Sin
     ella (ficha del comprador), precargado con la del perfil.
   - required: marca los mínimos del perfil (PLAN_PERFIL_OBLIGATORIO.md, decisión 4,
-    con la ubicación de PLAN_PERFIL_UBICACION.md): tipo de inmueble y precio
-    máximo con `required`, y "provincia, o al menos una población o zona" con
-    `data-places-required` (lo valida /static/js/search-profile.js al enviar; el
-    servidor lo valida igualmente con buyer_matching.missing_profile_fields).
+    con los de PLAN_PERFIL_ZONAS.md): tipo de inmueble y precio máximo con
+    `required`, y "al menos una población; si alguna marcada tiene zonas,
+    alguna zona o Todas" con `data-places-required` (lo valida
+    /static/js/search-profile.js al enviar, con los avisos `data-places-error`
+    de población y `data-zones-error` de zona; el servidor lo valida igualmente
+    con buyer_matching.missing_profile_fields).
   - required_operations (PLAN_PERFIL_SOLO_VENTA.md): lista de operaciones con
     perfil obligatorio (`buyer_matching.profile_required_operations()`, la ÚNICA
     fuente; aquí no se compara con "Venta"). Si se pasa, sustituye a `required`:
@@ -48,28 +59,66 @@
 #}
 {% import "components/ui_macros.html" as ui %}
 
-{# Lista de casillas con "Todas" (Población o Zona). Con "Todas" marcada, las demás
-   salen marcadas y deshabilitadas: no se envían y la lista guardada queda vacía (= Todas). #}
-{% macro _geo_list(kind, legend, values, selected, all_checked, prefix, empty_text) -%}
+{# Casilla de una población o zona (mismas clases que crea el JS) #}
+{% macro _geo_box(name, value, checked, disabled) -%}
+<label class="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50">
+    <input type="checkbox" name="{{ name }}" value="{{ value }}" {% if checked %}checked{% endif %} {% if disabled %}disabled{% endif %}
+        class="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900/30">
+    {{ value }}
+</label>
+{%- endmacro %}
+
+{# Poblaciones: casillas sin "Todas" (PLAN_PERFIL_ZONAS.md: al menos una concreta) #}
+{% macro _cities(loc, prefix, validated, required) -%}
 <fieldset>
-    <legend class="block text-sm font-medium text-gray-700 mb-2">{{ legend }}</legend>
-    <div id="{{ prefix }}{{ kind | capitalize }}List" class="flex flex-wrap gap-2 max-h-48 overflow-y-auto" data-geo-list="{{ kind }}">
-        <label class="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-900 cursor-pointer hover:bg-gray-50">
-            <input type="checkbox" data-geo-all {% if all_checked %}checked{% endif %}
-                class="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900/30">
-            Todas
-        </label>
-        {% for value in values %}
-        <label class="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50">
-            <input type="checkbox" name="{{ kind }}" value="{{ value }}"
-                {% if all_checked or value in selected %}checked{% endif %}
-                {% if all_checked %}disabled{% endif %}
-                class="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900/30">
-            {{ value }}
-        </label>
+    <legend class="block text-sm font-medium text-gray-700 mb-2">
+        Población{% if validated %} <span class="text-red-500{% if not required %} hidden{% endif %}" aria-hidden="true" data-profile-mark>*</span>{% endif %}
+    </legend>
+    <div id="{{ prefix }}CitiesList" class="flex flex-wrap gap-2 max-h-48 overflow-y-auto" data-geo-list="cities">
+        {% for value in loc.cities or [] %}
+        {{ _geo_box("cities", value, value in (loc.selected_cities or []), false) }}
         {% endfor %}
     </div>
-    <p class="text-sm text-gray-500 mt-2 {% if values %}hidden{% endif %}" data-geo-empty>{{ empty_text }}</p>
+    <p class="text-sm text-gray-500 mt-2 {% if loc.cities %}hidden{% endif %}" data-geo-empty>No hay poblaciones en esta provincia</p>
+    {% if validated %}
+    <p id="{{ prefix }}PlacesError" class="hidden text-xs text-red-600 mt-2" role="alert">Marca al menos una población</p>
+    {% endif %}
+</fieldset>
+{%- endmacro %}
+
+{# Zonas de las poblaciones marcadas, en grupos por población (título si hay más de
+   uno). Oculto y deshabilitado sin poblaciones marcadas. "Todas" marcada deja las
+   demás marcadas y deshabilitadas: no se envían y la lista guardada queda vacía. #}
+{% macro _zones(loc, prefix, validated) -%}
+{% set groups = loc.zone_groups or [] %}
+{% set all_checked = loc.zones_all %}
+<fieldset data-geo-zones{% if not loc.show_zones %} class="hidden" disabled{% endif %}>
+    <legend class="block text-sm font-medium text-gray-700 mb-2">
+        Zona{% if validated %} <span class="text-red-500 hidden" aria-hidden="true" data-zone-mark>*</span>{% endif %}
+    </legend>
+    <div id="{{ prefix }}ZonesList" class="space-y-3 max-h-64 overflow-y-auto" data-geo-list="zones">
+        <div class="flex flex-wrap gap-2 {% if not groups %}hidden{% endif %}" data-geo-all-wrap>
+            <label class="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-900 cursor-pointer hover:bg-gray-50">
+                <input type="checkbox" name="zones_all" value="1" data-geo-all {% if all_checked %}checked{% endif %}
+                    class="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900/30">
+                Todas
+            </label>
+        </div>
+        {% for group in groups %}
+        <div role="group" aria-label="Zonas de {{ group.city }}" data-geo-group>
+            {% if groups | length > 1 %}<p class="text-xs font-medium text-gray-500 mb-1">{{ group.city }}</p>{% endif %}
+            <div class="flex flex-wrap gap-2">
+                {% for value in group.zones %}
+                {{ _geo_box("zones", value, all_checked or value in (loc.selected_zones or []), all_checked) }}
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    <p class="text-sm text-gray-500 mt-2 {% if groups %}hidden{% endif %}" data-geo-empty>Las poblaciones elegidas no tienen zonas registradas</p>
+    {% if validated %}
+    <p id="{{ prefix }}ZonesError" class="hidden text-xs text-red-600 mt-2" role="alert">Elige al menos una zona o marca Todas</p>
+    {% endif %}
 </fieldset>
 {%- endmacro %}
 
@@ -83,10 +132,10 @@
 {% set province_options = [] %}
 {% for province in loc.provinces or [] %}{% set _ = province_options.append((province, province)) %}{% endfor %}
 <div class="space-y-4" data-geo-cascade data-geo-source="geoData-{{ prefix }}" data-no-province="{{ loc.no_province or 'Sin provincia' }}"
-     {% if validated %}data-places-required data-places-error="{{ prefix }}PlacesError"{% endif %}>
+     {% if validated %}data-places-required data-places-error="{{ prefix }}PlacesError" data-zones-error="{{ prefix }}ZonesError"{% endif %}>
     <script type="application/json" id="geoData-{{ prefix }}">{{ (loc.tree or {}) | tojson }}</script>
     <p id="{{ prefix }}PlacesHelp" class="text-xs text-gray-500">
-        {% if validated %}Ubicación <span class="text-red-500{% if not required %} hidden{% endif %}" aria-hidden="true" data-profile-mark>*</span> · elige la provincia, o al menos una población o zona{% else %}Ubicación · provincia, poblaciones y zonas{% endif %}
+        {% if validated %}Ubicación · marca al menos una población; si tiene zonas, elige las zonas o Todas{% else %}Ubicación · provincia, poblaciones y zonas{% endif %}
     </p>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {# Con un solo país, preseleccionado y fijo (el desplegable deshabilitado no se envía: va oculto) #}
@@ -98,13 +147,8 @@
                      empty="Todas las provincias", attrs='data-geo="province"', id=prefix ~ "Province",
                      help="Según el código postal de las propiedades") }}
     </div>
-    {{ _geo_list("cities", "Población", loc.cities or [], loc.selected_cities or [], loc.cities_all, prefix,
-                 "No hay poblaciones en esta provincia") }}
-    {{ _geo_list("zones", "Zona", loc.zones or [], loc.selected_zones or [], loc.zones_all, prefix,
-                 "Las poblaciones elegidas no tienen zonas registradas") }}
-    {% if validated %}
-    <p id="{{ prefix }}PlacesError" class="hidden text-xs text-red-600" role="alert">Elige la provincia, o al menos una población o zona</p>
-    {% endif %}
+    {{ _cities(loc, prefix, validated, required) }}
+    {{ _zones(loc, prefix, validated) }}
 </div>
 {%- endmacro %}
 

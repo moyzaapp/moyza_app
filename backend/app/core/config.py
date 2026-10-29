@@ -78,6 +78,16 @@ class Settings:
     # Formato YYYY-MM-DD; vacía o inválida = sin corte.
     BUYER_ATTENTION_SINCE: Optional[date] = _parse_date(os.getenv("BUYER_ATTENTION_SINCE", "2026-10-20"))
 
+    # Mínimos nuevos del perfil del comprador (PLAN_PERFIL_ZONAS.md §4-4):
+    # población concreta, zona si la población tiene zonas y dormitorios
+    # máximos. Solo cuentan para los perfiles creados este día o después (00:00
+    # de Madrid); los anteriores siguen con la regla antigua (tipo, precio
+    # máximo y ubicación) y no pasan a incompletos. El formulario exige los
+    # nuevos siempre que se guarda. Se pone en el .env si el despliegue no es
+    # el 2026-10-29. Formato YYYY-MM-DD; vacía o inválida = sin corte (todos
+    # los perfiles con la regla nueva).
+    PROFILE_MINIMUMS_SINCE: Optional[date] = _parse_date(os.getenv("PROFILE_MINIMUMS_SINCE", "2026-10-29"))
+
     # Hora del día (Europe/Madrid) del email diario y los avisos in-app; solo
     # en días hábiles. Antes era 6 en UTC: revisar el .env al desplegar.
     BUYER_REMINDER_HOUR: int = int(os.getenv("BUYER_REMINDER_HOUR", "8"))
