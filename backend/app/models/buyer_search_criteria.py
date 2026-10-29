@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Numeric, SmallInteger, JSON
+from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, ForeignKey, Numeric, SmallInteger, JSON
 from sqlalchemy.orm import relationship
 
 from app.db.base import Base
@@ -47,6 +47,10 @@ class BuyerSearchCriteria(Base):
     min_bedrooms = Column(SmallInteger, nullable=True)
     max_bedrooms = Column(SmallInteger, nullable=True)
     min_bathrooms = Column(SmallInteger, nullable=True)
+
+    # Ascensor (PLAN_PERFIL_ZONAS.md, fase C): NULL = indiferente, True = con
+    # ascensor, False = sin ascensor. Se cruza con `Property.num_ascensores`.
+    elevator = Column(Boolean, nullable=True)
 
     # Superficie
     min_m2 = Column(Numeric, nullable=True)

@@ -46,6 +46,10 @@ PLAN_PERFIL_OBLIGATORIO.md también las creadas con referencia):
 - `apply_profile`: vuelca los campos del formulario del perfil en el
   `BuyerSearchCriteria` (mismo parseo para la ficha y para la alerta). No
   toca `min_m2` / `max_m2`.
+- Ascensor (PLAN_PERFIL_ZONAS.md, fase C): `elevator` NULL = indiferente,
+  True = con ascensor (`num_ascensores >= 1`), False = sin ascensor
+  (`num_ascensores` 0 o vacío). En el formulario es un select opcional
+  (`ElevatorPreference`: "" / "yes" / "no"; `parse_elevator`, `elevator_value`).
 - `criteria_summary`: resumen corto para listados, notas y cabeceras
   ("Piso · Jaén · 2-3 dorm · ≤ 150.000 €").
 """
@@ -58,7 +62,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core import business_calendar as bc
 from app.core import geo
 from app.core.config import settings
-from app.core.constants import BusinessType, PropertyStatus
+from app.core.constants import BusinessType, ElevatorPreference, PropertyStatus
 from app.models.buyer_search_criteria import BuyerSearchCriteria
 from app.models.company import Company
 from app.models.property import Property
@@ -320,6 +324,11 @@ def _matching_filters(query, criteria: BuyerSearchCriteria, company_id: Optional
         query = query.filter(Property.num_dormitorios <= criteria.max_bedrooms)
     if criteria.min_bathrooms is not None:
         query = query.filter(Property.num_banos_aseos >= criteria.min_bathrooms)
+    # Ascensor (PLAN_PERFIL_ZONAS.md, fase C): indiferente (NULL) no filtra
+    if criteria.elevator is True:
+        query = query.filter(Property.num_ascensores >= 1)
+    elif criteria.elevator is False:
+        query = query.filter(or_(Property.num_ascensores.is_(None), Property.num_ascensores == 0))
     return query
 
 
@@ -547,6 +556,23 @@ def to_decimal(value) -> Optional[float]:
         return None
 
 
+# Select "Ascensor" del perfil (PLAN_PERFIL_ZONAS.md, decisiones 2 y 3): opcional,
+# "Indiferente" (valor vacío) por defecto; opciones en `ElevatorPreference.choices()`
+_ELEVATOR_PARSE = {ElevatorPreference.YES: True, ElevatorPreference.NO: False}
+
+
+def parse_elevator(value) -> Optional[bool]:
+    """'yes' -> True, 'no' -> False; vacío o cualquier otro valor -> None (indiferente)."""
+    return _ELEVATOR_PARSE.get(str(value or "").strip().lower())
+
+
+def elevator_value(criteria: Optional[BuyerSearchCriteria]) -> str:
+    """Valor del select para un perfil guardado: 'yes', 'no' o '' (indiferente)."""
+    if criteria is None or criteria.elevator is None:
+        return ElevatorPreference.ANY
+    return ElevatorPreference.YES if criteria.elevator else ElevatorPreference.NO
+
+
 def apply_profile(
     criteria: BuyerSearchCriteria,
     *,
@@ -561,6 +587,7 @@ def apply_profile(
     min_bedrooms=None,
     max_bedrooms=None,
     min_bathrooms=None,
+    elevator=None,
     notes=None,
     agent_id=None,
     now: Optional[datetime] = None,
@@ -570,6 +597,7 @@ def apply_profile(
     Ubicación (PLAN_PERFIL_UBICACION.md): el país se normaliza (variantes de
     España → "España"); la provincia solo se guarda si es una de la tabla de
     `app/core/geo.py` y el país es España (si no hay país, queda España).
+    Ascensor: `parse_elevator` ('yes' / 'no' / vacío = indiferente).
     Zonas vacías = "Todas" (PLAN_PERFIL_ZONAS.md: con la regla nueva hay que
     marcar al menos una población; la lista vacía de poblaciones solo queda
     en perfiles antiguos, donde sigue significando "Todas").
@@ -594,6 +622,7 @@ def apply_profile(
     criteria.min_bedrooms = to_int(min_bedrooms)
     criteria.max_bedrooms = to_int(max_bedrooms)
     criteria.min_bathrooms = to_int(min_bathrooms)
+    criteria.elevator = parse_elevator(elevator)
     criteria.notes = (notes or "").strip() or None
     criteria.updated_at = now or datetime.utcnow()
     return criteria
@@ -670,6 +699,8 @@ def criteria_parts(criteria: Optional[BuyerSearchCriteria]) -> list:
         parts.append(bedrooms)
     if criteria.min_bathrooms is not None:
         parts.append(f"≥ {criteria.min_bathrooms} {'baño' if criteria.min_bathrooms == 1 else 'baños'}")
+    if criteria.elevator is not None:
+        parts.append("con ascensor" if criteria.elevator else "sin ascensor")
     price = _price_range(criteria.min_price, criteria.max_price)
     if price:
         parts.append(price)

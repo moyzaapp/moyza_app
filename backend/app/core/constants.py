@@ -153,6 +153,23 @@ class BusinessType:
         return value in cls.values()
 
 
+class ElevatorPreference:
+    """Ascensor en el perfil del comprador (PLAN_PERFIL_ZONAS.md, fase C).
+
+    Valores del select "Ascensor" (opcional, "Indiferente" por defecto). En la
+    base de datos `buyer_search_criteria.elevator` es NULL / True / False
+    (`buyer_matching.parse_elevator` y `elevator_value` traducen).
+    """
+    ANY = ""
+    YES = "yes"
+    NO = "no"
+
+    @classmethod
+    def choices(cls) -> tuple[tuple[str, str], ...]:
+        # Orden de las opciones del select
+        return ((cls.ANY, "Indiferente"), (cls.YES, "Con ascensor"), (cls.NO, "Sin ascensor"))
+
+
 class PropertyInteractionType:
     INQUIRY = "CONSULTA"
     VISIT = "VISITA"

@@ -269,7 +269,8 @@
 
     // Campos que cuentan como "datos del perfil" (mismo criterio que
     // _profile_values_present en routes/alerts.py: ni país ni operación)
-    var VALUE_NAMES = ['property_type', 'min_price', 'max_price', 'min_bedrooms', 'max_bedrooms', 'min_bathrooms', 'province'];
+    var VALUE_NAMES = ['property_type', 'min_price', 'max_price', 'min_bedrooms', 'max_bedrooms', 'min_bathrooms',
+        'elevator', 'province'];
 
     function requiredOperations(root) {
         var raw = root.getAttribute('data-required-operations');

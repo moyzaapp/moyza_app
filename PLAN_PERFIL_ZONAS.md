@@ -77,7 +77,7 @@ poblaciones distintas (ver §4-5).
 |---|---|---|
 | A | Zonas por población, zona sin "Todas" por defecto, población y zona obligatorias — **IMPLEMENTADO** | `feat(perfil): zonas por población, obligatorias sin marcar todas por defecto` |
 | B | Dormitorios máx. obligatorio — **IMPLEMENTADO** | `feat(perfil): dormitorios máximos obligatorios` |
-| C | Filtro de ascensor (migración) | `feat(perfil): filtro de ascensor en el perfil del comprador` |
+| C | Filtro de ascensor (migración) — **IMPLEMENTADO** | `feat(perfil): filtro de ascensor en el perfil del comprador` |
 
 ## 4. Decisiones (2026-10-28)
 
@@ -159,3 +159,19 @@ Las decisiones de §4 no se han cambiado. Donde el plan dejaba margen:
 - `tests/test_buyer_business_type.py::test_edicion_de_criterios_exige_operacion` (pega a la app levantada)
   se actualiza aquí a los mínimos nuevos: con la fase A ya fallaba tras reiniciar el contenedor (antes de
   reiniciar, la app seguía con el código anterior).
+
+### Fase C
+
+- Migración `e4f5a6b7c8d9_criteria_elevator` (aplicada en local; probado downgrade y upgrade). Columna
+  `buyer_search_criteria.elevator` Boolean nullable; los perfiles existentes quedan en NULL (indiferente).
+- Opciones del select en `app/core/constants.py` (`ElevatorPreference`: "" Indiferente / "yes" Con ascensor /
+  "no" Sin ascensor), global de Jinja `ElevatorPreference` (no se puede importar `buyer_matching` desde
+  `template_env` por el ciclo de imports). `buyer_matching.parse_elevator` / `elevator_value` traducen a
+  NULL / True / False; cualquier otro valor = indiferente.
+- El select va junto a "Baños mín." (misma celda, dos columnas), opcional y sin asterisco. "Con ascensor" o
+  "Sin ascensor" cuentan como dato del perfil (`PROFILE_TEXT_FIELDS` y `VALUE_NAMES` del JS): en un perfil
+  opcional, o al editar uno completo desde «Contactado», enviar solo el ascensor exige los mínimos.
+- Cruce: con ascensor `num_ascensores >= 1`; sin ascensor `num_ascensores` 0 o NULL (una propiedad sin el
+  dato cuenta como "sin ascensor"). Resumen: "con ascensor" / "sin ascensor" detrás de los baños.
+- Nota de despliegue en `MULTIEMPRESA_MOYZA_MOES.md` §21 (migración, `PROFILE_MINIMUMS_SINCE` y script de
+  la fase D).

@@ -200,9 +200,15 @@
                         id=prefix ~ "MaxBedrooms") }}
         </div>
 
-        {{ ui.field("min_bathrooms", "Baños mín.", type="number",
-                    value=(c.min_bathrooms if c and c.min_bathrooms is not none else ""),
-                    placeholder="–", attrs='min="0" max="10" inputmode="numeric"', id=prefix ~ "MinBathrooms") }}
+        <div class="grid grid-cols-2 gap-3">
+            {{ ui.field("min_bathrooms", "Baños mín.", type="number",
+                        value=(c.min_bathrooms if c and c.min_bathrooms is not none else ""),
+                        placeholder="–", attrs='min="0" max="10" inputmode="numeric"', id=prefix ~ "MinBathrooms") }}
+            {# Ascensor (PLAN_PERFIL_ZONAS.md, fase C): opcional, Indiferente por defecto #}
+            {% set elevator = ((ElevatorPreference.YES if c.elevator else ElevatorPreference.NO) if c and c.elevator is not none else ElevatorPreference.ANY) %}
+            {{ ui.select("elevator", "Ascensor", ElevatorPreference.choices(), value=elevator, empty=none,
+                         id=prefix ~ "Elevator") }}
+        </div>
 
         <div class="grid grid-cols-2 gap-3 sm:col-span-2">
             {{ ui.field("min_price", "Precio mín. (€)", type="number",
@@ -216,7 +222,7 @@
     </div>
 
     {{ ui.field(notes_name, "Imprescindibles", type="textarea", value=(c.notes if c and c.notes else ""),
-                placeholder="Ej: planta baja, terraza, ascensor, sin reformar…", id=prefix ~ "Notes") }}
+                placeholder="Ej: planta baja, terraza, sin reformar…", id=prefix ~ "Notes") }}
 
     {% if caller %}{{ caller() }}{% endif %}
 </div>

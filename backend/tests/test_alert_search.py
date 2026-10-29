@@ -190,7 +190,7 @@ def _save_profile(env, user, alert, form=None):
     from app.web.routes.alerts import save_alert_search_profile
     form = dict(PROFILE if form is None else form)
     fields = {k: form.get(k) for k in ("property_type", "min_price", "max_price", "min_bedrooms",
-                                       "max_bedrooms", "min_bathrooms", "notes")}
+                                       "max_bedrooms", "min_bathrooms", "elevator", "notes")}
     request = _request(env, user, f"/alerts/{alert.id}/search-profile", "POST", form=form)
     return asyncio.run(save_alert_search_profile(alert.id, request, db=env.db, **fields))
 

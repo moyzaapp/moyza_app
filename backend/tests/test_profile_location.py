@@ -488,7 +488,7 @@ def test_propuesta_avisa_si_la_propiedad_es_de_otra_operacion(env):
 def _save_buyer_profile(env, user, form):
     from app.web.routes.alerts import save_search_criteria
     fields = {k: form.get(k) for k in ("agent_id", "property_type", "business_type", "min_price", "max_price",
-                                       "min_bedrooms", "max_bedrooms", "min_bathrooms", "notes")}
+                                       "min_bedrooms", "max_bedrooms", "min_bathrooms", "elevator", "notes")}
     request = _request(env, user, f"/buyers/{env.buyer.id}/search-criteria", "POST", form=form)
     return asyncio.run(save_search_criteria(env.buyer.id, request, db=env.db, **fields))
 

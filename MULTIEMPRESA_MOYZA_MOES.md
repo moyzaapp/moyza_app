@@ -721,3 +721,30 @@ cambiado (§13).
 
 Tras desplegar: `alembic upgrade head` (aplica `d3e4f5a6b7c8`); no hace falta
 tocar nada a mano en producción.
+
+## 21. Perfil del comprador: zonas por población, mínimos nuevos y ascensor (2026-10-29)
+
+`PLAN_PERFIL_ZONAS.md` (fases A a D). Afecta a las dos empresas por igual (el
+árbol de poblaciones y zonas sale de las propiedades de ambas, §16).
+
+| Fase | Cambio | Despliegue |
+|---|---|---|
+| A | Población sin "Todas" (al menos una); Zona solo con poblaciones marcadas, agrupada por población, sin "Todas" por defecto y obligatoria si la población tiene zonas | Nada |
+| B | Dormitorios máx. obligatorio | Nada |
+| C | Filtro "Ascensor" (Indiferente / Con ascensor / Sin ascensor) | Migración `e4f5a6b7c8d9_criteria_elevator` (columna `buyer_search_criteria.elevator`, Boolean nullable; NULL = indiferente) |
+| D | Grafía oficial de las poblaciones ("Jaen" → "Jaén") al guardar la propiedad | Script de datos una vez |
+
+Los mínimos nuevos (A y B) solo cuentan para los perfiles creados desde
+`PROFILE_MINIMUMS_SINCE` (00:00 de Madrid; por defecto 2026-10-29): los
+anteriores siguen con la regla antigua y no pasan a incompletos. El formulario
+exige los nuevos siempre que se guarda.
+
+Tras desplegar:
+
+1. `alembic upgrade head` (aplica `e4f5a6b7c8d9`).
+2. Si el despliegue **no** es el 2026-10-29, poner en el `.env`
+   `PROFILE_MINIMUMS_SINCE=AAAA-MM-DD` con el día del despliegue y reiniciar.
+3. Unificar la grafía de las poblaciones ya guardadas (fase D), primero en
+   prueba y después de verdad:
+   `docker exec <backend> python scripts/normalize_city_names.py` y
+   `docker exec <backend> python scripts/normalize_city_names.py --apply`.
