@@ -103,9 +103,13 @@ tabla `companies`. No toca el resto de datos.
 
 ## 4. Datos de MOES PREMIUM
 
-La migración crea MOES PREMIUM con los datos legales de MOYZA de forma
-**provisional** (marcados `TODO` en la migración). En cuanto se tengan los
-reales, se actualizan en base de datos sin tocar código:
+La migración `r1s2t3u4v5w6` creó MOES PREMIUM con los datos legales de MOYZA
+de forma provisional. **Los reales los pone la migración de datos
+`d3e4f5a6b7c8_moes_company_data` (2026-10-28, ver §20)**: razón social
+"MOES 2024 S.L.U.", CIF B70662390, teléfono 722 877 402, logo
+`/static/logo_moes.png` y domicilio fiscal "Avenida de Madrid 37, 23009 Jaén",
+que también pasa a ser el de MOYZA. Cualquier cambio posterior se hace igual,
+con una migración de datos o con un UPDATE como este:
 
 ```sql
 UPDATE companies SET
@@ -479,7 +483,8 @@ docker exec moyza_backend python -m pytest tests/test_business_calendar.py tests
 
 ## 13. Pendientes conocidos
 
-- Datos legales y logo reales de MOES PREMIUM (sección 4).
+- Texto RGPD propio de MOES PREMIUM (hoy es el de MOYZA con el nombre
+  cambiado; los datos legales y el logo ya son los reales, §4 y §20).
 - Eliminar las columnas heredadas `users.company` y `agents.company` cuando ya
   no las lea nada.
 - `/activity-logs` no filtra por empresa a propósito: la actividad de
@@ -695,3 +700,24 @@ NULL). Downgrade limpio (borra las tres columnas).
 
 Tras desplegar: `alembic upgrade head`, recompilar Tailwind (lo hace el build de
 Docker) y reiniciar.
+
+## 20. Datos legales reales de MOES PREMIUM (2026-10-28)
+
+Migración de datos `d3e4f5a6b7c8_moes_company_data` (sin cambios de esquema,
+idempotente, downgrade a los valores de la siembra):
+
+| Empresa | Campo | Valor |
+|---|---|---|
+| MOES | `legal_name` | MOES 2024 S.L.U. |
+| MOES | `tax_id` | B70662390 |
+| MOES | `phone` | 722 877 402 |
+| MOES | `logo_path` | `/static/logo_moes.png` (1254×1254, ya en el repo) |
+| MOES y MOYZA | `fiscal_address` | Avenida de Madrid 37, 23009 Jaén |
+
+Lo usan la ficha de visita (cabecera con logo, texto legal con razón social,
+CIF y domicilio) y la vista previa que se firma. Los PDF ya generados no se
+regeneran. El texto RGPD de MOES sigue siendo el de MOYZA con el nombre
+cambiado (§13).
+
+Tras desplegar: `alembic upgrade head` (aplica `d3e4f5a6b7c8`); no hace falta
+tocar nada a mano en producción.
