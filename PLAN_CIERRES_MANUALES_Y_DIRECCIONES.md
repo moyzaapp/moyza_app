@@ -57,21 +57,22 @@ cualquier agente en:
   con el agente, enlazando a la pestaña Cierres.
 - **Agentes**: no registran ni ven el listado; sí ven su métrica en Inicio como hasta ahora.
 
-### 2.2 Dirección solo de la propia empresa
+### 2.2 Dirección solo de la propia empresa (por ahora, solo en la sección Propiedades)
 
-- Regla: un usuario ve la calle de una propiedad **solo si su empresa está entre las que él
-  puede usar** (`request.state.allowed_companies`: las del usuario y las de su ficha de agente).
-  El admin ve todas. Un agente dado de alta en MOYZA y MOES ve las dos.
-- Si no puede verla, en su lugar sale solo población y zona (sin texto de "reservada").
-- Implementación: función Jinja con contexto `street_of(prop)` en `template_env.py` que aplica la
-  regla (`app/core/address.py::street_for`), y se usa en vez de `prop.address | street` en los
-  sitios de §1.2. En el JSON del buscador y en las filas de solo lectura de la pestaña de la otra
-  empresa la dirección se omite **desde el servidor** (no solo en la plantilla).
-- Buscadores: la búsqueda por texto deja de mirar `address` en las propiedades de la otra
-  empresa (si no, se adivinaría la calle buscándola).
-- Visitas: si un agente acompaña una visita de la otra empresa, la ficha de visita (pantalla y
-  PDF) conserva la dirección completa: es el documento legal de una visita que él hace en persona.
-- PDFs y WhatsApp no cambian (ya son solo de la empresa activa).
+- **Alcance acotado por el usuario**: por el momento se aplica únicamente a la pestaña
+  "Propiedades de {otra empresa}" de la sección Propiedades. Los demás sitios de §1.2
+  (sugerencias, buscador de alertas, detalle de alerta, ficha del comprador, visitas) **no se
+  tocan** en esta tanda.
+- Regla: un usuario ve la calle de una propiedad de la otra empresa **solo si esa empresa está
+  entre las que él puede usar** (`request.state.allowed_companies`: las del usuario y las de su
+  ficha de agente). El admin ve todas. Un agente dado de alta en MOYZA y MOES ve las dos.
+- Si no puede verla, la celda muestra solo población y zona (sin texto de "reservada").
+- Implementación: `_readonly_property_rows(query, search, include_address=True)` en
+  `routes/properties.py`; para la pestaña de la otra empresa se pasa `include_address=False`
+  cuando el usuario no puede verla, y entonces la consulta **no carga `Property.address`** (la fila
+  lleva `address=None`) y la búsqueda por texto **no mira `address`** (si no, se adivinaría la calle
+  buscándola). `table_others.html` pinta la calle solo si viene.
+- "Resto de propiedades" (misma empresa) no cambia.
 
 ## 3. Fases
 
@@ -80,21 +81,22 @@ cualquier agente en:
   `commercial_results.py` (CSV), recálculo de snapshots, tests.
 - **Fase B — Cierres: pantalla.** Pestaña Cierres + modal de alta + borrado, rutas POST, tests
   de ruta.
-- **Fase C — Direcciones.** `street_of`, plantillas, JSON y filas de solo lectura, búsqueda,
-  tests de aislamiento.
+- **Fase C — Direcciones (solo pestaña de la otra empresa).** `_readonly_property_rows` con
+  `include_address`, `table_others.html`, tests de aislamiento.
 
-## 4. Preguntas abiertas (respuestas del usuario)
+## 4. Decisiones (respuestas del usuario, 2026-11-04)
 
-1. Cierres: un registro por cierre (fecha, agente, venta/alquiler, propiedad opcional, nota) — **recomendado** — ¿o basta un número por agente y mes?
-2. ¿Registra solo el admin? — **recomendado sí**.
-3. Cierre con dos agentes (captador y el que trajo al comprador): ¿un registro por cada agente (el admin mete dos) — **recomendado, más simple** — o un solo registro con dos agentes?
-4. Cierre con fecha en un mes ya congelado: ¿se actualiza el snapshot de ese mes y año? — **recomendado sí**.
-5. Direcciones: ¿el admin las ve todas? — **recomendado sí**.
-6. ¿Un agente que está en las dos empresas ve las dos? — **recomendado sí**.
-7. Agente acompañante en una visita de la otra empresa: ¿la ficha de visita mantiene la dirección completa? — **recomendado sí**.
+1. Cierres: **un registro por cierre** (fecha, agente, venta/alquiler, propiedad opcional, nota).
+2. **Solo el admin** registra y borra cierres.
+3. Cierre con dos agentes: **un registro por cada agente** (el admin mete dos).
+4. Cierre con fecha en un mes ya congelado: **sí se actualiza** el snapshot del mes y del año.
+5. Direcciones: el admin las ve todas (sin respuesta explícita; se aplica la recomendación).
+6. Un agente dado de alta en las dos empresas **ve las dos**.
+7. Visitas: la ficha mantiene la dirección completa (**fuera de alcance** en esta tanda: solo se
+   toca la sección Propiedades).
 
 ## 5. Estado
 
-Pendiente de respuestas. Ojo: el árbol de trabajo tiene cambios sin commitear de otra sesión
-(`PLAN_BAJA_USUARIOS.md`, migración `f5a6b7c8d9e0`) y de `PLAN_VISITAS_INDICATIVO_HONORARIOS.md`;
-los agentes solo añaden al commit sus propios archivos por nombre.
+Árbol limpio al empezar (el usuario commiteó la tanda de visitas y la baja de usuarios en
+`37de935`). Migración de cierres tras `f5a6b7c8d9e0`. Ejecución con agentes Opus 5.5 high: un
+agente para A+B (un commit por fase) y otro para C, en paralelo.
