@@ -6,9 +6,12 @@ PLAN_RESULTADOS_COMERCIALES.md. Reglas:
   de sus propiedades, alertas, seguimientos y visitas. Un agente que está
   en las dos empresas tiene resultados, objetivos y snapshots separados.
 - Captaciones, bajadas y cierres se desglosan en venta / alquiler. El tipo
-  sale de la propiedad; en cierres, del tipo de la alerta y, si falta, del
-  de la propiedad. Lo que no es venta ni alquiler cuenta en el total
-  ("otros") pero en ningún tipo.
+  sale de la propiedad; en cierres, del propio registro. Lo que no es venta
+  ni alquiler cuenta en el total ("otros") pero en ningún tipo.
+- Cierres = registros de `closings` que mete el admin a mano
+  (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1), no los seguimientos
+  «Cerrado» de las alertas. Si se registra o borra uno en un período ya
+  congelado, `refresh_closings_snapshot` recalcula sus columnas.
 - Períodos semana, mes y año. El período en curso se calcula en vivo; uno
   pasado se lee de su snapshot congelado si existe.
 - Las métricas con objetivo dependen del período (`PerformanceObjectives`).
@@ -19,22 +22,22 @@ PLAN_RESULTADOS_COMERCIALES.md. Reglas:
 """
 import calendar
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
+from sqlalchemy import Date
 from sqlalchemy import case
 from sqlalchemy import extract
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
 
-from app.core.constants import FollowUpActionType
 from app.core.constants import PerformanceObjectives
 from app.core.constants import PeriodType
 from app.models.agent import Agent
 from app.models.agent_performance_report import AgentPerformanceReport
 from app.models.agent_performance_target import AgentPerformanceTarget
-from app.models.alert_follow_up import AlertFollowUp
+from app.models.closing import Closing
 from app.models.company import Company
 from app.models.property import Property
 from app.models.property_alert import PropertyAlert
@@ -135,18 +138,6 @@ def business_kind(column):
         (column.ilike(SALE), SALE),
         (column.ilike(RENT), RENT),
         else_=OTHER,
-    )
-
-
-def closing_business_type():
-    """Tipo de un cierre: el de la alerta y, si falta (NULL o vacío), el de la propiedad.
-
-    La consulta une la propiedad con OUTER JOIN: una búsqueda sin propiedad y
-    sin tipo cuenta como 'otros'.
-    """
-    return func.coalesce(
-        func.nullif(func.trim(PropertyAlert.business_type), ""),
-        Property.business_type,
     )
 
 
@@ -384,10 +375,11 @@ class PerformanceReportService:
     def _indicator_spec(self, indicator: str):
         """(columna agente, columna fecha, columna tipo, columna empresa, función que monta FROM/JOIN/WHERE).
 
-        Contactos y cierres son métricas **por agente** de la alerta: cuentan
-        también las búsquedas sin propiedad (PLAN_ALERTA_SIN_REFERENCIA.md),
-        así que la empresa es la de la propia alerta. Captaciones y bajadas
-        son de la propiedad.
+        Contactos es métrica **por agente** de la alerta: cuenta también las
+        búsquedas sin propiedad (PLAN_ALERTA_SIN_REFERENCIA.md), así que la
+        empresa es la de la propia alerta. Captaciones y bajadas son de la
+        propiedad. Cierres, de los registros manuales de `closings` (agente,
+        empresa, fecha y tipo propios; la propiedad es opcional).
         """
         if indicator == "contactos":
             def build(query):
@@ -412,16 +404,10 @@ class PerformanceReportService:
 
         if indicator == "cierres":
             def build(query):
-                # OUTER JOIN: la propiedad solo aporta el tipo de respaldo
-                # (closing_business_type); una búsqueda sin propiedad también cuenta
-                return (
-                    query.select_from(AlertFollowUp)
-                    .join(PropertyAlert, PropertyAlert.id == AlertFollowUp.alert_id)
-                    .outerjoin(Property, Property.id == PropertyAlert.property_id)
-                    .filter(AlertFollowUp.action_type == FollowUpActionType.CERRADO)
-                )
-            return (PropertyAlert.agent_id, AlertFollowUp.created_at, closing_business_type(),
-                    PropertyAlert.company_id, build)
+                # `closed_on` es una fecha: frente a los límites del período
+                # (00:00:00 y 23:59:59) entra el día entero
+                return query.select_from(Closing)
+            return Closing.agent_id, Closing.closed_on, Closing.business_type, Closing.company_id, build
 
         raise ValueError(f"Indicador desconocido: {indicator}")
 
@@ -432,6 +418,9 @@ class PerformanceReportService:
         (`grouped_counts`) y el detalle (`indicator_rows`).
         """
         agent_col, date_col, _type_col, company_col, build = spec
+        if isinstance(date_col.type, Date):
+            # Columna de fecha sin hora (cierres): se compara con días, no con instantes
+            period_start, period_end = period_start.date(), period_end.date()
         return build(query).filter(
             company_col == self._require_company(),
             agent_col.in_(list(agent_ids)),
@@ -621,9 +610,9 @@ class PerformanceReportService:
             options = ()
             id_col = PropertyPriceHistory.id
         else:  # cierres
-            entities = (AlertFollowUp, PropertyAlert, Property, kind)
-            options = (joinedload(PropertyAlert.buyer),)
-            id_col = AlertFollowUp.id
+            entities = (Closing, kind)
+            options = (joinedload(Closing.property),)
+            id_col = Closing.id
 
         query = self._scoped_indicator_query(
             spec, self.db.query(*entities).options(*options), [agent_id], period_start, period_end,
@@ -703,16 +692,14 @@ class PerformanceReportService:
                 **self._property_fields(prop),
             }
 
-        follow_up, alert, prop, kind = row
+        closing, kind = row
         return {
-            "id": follow_up.id,
-            "date": follow_up.created_at,
+            "id": closing.id,
+            # Fecha sin hora (date): el panel y el CSV la pintan sin hora
+            "date": closing.closed_on,
             "kind": kind,
-            "alert_id": alert.id,
-            "buyer_name": self._buyer_name(alert),
-            "is_search": prop is None,
-            "notes": follow_up.notes,
-            **self._property_fields(prop),
+            "notes": closing.notes,
+            **self._property_fields(closing.property),
         }
 
     def indicator_rows(
@@ -821,9 +808,9 @@ class PerformanceReportService:
             )
         if indicator == "cierres":
             return (
-                f"{label} = seguimientos «Cerrado» de alertas de comprador de {brand} cuyo agente "
-                f"actual es {name}, registrados {dates}. El tipo es el de la alerta o, si falta, "
-                f"el de la propiedad."
+                f"{label} = cierres (firma o venta de una propiedad) registrados por el "
+                f"administrador en {brand} a nombre de {name}, con fecha de cierre {dates}. "
+                f"El tipo es el que se indicó al registrarlo."
             )
         if indicator == "hojas_visita":
             return (
@@ -1039,6 +1026,36 @@ class PerformanceReportService:
         agents = scope_active_agents(self.db.query(Agent), self.company_id).order_by(Agent.id).all()
         for agent in agents:
             self.freeze_report(agent.id, period_type, period_start, period_end)
+
+    def refresh_closings_snapshot(self, agent_id: int, closed_on: date) -> list:
+        """Recalcula los cierres de los snapshots congelados que contienen `closed_on`.
+
+        Se llama al registrar o borrar un cierre (decisión §4.4 de
+        PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md): si el mes y/o el año de esa
+        fecha ya están congelados para el agente en la empresa del servicio,
+        se actualizan solo `cierres`, `cierres_venta` y `cierres_alquiler`; el
+        resto del snapshot (y `locked_at`) no se toca. La semana no tiene
+        objetivo de cierres y no se recalcula. Devuelve los snapshots tocados.
+        """
+        self._require_company()
+        day = datetime(closed_on.year, closed_on.month, closed_on.day)
+        sale_key, rent_key = BREAKDOWN_KEYS["cierres"]
+        touched = []
+        for period_type in (PeriodType.MONTHLY, PeriodType.YEARLY):
+            start = self.normalize_start(period_type, day)
+            report = self.get_report(agent_id, period_type, start)
+            if report is None or not report.is_locked:
+                continue
+            _, end = self.period_bounds(period_type, start)
+            counts = self.grouped_counts("cierres", start, end, [agent_id]).get((agent_id, None), _empty_counts())
+            report.cierres = counts[SALE] + counts[RENT] + counts[OTHER]
+            setattr(report, sale_key, counts[SALE])
+            setattr(report, rent_key, counts[RENT])
+            report.updated_at = datetime.utcnow()
+            touched.append(report)
+        if touched:
+            self.db.commit()
+        return touched
 
     # ------------------------------------------------------------------
     # Objetivos

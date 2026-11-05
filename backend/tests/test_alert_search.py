@@ -669,7 +669,9 @@ def test_metricas_por_agente_cuentan_busquedas_sin_propiedad(env):
     closings = svc.grouped_counts("cierres", start, end, agents)
     assert contacts[(env.agents["ana"].id, None)]["venta"] == 1   # la búsqueda, sin propiedad
     assert contacts[(env.agents["bea"].id, None)]["venta"] == 1
-    assert closings[(env.agents["ana"].id, None)]["venta"] == 1   # tipo de la alerta (OUTER JOIN)
+    # El seguimiento «Cerrado» ya no es un cierre: los cierres se registran a mano
+    # (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1)
+    assert closings == {}
     # En MOES no cuenta nada de MOYZA
     assert PerformanceReportService(env.db, env.moes.id).grouped_counts("contactos", start, end, agents) == {}
 

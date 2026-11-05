@@ -39,6 +39,7 @@ from app.models.agent import Agent
 from app.models.agent_performance_report import AgentPerformanceReport
 from app.models.agent_performance_target import AgentPerformanceTarget
 from app.models.alert_follow_up import AlertFollowUp
+from app.models.closing import Closing
 from app.models.property import Property
 from app.models.property_alert import PropertyAlert
 from app.models.property_visit import PropertyVisit
@@ -1125,25 +1126,29 @@ class DashboardService:
                 "when": change.created_at, "href": f"/properties/{prop.id}",
             })
 
+        # Cierres registrados a mano (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1).
+        # El evento es el registro (created_at): un cierre metido tarde aparece
+        # al registrarse, con su fecha de firma en el texto.
         closings = (
-            self.db.query(AlertFollowUp, PropertyAlert)
-            .join(PropertyAlert, PropertyAlert.id == AlertFollowUp.alert_id)
-            .options(joinedload(PropertyAlert.agent))
-            .filter(
-                PropertyAlert.company_id == self.company_id,
-                AlertFollowUp.action_type == FollowUpActionType.CERRADO,
-                AlertFollowUp.created_at >= since,
-            )
-            .order_by(AlertFollowUp.created_at.desc())
+            self.db.query(Closing)
+            .options(joinedload(Closing.agent), joinedload(Closing.property))
+            .filter(Closing.company_id == self.company_id, Closing.created_at >= since)
+            .order_by(Closing.created_at.desc())
             .limit(limit)
             .all()
         )
-        for follow_up, alert in closings:
+        for closing in closings:
+            subject = closing.property.title if closing.property and closing.property.title else closing.business_type
+            text_parts = [closing.agent.name if closing.agent else None]
+            if closing.property and closing.property.title:
+                text_parts.append(closing.business_type)
+            text_parts.append(f"firmado el {closing.closed_on.strftime('%d/%m/%Y')}")
             events.append({
                 "kind": "closing", "icon": "check", "tone": "green", "cross": False,
-                "title": f"Cierre · {alert.lead_name or 'Comprador'}",
-                "text": alert.agent.name if alert.agent else "",
-                "when": follow_up.created_at, "href": f"/alerts/{alert.id}",
+                "title": f"Cierre · {subject}",
+                "text": " · ".join(p for p in text_parts if p),
+                "when": closing.created_at,
+                "href": f"/commercial-results?tab=cierres&year={closing.closed_on.year}",
             })
 
         captures = (

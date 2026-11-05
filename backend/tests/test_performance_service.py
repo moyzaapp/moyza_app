@@ -4,7 +4,8 @@ Tests del servicio de rendimiento (PLAN_RESULTADOS_COMERCIALES.md, fase 1).
 - Unitarios (sin base de datos): períodos semana / mes / año, objetivos por
   período, % de cumplimiento, desglose de snapshots y SQL del tipo de negocio.
 - Con base de datos (se omiten si no hay conexión): aislamiento por empresa,
-  desglose venta / alquiler (mayúsculas, NULL, tipo de la alerta en cierres),
+  desglose venta / alquiler (mayúsculas, NULL; cierres manuales en
+  test_closings_metric.py),
   límites de año, snapshots y objetivos por empresa. Todo dentro de una
   transacción externa que se deshace al terminar (los commit del servicio
   solo cierran savepoints).
@@ -24,13 +25,13 @@ from app.models.agent import Agent
 from app.models.agent_performance_report import AgentPerformanceReport
 from app.models.agent_performance_target import AgentPerformanceTarget
 from app.models.alert_follow_up import AlertFollowUp
+from app.models.closing import Closing
 from app.models.property import Property
 from app.models.property_alert import PropertyAlert
 from app.models.property_price_history import PropertyPriceHistory
 from app.models.property_visit import PropertyVisit
 from app.services.performance_report_service import PerformanceReportService
 from app.services.performance_report_service import business_kind
-from app.services.performance_report_service import closing_business_type
 
 
 NOW = datetime(2026, 10, 8, 10, 30)
@@ -192,9 +193,9 @@ class TestBusinessKindSql:
         assert "ILIKE 'alquiler'" in sql
         assert "ELSE 'otros'" in sql
 
-    def test_cierre_usa_alerta_y_cae_a_propiedad(self):
-        sql = _sql(closing_business_type())
-        assert sql.startswith("coalesce(nullif(trim(property_alerts.business_type), ''), properties.business_type")
+    def test_cierre_usa_su_propio_tipo(self):
+        sql = _sql(business_kind(Closing.business_type))
+        assert "closings.business_type ILIKE 'venta'" in sql
 
 
 def test_sin_empresa_no_calcula():
@@ -261,6 +262,12 @@ def _alert(ctx, prop, business_type, created_at, closed_at=None):
     return alert
 
 
+def _closing(ctx, company, business_type, closed_at):
+    ctx.db.add(Closing(company_id=company.id, agent_id=ctx.agent.id, business_type=business_type,
+                       closed_on=closed_at.date(), created_by=ctx.user.id))
+    ctx.db.flush()
+
+
 MARCH = (datetime(2025, 3, 1), datetime(2025, 3, 31, 23, 59, 59))
 
 
@@ -270,6 +277,7 @@ def test_metricas_aisladas_por_empresa(ctx):
     ctx.db.add(PropertyPriceHistory(property_id=pm.id, old_price=100, new_price=90,
                                     created_at=datetime(2025, 3, 12)))
     _alert(ctx, pm, "Venta", datetime(2025, 3, 12), closed_at=datetime(2025, 3, 13))
+    _closing(ctx, ctx.moyza, "Venta", datetime(2025, 3, 13))
     ctx.db.add(PropertyVisit(property_id=pe.id, visitor_name="PYTEST", agent_id=ctx.agent.id,
                              created_at=datetime(2025, 3, 14)))
     ctx.db.flush()
@@ -302,17 +310,20 @@ def test_desglose_venta_alquiler_mayusculas_y_null(ctx):
     ctx.db.add(PropertyPriceHistory(property_id=venta.id, old_price=50, new_price=60,
                                     created_at=datetime(2025, 3, 6)))
     closed = datetime(2025, 3, 20)
-    _alert(ctx, alquiler, None, closed, closed_at=closed)      # NULL -> el de la propiedad: alquiler
-    _alert(ctx, alquiler, "Venta", closed, closed_at=closed)   # el de la alerta manda: venta
-    _alert(ctx, venta, "", closed, closed_at=closed)           # vacío -> propiedad: venta
-    _alert(ctx, sin_tipo, None, closed, closed_at=closed)      # sin tipo en ninguna: otros
-    _alert(ctx, traspaso, "Venta", closed)                     # sin cierre: no cuenta
+    _alert(ctx, alquiler, None, closed, closed_at=closed)      # contacto sin tipo: no cuenta
+    _alert(ctx, alquiler, "Venta", closed, closed_at=closed)   # contacto venta
+    _alert(ctx, venta, "", closed, closed_at=closed)           # vacío: no cuenta
+    _alert(ctx, sin_tipo, None, closed, closed_at=closed)
+    _alert(ctx, traspaso, "Venta", closed)                     # contacto venta
+    # Cierres manuales (los seguimientos «Cerrado» de arriba no cuentan)
+    for business_type in ("Venta", "Venta", "Alquiler"):
+        _closing(ctx, ctx.moyza, business_type, closed)
 
     m = PerformanceReportService(ctx.db, ctx.moyza.id).calculate_metrics(ctx.agent.id, *MARCH)
 
     assert (m["captaciones_crm"], m["captaciones_venta"], m["captaciones_alquiler"]) == (4, 1, 1)
     assert (m["bajadas"], m["bajadas_venta"], m["bajadas_alquiler"]) == (3, 1, 1)
-    assert (m["cierres"], m["cierres_venta"], m["cierres_alquiler"]) == (4, 2, 1)
+    assert (m["cierres"], m["cierres_venta"], m["cierres_alquiler"]) == (3, 2, 1)
     # Contactos: solo cuentan venta y alquiler de la alerta, como antes
     assert (m["contactos_venta"], m["contactos_alquiler"]) == (2, 0)
 

@@ -247,9 +247,14 @@ def _csv_price(value) -> str:
     return "" if value is None else f"{float(value):.0f}"
 
 
-def _csv_property(row) -> str:
+def _csv_day(value) -> str:
+    """Fecha sin hora (cierres): sin conversión de zona horaria."""
+    return value.strftime("%d/%m/%Y") if value else ""
+
+
+def _csv_property(row, empty: str = "Búsqueda general") -> str:
     if row["property_id"] is None:
-        return "Búsqueda general"
+        return empty
     return " · ".join(p for p in (row["property_ref"], row["property_title"]) if p)
 
 
@@ -285,13 +290,15 @@ METRIC_CSV_COLUMNS = {
         ("Motivo", lambda r: r["reason"] or ""),
         ("Enlace", lambda r: f"/properties/{r['property_id']}"),
     ),
+    # Cierres registrados a mano (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1):
+    # fecha sin hora y propiedad opcional
     "cierres": (
-        ("Fecha", lambda r: _csv_date(r["date"])),
-        ("Comprador", lambda r: r["buyer_name"]),
-        ("Propiedad", _csv_property),
-        ("Tipo", lambda r: KIND_LABELS[r["kind"]]),
-        ("Nota del cierre", lambda r: r["notes"] or ""),
-        ("Alerta", lambda r: f"/alerts/{r['alert_id']}"),
+        ("Fecha de cierre", lambda r: _csv_day(r["date"])),
+        ("Operación", lambda r: KIND_LABELS[r["kind"]]),
+        ("Propiedad", lambda r: _csv_property(r, empty="")),
+        ("Ciudad", lambda r: r["property_city"] or ""),
+        ("Nota", lambda r: r["notes"] or ""),
+        ("Enlace", lambda r: f"/properties/{r['property_id']}" if r["property_id"] else ""),
     ),
     "hojas_visita": (
         ("Fecha", lambda r: _csv_date(r["date"])),
