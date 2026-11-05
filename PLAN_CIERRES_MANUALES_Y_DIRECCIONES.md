@@ -102,9 +102,10 @@ pestañas en móvil). Suite: 3 fallos, los mismos del baseline. Comprobado a 375
 
 Decisiones de implementación: `Closing.business_type` es `String` con "Venta"/"Alquiler";
 la actividad del Inicio usa `created_at` (cuándo se registró); el refresco de snapshots solo
-toca mes y año (la semana no tiene objetivo de cierres); el selector de propiedad es un
-`<select>` (cambiar por buscador si el inventario crece); un error de alta devuelve flash y no
-conserva lo escrito. En la pestaña de la otra empresa el texto del buscador deja de mencionar
+toca mes y año (la semana no tiene objetivo de cierres); la propiedad se elige con un buscador
+que filtra en el navegador (título, referencia, calle, población; inventario completo de la
+empresa en JSON dentro de la página, máximo 30 resultados visibles); un error de alta devuelve
+flash y no conserva lo escrito. En la pestaña de la otra empresa el texto del buscador deja de mencionar
 "dirección" cuando la calle no se ve.
 
 Despliegue: `alembic upgrade head` (`a6b7c8d9e0f1`, tabla `closings`); no hay migración de

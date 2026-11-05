@@ -13,6 +13,7 @@ Ejecución dentro del contenedor:
     docker exec moyza_backend python -m pytest tests/test_closings_routes.py -q
 """
 import base64
+import json
 import re
 from datetime import date, datetime, timedelta
 
@@ -127,8 +128,14 @@ def test_pestana_vacia_y_modal(admin, setup):
     # Agentes activos de la empresa activa y propiedades de la empresa (también vendidas)
     assert f'<option value="{setup["agent_id"]}">{TAG} AGENTE</option>' in body
     assert f'value="{setup["moes_agent_id"]}"' not in body
-    assert f'<option value="{setup["prop_id"]}">{TAG} PISO · PYT-CIE-1 (Vendida)</option>' in body
-    assert f'value="{setup["moes_prop_id"]}"' not in body
+    # Las propiedades van como JSON para el buscador del modal, no como <select>
+    assert 'id="closing_property_search"' in body and '<select id="closing_property"' not in body
+    data_json = body.split('id="closingPropertyData">', 1)[1].split("</script>", 1)[0]
+    options = {p["id"]: p for p in json.loads(data_json)}
+    prop = options[setup["prop_id"]]
+    assert (prop["title"], prop["referencia"], prop["status"]) == (f"{TAG} PISO", "PYT-CIE-1", "Vendida")
+    assert {"street", "city"} <= set(prop)
+    assert setup["moes_prop_id"] not in options
 
 
 def test_alta_validaciones(admin, setup):
