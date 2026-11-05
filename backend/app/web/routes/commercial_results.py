@@ -37,6 +37,7 @@ from app.core.constants import AlertStatus
 from app.core.constants import BusinessType
 from app.core.constants import PerformanceObjectives
 from app.core.constants import PeriodType
+from app.core.constants import PropertyStatus
 from app.db.deps import get_db
 from app.models.agent import Agent
 from app.models.closing import Closing
@@ -190,11 +191,21 @@ def closings_context(db: Session, company_id: int, year: int, today: date) -> di
     )
     # Propiedades de la empresa, también vendidas y archivadas: el cierre suele
     # registrarse cuando la propiedad ya no está activa
-    properties = (
-        scope_properties(db.query(Property), company_id)
+    # El modal las filtra en el navegador (título, referencia, calle, población),
+    # así que van al HTML como JSON ligero en vez de un <select> interminable.
+    properties = [
+        {
+            "id": p.id,
+            "title": p.title or f"Propiedad #{p.id}",
+            "referencia": p.referencia or "",
+            "street": p.street or "",
+            "city": p.city or "",
+            "status": p.status if p.status and p.status != PropertyStatus.ACTIVE else "",
+        }
+        for p in scope_properties(db.query(Property), company_id)
         .order_by(Property.title.asc(), Property.id.asc())
         .all()
-    )
+    ]
     return {
         "closings": closings,
         "closings_year": year,
