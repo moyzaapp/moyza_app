@@ -40,7 +40,7 @@ from app.models.property import Property
 from app.models.property_alert import PropertyAlert
 from app.models.property_price_history import PropertyPriceHistory
 from app.models.property_visit import PropertyVisit
-from app.services.company_scope import scope_agents
+from app.services.company_scope import scope_active_agents
 from app.services.company_scope import scope_visits
 from app.services.company_scope import visits_for_agent
 
@@ -925,6 +925,8 @@ class PerformanceReportService:
             agents_data.append({
                 "id": agent.id,
                 "name": agent.name,
+                # Para marcar "(baja)" en el select de la gráfica (PLAN_BAJA_USUARIOS.md §4.4)
+                "is_active": agent.is_active,
                 "totals": totals,
                 "monthly": monthly,
                 "completion": completion,
@@ -1032,7 +1034,9 @@ class PerformanceReportService:
                 )
             return
 
-        agents = scope_agents(self.db.query(Agent), self.company_id).order_by(Agent.id).all()
+        # Snapshots nuevos solo de agentes activos (PLAN_BAJA_USUARIOS.md §4.3);
+        # los ya congelados de un dado de baja se conservan
+        agents = scope_active_agents(self.db.query(Agent), self.company_id).order_by(Agent.id).all()
         for agent in agents:
             self.freeze_report(agent.id, period_type, period_start, period_end)
 

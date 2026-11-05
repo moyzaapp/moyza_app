@@ -46,7 +46,7 @@ Vista Previa del Documento - Visita
             </tr>
             <tr class="border-b">
                 <td class="py-2 font-semibold">Teléfono de contacto:</td>
-                <td class="py-2">{{ '+' + visit.phone if visit.phone else 'No especificado' }}</td>
+                <td class="py-2">{{ visit.phone | phone_display if visit.phone else 'No especificado' }}</td>
             </tr>
             <tr>
                 <td class="py-2 font-semibold">E-mail:</td>

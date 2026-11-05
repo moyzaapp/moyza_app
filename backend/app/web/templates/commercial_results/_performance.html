@@ -96,7 +96,7 @@
           {{ item.agent.name[0] | upper }}
         </div>
         <div class="min-w-0">
-          <p class="font-semibold text-gray-800 truncate">{{ item.agent.name }}</p>
+          <p class="font-semibold text-gray-800 truncate">{{ item.agent.name }}{% if item.agent.is_active is false %} {{ ui.badge("Baja", "gray") }}{% endif %}</p>
           {% if item.agent.email %}<p class="text-xs text-gray-500 truncate">{{ item.agent.email }}</p>{% endif %}
         </div>
       </div>

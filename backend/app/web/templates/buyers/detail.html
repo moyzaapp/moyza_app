@@ -153,7 +153,7 @@
                         <div class="sm:max-w-sm">
                             {% if is_admin %}
                             {% set agent_options = [] %}
-                            {% for agent in agents %}{% set _ = agent_options.append((agent.id, agent.name)) %}{% endfor %}
+                            {% for agent in agents %}{% set _ = agent_options.append((agent.id, agent.name ~ (" (baja)" if agent.is_active is false else ""))) %}{% endfor %}
                             {{ ui.select("agent_id", "Agente responsable", agent_options,
                                          value=(criteria.agent_id if criteria else none), empty="Sin asignar", id="bcAgent") }}
                             {% else %}

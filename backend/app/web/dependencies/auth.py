@@ -41,7 +41,8 @@ def get_current_web_user(
         User.email == email
     ).first()
 
-    if not user:
+    # Dado de baja (NULL cuenta como activo), PLAN_BAJA_USUARIOS.md §4.1
+    if not user or user.is_active is False:
 
         return RedirectResponse(url="/", status_code=302)
 

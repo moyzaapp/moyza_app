@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "components/phone_macros.html" as phone %}
 
 {% block title %}
 Registrar visita
@@ -80,34 +81,9 @@ Registrar visita
 
         </div>
 
-        <div>
-
-            <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
-                Teléfono
-            </label>
-
-            <div class="flex gap-2">
-
-                <select
-                    name="phone_country_code"
-                    class="phone-country-select border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base flex-shrink-0"
-                >
-                {% for code, flag, label in phone_countries %}
-                    <option value="{{ code }}" data-full="{{ label }}" data-short="+{{ code }}" {% if code == default_country_code %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-                </select>
-
-                <input
-                    type="tel"
-                    name="phone_number"
-                    placeholder="Teléfono de contacto"
-                    required
-                    class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
-                >
-
-            </div>
-
-        </div>
+        {# Selector de país con "Otro…" (indicativo escrito a mano), el mismo que compradores;
+           el servidor compone el número con phone_from_form (PLAN_VISITAS_INDICATIVO_HONORARIOS.md §2.1) #}
+        {{ phone.phone_field("phone_", required=True, id="visitPhone") }}
 
         <div>
 
@@ -130,12 +106,13 @@ Registrar visita
                 Honorarios en caso de compra
             </label>
 
-            {# Importe en euros o porcentaje (PLAN_CEDER_COMPRADORES.md §2): el selector pone el signo #}
+            {# Importe en euros o porcentaje (PLAN_CEDER_COMPRADORES.md §2): el selector pone el signo.
+               Coma decimal y punto de miles (PLAN_VISITAS_INDICATIVO_HONORARIOS.md §2.2) #}
             <div class="flex gap-2">
                 <select
                     name="purchase_fees_unit"
                     aria-label="Unidad de los honorarios"
-                    onchange="document.getElementById('purchase_fees').placeholder = this.value === '%' ? 'Ej: 3' : 'Ej: 2500'"
+                    onchange="document.getElementById('purchase_fees').placeholder = this.value === '%' ? 'Ej: 2,5' : 'Ej: 2500'"
                     class="shrink-0 border border-gray-300 bg-white p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base text-gray-700"
                 >
                     <option value="€" selected>€</option>
@@ -147,10 +124,11 @@ Registrar visita
                         id="purchase_fees"
                         name="purchase_fees"
                         inputmode="decimal"
-                        pattern="\d[\d.,]*%?"
-                        title="Escribe solo el número y elige € o % a la izquierda; el IVA se añade automáticamente"
+                        pattern="(\d{1,3}(\.\d{3})+|\d+)(,\d{1,2})?\s*%?"
+                        title="Decimales con coma (2,5); el punto solo para los miles (2.500). El IVA se añade automáticamente"
                         placeholder="Ej: 2500"
                         required
+                        aria-describedby="purchase_fees_hint"
                         class="w-full border border-gray-300 p-2 sm:p-3 pr-16 sm:pr-20 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
                     >
                     <span class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 sm:pr-3 text-gray-500 text-sm sm:text-base">
@@ -158,6 +136,9 @@ Registrar visita
                     </span>
                 </div>
             </div>
+            <p id="purchase_fees_hint" class="mt-1 text-xs text-gray-500">
+                Decimales con coma (2,5); el punto solo para los miles (2.500).
+            </p>
 
         </div>
 
@@ -330,23 +311,6 @@ Registrar visita
 
 </div>
 
-<script>
-document.querySelectorAll('.phone-country-select').forEach(function (select) {
-    function shorten() {
-        var opt = select.options[select.selectedIndex];
-        if (opt) opt.textContent = opt.dataset.short;
-    }
-    function expand() {
-        Array.prototype.forEach.call(select.options, function (opt) {
-            opt.textContent = opt.dataset.full;
-        });
-    }
-    shorten();
-    select.addEventListener('mousedown', expand);
-    select.addEventListener('focus', expand);
-    select.addEventListener('change', shorten);
-    select.addEventListener('blur', shorten);
-});
-</script>
+<script src="{{ static_url('/static/js/phone-field.js') }}"></script>
 
 {% endblock %}

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean
+from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy import ForeignKey
 
@@ -21,7 +21,11 @@ class User(Base):
 
     company = Column(String, nullable=True)
 
+    # NULL cuenta como activo (PLAN_BAJA_USUARIOS.md §3)
     is_active = Column(Boolean, default=True)
+
+    # Fecha de la baja lógica; NULL si está activo
+    deactivated_at = Column(DateTime, nullable=True)
 
     role_id = Column(Integer, ForeignKey("roles.id"))
     

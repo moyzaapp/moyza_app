@@ -61,7 +61,7 @@ from app.services import alert_view
 from app.services import buyer_attention_service
 from app.services.company_scope import add_to_company
 from app.services.company_scope import in_company
-from app.services.company_scope import scope_agents
+from app.services.company_scope import scope_active_agents
 from app.services.notification_service import NotificationKind
 from app.services.notification_service import notify
 from app.services.notification_service import notify_alert_ceded
@@ -169,7 +169,7 @@ def resolve_assignee(
 
     agent = lookup_any_agent(agent_id)
     if agent is None:
-        raise AlertAssignmentError("El agente elegido no existe o no pertenece a ninguna empresa activa")
+        raise AlertAssignmentError("El agente elegido no existe, está dado de baja o no pertenece a ninguna empresa activa")
     return agent
 
 
@@ -202,7 +202,7 @@ def resolve_search_assignee(
         )
     agent = lookup_any_agent(requested)
     if agent is None:
-        raise AlertAssignmentError("El agente elegido no existe o no pertenece a ninguna empresa activa")
+        raise AlertAssignmentError("El agente elegido no existe, está dado de baja o no pertenece a ninguna empresa activa")
     return agent
 
 
@@ -213,7 +213,7 @@ def validate_reassignment(alert, agent, *, is_admin_user: bool) -> None:
     if alert.status not in REASSIGNABLE_STATUSES:
         raise AlertAssignmentError("Solo se pueden reasignar alertas abiertas (pendientes o en proceso)")
     if agent is None:
-        raise AlertAssignmentError("El agente elegido no existe o no pertenece a ninguna empresa activa")
+        raise AlertAssignmentError("El agente elegido no existe, está dado de baja o no pertenece a ninguna empresa activa")
     if agent.id == alert.agent_id:
         raise AlertAssignmentError(f"La alerta ya está asignada a {agent.name}")
 
@@ -286,9 +286,12 @@ def validate_cession(alert, to_agent, *, by_agent, reason, now: Optional[datetim
 
 
 def cession_agents(db: Session, company_id: int, exclude_agent_id: Optional[int] = None) -> list:
-    """Agentes de la empresa a los que se puede ceder (sin el propio cedente), por nombre."""
+    """Agentes activos de la empresa a los que se puede ceder (sin el propio cedente), por nombre.
+
+    Sin los dados de baja (PLAN_BAJA_USUARIOS.md §4.3).
+    """
     query = (
-        scope_agents(db.query(Agent), company_id)
+        scope_active_agents(db.query(Agent), company_id)
         .options(selectinload(Agent.companies))
         .order_by(Agent.name)
     )

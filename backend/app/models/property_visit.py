@@ -12,6 +12,7 @@ from sqlalchemy import ForeignKey
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
 
+from app.core.numbers import format_es_decimal, parse_es_decimal
 from app.db.base import Base
 
 
@@ -249,11 +250,24 @@ class PropertyVisit(Base):
 
         Se guarda así en `purchase_fees`: "2500" son euros (también los valores
         antiguos, que eran solo dígitos) y "2%" un porcentaje
-        (PLAN_CEDER_COMPRADORES.md §2).
+        (PLAN_CEDER_COMPRADORES.md §2). Los valores nuevos se guardan
+        normalizados con `normalize_purchase_fees`.
         """
         if not value:
             return ""
         return re.sub(r"(?i)iva|€|\+|\s", "", value)
+
+    @staticmethod
+    def normalize_purchase_fees(value):
+        """Honorarios limpios en el formato guardado: sin separador de miles y
+        con coma si hay decimales ("2.500,50" -> "2500,5"; "2,50%" -> "2,5%").
+        ValueError si el número no sigue la regla española
+        (PLAN_VISITAS_INDICATIVO_HONORARIOS.md §2.2)."""
+        clean = PropertyVisit.clean_purchase_fees(value)
+        if not clean:
+            return ""
+        amount = format_es_decimal(parse_es_decimal(clean.rstrip("%")), thousands=False)
+        return amount + ("%" if clean.endswith("%") else "")
 
     # builtins.property porque el atributo 'property' (relación) tapa al decorador
     @builtins.property
@@ -262,19 +276,38 @@ class PropertyVisit(Base):
         return "%" if self.clean_purchase_fees(self.purchase_fees).endswith("%") else "€"
 
     @builtins.property
+    def purchase_fees_value(self):
+        """Importe o porcentaje como Decimal, o None si está vacío o es un valor
+        antiguo que no sigue la regla española ("1.2")."""
+        raw = self.clean_purchase_fees(self.purchase_fees).rstrip("%")
+        try:
+            return parse_es_decimal(raw, max_decimals=6) if raw else None
+        except ValueError:
+            return None
+
+    @builtins.property
     def purchase_fees_amount(self):
-        """Honorarios sin signo para el input del formulario ("2500", "2")."""
-        return self.clean_purchase_fees(self.purchase_fees).rstrip("%")
+        """Honorarios sin signo para el input del formulario ("2500", "2,5",
+        "2500,5"; sin puntos de miles para que se edite cómodo). Un valor
+        antiguo no interpretable sale tal cual."""
+        value = self.purchase_fees_value
+        if value is None:
+            return self.clean_purchase_fees(self.purchase_fees).rstrip("%")
+        return format_es_decimal(value, thousands=False)
 
     @builtins.property
     def purchase_fees_display(self):
-        """Honorarios para el informe: '€2500 + IVA' o '2% + IVA'."""
+        """Honorarios para el informe en formato español: '2.500 € + IVA',
+        '2.500,50 € + IVA' o '2,5 % + IVA'. Un valor antiguo no interpretable
+        se muestra tal cual con su signo."""
         amount = self.purchase_fees_amount
         if not amount:
             return None
-        if self.purchase_fees_unit == "%":
-            return f"{amount}% + IVA"
-        return f"€{amount} + IVA"
+        unit = self.purchase_fees_unit
+        value = self.purchase_fees_value
+        if value is not None:
+            amount = format_es_decimal(value, pad=(unit == "€"))
+        return f"{amount} {unit} + IVA"
 
     @builtins.property
     def signing_agent(self):

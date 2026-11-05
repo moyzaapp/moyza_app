@@ -155,7 +155,7 @@
                     <option value="">Todos los agentes</option>
                     {% for agent in agents %}
                     <option value="{{ agent.id }}" {% if selected_agent_id == agent.id %}selected{% endif %}>
-                        {{ agent.name }}
+                        {{ agent.name }}{% if agent.is_active is false %} (baja){% endif %}
                     </option>
                     {% endfor %}
                 </select>

@@ -28,12 +28,13 @@ from app.core.business_calendar import fmt_madrid
 from app.core.config import settings
 from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, get_agent_from_user
-from app.core.constants import PhoneCountryCodes
+from app.core.numbers import parse_es_decimal
+from app.core.phone import PhoneValidationError, canonical_phone, phone_from_form, split_phone
 from app.services.visit_whatsapp_log_service import log_whatsapp_attempt
 from app.services.notification_service import notify_visit_created
 from app.services.notification_service import notify_visit_sheet_failed
 from app.services.company_scope import (
-    scope_agents,
+    scope_active_agents,
     scope_visits,
     scope_properties,
     visit_agent_clause,
@@ -54,16 +55,19 @@ logger = logging.getLogger(__name__)
 UNSIGNED_VISIT_STATUSES = ("draft", "preview")
 
 # Honorarios: importe o porcentaje, dígitos con separadores opcionales y '%'
-# final si es porcentaje (2500, 2.500, 2500,50, 2%, 2,5%)
+# final si es porcentaje (2500, 2.500, 2500,50, 2%, 2,5%). La regla de los
+# separadores (coma decimal, punto de miles) la comprueba `purchase_fees_error`
 PURCHASE_FEES_PATTERN = re.compile(r"\d[\d.,]*%?")
 
 
 def purchase_fees_from_form(form) -> str:
-    """Honorarios del formulario tal como se guardan: "2500" (euros) o "2%".
+    """Honorarios del formulario limpios, con el signo: "2500" (euros) o "2,5%".
 
     El selector `purchase_fees_unit` ('€' por defecto o '%') pone el signo; si
     el agente escribe el '%' en el propio campo también vale
-    (PLAN_CEDER_COMPRADORES.md §2).
+    (PLAN_CEDER_COMPRADORES.md §2). Antes de guardar se validan con
+    `purchase_fees_error` y se normalizan con
+    `PropertyVisit.normalize_purchase_fees`.
     """
     value = PropertyVisit.clean_purchase_fees(form.get("purchase_fees"))
     if value and form.get("purchase_fees_unit") == "%" and not value.endswith("%"):
@@ -72,23 +76,44 @@ def purchase_fees_from_form(form) -> str:
 
 
 def purchase_fees_error(value: str):
-    """Mensaje de error de unos honorarios ya limpios, o None si son válidos."""
+    """Mensaje de error de unos honorarios ya limpios, o None si son válidos.
+
+    Regla española (PLAN_VISITAS_INDICATIVO_HONORARIOS.md §2.2): coma para los
+    decimales, punto solo para los miles; "1.2" se rechaza por ambiguo.
+    """
     if not PURCHASE_FEES_PATTERN.fullmatch(value):
-        return "Los honorarios deben ser solo el importe o el porcentaje (ej: 2500 o 2)"
-    if value.endswith("%"):
-        try:
-            percent = float(value[:-1].replace(",", "."))
-        except ValueError:
-            percent = None
-        if percent is None or not 0 <= percent <= 100:
-            return "El porcentaje de honorarios debe estar entre 0 y 100"
+        return "Los honorarios deben ser solo el importe o el porcentaje (ej: 2500 o 2,5)"
+    try:
+        number = parse_es_decimal(value.rstrip("%"))
+    except ValueError as error:
+        return f"Revisa los honorarios: {error}"
+    if value.endswith("%") and not 0 <= number <= 100:
+        return "El porcentaje de honorarios debe estar entre 0 y 100"
     return None
+
+
+def visit_phone_from_form(form) -> str | None:
+    """Teléfono del visitante compuesto con el selector de país del macro
+    `phone_field` (incluida la opción "Otro…" con el indicativo escrito en
+    `phone_country_code_other`), en el formato guardado de compradores
+    ("34600112233"; "+41791234567" si el indicativo no está en el selector).
+    None si el número va vacío. Lanza PhoneValidationError si la parte local
+    no tiene entre 6 y 12 dígitos o el indicativo escrito no existe
+    (PLAN_VISITAS_INDICATIVO_HONORARIOS.md §2.1).
+    """
+    return phone_from_form(
+        form.get("phone_country_code"),
+        form.get("phone_number"),
+        other_code=form.get("phone_country_code_other"),
+    )
 
 
 def _visit_agents_context(request: Request, db: Session, property_item, visit=None) -> dict:
     """Datos de la sección "Agentes de la visita" (alta y edición).
 
-    - `agents`: agentes de la empresa activa (select del principal, admin).
+    - `agents`: agentes activos de la empresa activa (select del principal,
+      admin) más el de la visita si está dado de baja, para no perderlo al
+      editar (opción "(baja)", PLAN_BAJA_USUARIOS.md §4.3).
     - `companion_agents`: agentes de todas las empresas activas agrupados
       por empresa (select del acompañante); ver `companion_agent_groups`.
     - `principal_agent`: el que figura como "Realizada por" para un usuario
@@ -101,10 +126,23 @@ def _visit_agents_context(request: Request, db: Session, property_item, visit=No
 
     company_id = get_active_company(request).id
     agents = (
-        scope_agents(db.query(Agent), company_id)
+        scope_active_agents(db.query(Agent), company_id)
         .order_by(Agent.name)
         .all()
     )
+
+    if visit is not None and visit.agent is not None and visit.agent.is_active is False:
+        agents = sorted([*agents, visit.agent], key=lambda a: a.name or "")
+
+    # Lo mismo con el acompañante ya fijado: si está de baja se ofrece en un
+    # grupo propio para que la edición no obligue a cambiarlo.
+    companion_agents = companion_agent_groups(db, company_id)
+    if (
+        visit is not None
+        and visit.companion_agent is not None
+        and visit.companion_agent.is_active is False
+    ):
+        companion_agents.append({"label": "Dado de baja", "agents": [visit.companion_agent]})
 
     if visit is not None:
         principal_agent = visit.agent or current_agent
@@ -117,7 +155,7 @@ def _visit_agents_context(request: Request, db: Session, property_item, visit=No
 
     return {
         "agents": agents,
-        "companion_agents": companion_agent_groups(db, company_id),
+        "companion_agents": companion_agents,
         "current_agent": current_agent,
         "is_admin": bool(is_admin(current_user)),
         "principal_agent": principal_agent,
@@ -260,8 +298,6 @@ async def new_visit(
             "request": request,
             "property": property_item,
             "current_user": request.state.user,
-            "phone_countries": PhoneCountryCodes.choices(),
-            "default_country_code": PhoneCountryCodes.DEFAULT,
             "is_foreign_property": is_foreign_property,
             **agents_context
         }
@@ -295,9 +331,12 @@ async def create_visit(
 
     generate_sheet = form.get("generate_sheet") == "true"
 
-    phone_country_code = (form.get("phone_country_code") or PhoneCountryCodes.DEFAULT).strip()
-    phone_number_digits = "".join(ch for ch in (form.get("phone_number") or "") if ch.isdigit())
-    phone = f"{phone_country_code}{phone_number_digits}" if phone_number_digits else ""
+    try:
+        phone = visit_phone_from_form(form)
+    except PhoneValidationError as error:
+        response = RedirectResponse(url=f"/visits/new/{property_id}", status_code=302)
+        set_flash(response, "error", str(error))
+        return response
 
     visitor_name = (form.get("visitor_name") or "").strip()
     purchase_fees = purchase_fees_from_form(form)
@@ -313,6 +352,7 @@ async def create_visit(
         response = RedirectResponse(url=f"/visits/new/{property_id}", status_code=302)
         set_flash(response, "error", fees_error)
         return response
+    purchase_fees = PropertyVisit.normalize_purchase_fees(purchase_fees)
 
     try:
         agent_id, companion_agent_id = parse_visit_agents(form, request, db, property_item)
@@ -483,7 +523,8 @@ async def send_visit_sheet_whatsapp(
         started_at = perf_counter()
         try:
             send_report(
-                phone=visit.phone,
+                # La API quiere solo dígitos; los guardados con "Otro…" llevan "+"
+                phone=canonical_phone(visit.phone) or visit.phone,
                 file_url=file_url,
                 caption=f"Ficha de visita - {property_item.title}"
             )
@@ -877,7 +918,8 @@ async def edit_visit(
         set_flash(response, "error", "Visita no encontrada")
         return response
 
-    phone_country_code, phone_local_number = PhoneCountryCodes.split(visit.phone)
+    # Con "+41…" guardado el selector sale en "Otro…" con el 41 escrito
+    phone_country_code, phone_local_number = split_phone(visit.phone)
 
     return templates.TemplateResponse(
         request=request,
@@ -886,7 +928,6 @@ async def edit_visit(
             "request": request,
             "visit": visit,
             "current_user": request.state.user,
-            "phone_countries": PhoneCountryCodes.choices(),
             "phone_country_code": phone_country_code,
             "phone_local_number": phone_local_number,
             "agents_locked": visit_agents_locked(visit),
@@ -921,9 +962,12 @@ async def update_visit(
     # Guardar si tenía PDF antes de actualizar
     had_pdf = visit.visit_sheet_filepath is not None
 
-    phone_country_code = (form.get("phone_country_code") or PhoneCountryCodes.DEFAULT).strip()
-    phone_number_digits = "".join(ch for ch in (form.get("phone_number") or "") if ch.isdigit())
-    phone = f"{phone_country_code}{phone_number_digits}" if phone_number_digits else ""
+    try:
+        phone = visit_phone_from_form(form)
+    except PhoneValidationError as error:
+        response = RedirectResponse(url=f"/visits/edit/{visit_id}", status_code=302)
+        set_flash(response, "error", str(error))
+        return response
 
     visitor_name = (form.get("visitor_name") or "").strip()
     purchase_fees = purchase_fees_from_form(form)
@@ -939,6 +983,7 @@ async def update_visit(
         response = RedirectResponse(url=f"/visits/edit/{visit_id}", status_code=302)
         set_flash(response, "error", fees_error)
         return response
+    purchase_fees = PropertyVisit.normalize_purchase_fees(purchase_fees)
 
     # Agentes: fijos si la visita ya está firmada/completada (decisión 9)
     try:

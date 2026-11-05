@@ -1,6 +1,7 @@
 from typing import Optional
 
 from fastapi import BackgroundTasks, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.user import User
@@ -10,6 +11,11 @@ from app.schemas.user import UserCreate, UserUpdate
 from app.core.password import hash_password
 from app.services.user_email_service import send_welcome_email
 from app.services.company_service import resolve_companies, companies_label
+from app.services import offboarding_service
+
+# Mensajes de la baja lógica (PLAN_BAJA_USUARIOS.md §5)
+INACTIVE_EMAIL_MESSAGE = "Ese usuario está dado de baja. Reactívalo desde la lista de usuarios."
+HAS_HISTORY_MESSAGE = "Tiene historial: dale de baja en lugar de eliminarlo."
 
 
 def _apply_companies(db: Session, user: User, agent: Optional[Agent], company_ids: list[int]):
@@ -41,6 +47,14 @@ def create_user(
     .filter(User.email == user.email)
     .first()
     )
+
+    # Un inactivo no se duplica: se reactiva (PLAN_BAJA_USUARIOS.md §2-5)
+    if existing_user and existing_user.is_active is False:
+
+        raise HTTPException(
+            status_code=400,
+            detail=INACTIVE_EMAIL_MESSAGE
+        )
 
     if existing_user:
 
@@ -208,7 +222,10 @@ def get_users(db: Session):
 
 
 def delete_user(db: Session, user_id: int):
-    """Eliminar un usuario por ID"""
+    """Elimina un usuario por ID, solo si no tiene historial (PLAN_BAJA_USUARIOS.md §2-6).
+
+    Con historial se da de baja (`offboarding_service.deactivate`).
+    """
 
     user = db.query(User).filter(User.id == user_id).first()
 
@@ -218,6 +235,12 @@ def delete_user(db: Session, user_id: int):
             detail="Usuario no encontrado"
         )
 
+    if offboarding_service.has_history(db, user=user):
+        raise HTTPException(
+            status_code=400,
+            detail=HAS_HISTORY_MESSAGE
+        )
+
     # Si el usuario tiene rol de agente, también eliminar el agente
     if user.role and user.role.name.lower() in ['agente', 'agent']:
         agent = db.query(Agent).filter(Agent.email == user.email).first()
@@ -225,6 +248,15 @@ def delete_user(db: Session, user_id: int):
             db.delete(agent)
 
     db.delete(user)
-    db.commit()
+
+    # Red de seguridad: una FK no contemplada en `has_history`
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=HAS_HISTORY_MESSAGE
+        )
 
     return {"message": "Usuario eliminado correctamente"}

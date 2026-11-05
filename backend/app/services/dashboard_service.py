@@ -50,7 +50,7 @@ from app.core.business_calendar import format_business_duration
 from app.services.buyer_attention_service import RULE_CALLBACK
 from app.services.buyer_attention_service import RULE_NO_ACTION
 from app.services.buyer_reminder_service import get_pending_buyers_by_agent
-from app.services.company_scope import scope_agents
+from app.services.company_scope import scope_active_agents
 from app.services.performance_report_service import BREAKDOWN_KEYS
 from app.services.performance_report_service import MONTH_ABBR
 from app.services.performance_report_service import Period
@@ -225,7 +225,8 @@ class DashboardService:
     # ------------------------------------------------------------------
 
     def company_agents(self) -> list:
-        return scope_agents(self.db.query(Agent), self.company_id).order_by(Agent.name.asc()).all()
+        # Equipo del Inicio: sin los dados de baja (PLAN_BAJA_USUARIOS.md §4.3)
+        return scope_active_agents(self.db.query(Agent), self.company_id).order_by(Agent.name.asc()).all()
 
     def _visit_counts(self, agent_ids, start: datetime, end: datetime) -> dict:
         """Hojas de visita por agente participante (principal + acompañante)."""

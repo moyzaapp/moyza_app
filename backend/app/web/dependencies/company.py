@@ -88,10 +88,11 @@ def get_api_user(request: Request, db: Session) -> User | None:
     if not email:
         return None
 
+    # Dado de baja = no autenticado (NULL cuenta como activo), PLAN_BAJA_USUARIOS.md §4.1
     return (
         db.query(User)
         .options(joinedload(User.role), joinedload(User.companies))
-        .filter(User.email == email)
+        .filter(User.email == email, User.is_active.isnot(False))
         .first()
     )
 

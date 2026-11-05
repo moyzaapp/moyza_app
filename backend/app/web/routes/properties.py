@@ -39,6 +39,7 @@ from pathlib import Path
 from app.services.company_scope import (
     scope_properties,
     scope_agents,
+    scope_active_agents,
     scope_clients,
     get_property_in_company,
     get_agent_in_company,
@@ -253,7 +254,21 @@ async def properties_page(
     # Selectores del formulario: solo clientes y agentes de la empresa activa
     clients = scope_clients(db.query(Client), company.id).order_by(Client.name).all()
 
-    agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name).all()
+    # Captador: solo agentes activos (PLAN_BAJA_USUARIOS.md §4.3). Los dados de
+    # baja que aún figuran como captador de alguna propiedad del listado se
+    # añaden para que editar no les quite la propiedad: el formulario los
+    # pinta con "(baja)" y solo los muestra al editar esa propiedad.
+    agents = scope_active_agents(db.query(Agent), company.id).order_by(Agent.name).all()
+    inactive_owners = (
+        scope_agents(db.query(Agent), company.id)
+        .filter(
+            Agent.is_active.is_(False),
+            Agent.id.in_(base_query.with_entities(Property.agent_id)),
+        )
+        .all()
+    )
+    if inactive_owners:
+        agents = sorted([*agents, *inactive_owners], key=lambda a: a.name or "")
 
     # Una propiedad No disponible no cuenta como Activa aunque su status sea Activa.
     is_not_available = Property.not_available_clause()
@@ -412,9 +427,18 @@ async def create_property(
         set_flash(response, "error", f"El cliente seleccionado no pertenece a {company.name}")
         return response
 
-    if not get_agent_in_company(db, agent_id, company.id):
+    agent_item = get_agent_in_company(db, agent_id, company.id)
+
+    if not agent_item:
         response = RedirectResponse(url="/properties", status_code=302)
         set_flash(response, "error", f"El agente seleccionado no pertenece a {company.name}")
+        return response
+
+    # Un agente dado de baja no recibe captaciones nuevas (PLAN_BAJA_USUARIOS.md §4.3);
+    # el select ya lo oculta, esto cubre peticiones manipuladas.
+    if agent_item.is_active is False:
+        response = RedirectResponse(url="/properties", status_code=302)
+        set_flash(response, "error", f"{agent_item.name} está dado de baja y no puede ser el captador")
         return response
 
     try:
@@ -499,9 +523,18 @@ async def update_property(
         set_flash(response, "error", f"El cliente seleccionado no pertenece a {company.name}")
         return response
 
-    if not get_agent_in_company(db, agent_id, company.id):
+    agent_item = get_agent_in_company(db, agent_id, company.id)
+
+    if not agent_item:
         response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
         set_flash(response, "error", f"El agente seleccionado no pertenece a {company.name}")
+        return response
+
+    # Un agente dado de baja solo puede seguir como captador de lo que ya tenía
+    # (PLAN_BAJA_USUARIOS.md §4.3); no se le pueden pasar propiedades nuevas.
+    if agent_item.is_active is False and agent_id != property.agent_id:
+        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        set_flash(response, "error", f"{agent_item.name} está dado de baja y no puede ser el captador")
         return response
 
     try:

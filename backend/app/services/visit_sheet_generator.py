@@ -21,6 +21,7 @@ from reportlab.lib.units import cm
 from xml.sax.saxutils import escape
 
 from app.core.business_calendar import fmt_madrid
+from app.core.phone import phone_display
 from app.services.company_service import branding_for
 
 
@@ -278,7 +279,7 @@ def generate_visit_sheet(
     buyer_data = [
         ["Nombre:", _safe_text(visit.visitor_name)],
         ["DNI:", _safe_text(visit.dni)],
-        ["Teléfono de contacto:", _safe_text(f"+{visit.phone}" if visit.phone else None)],
+        ["Teléfono de contacto:", _safe_text(phone_display(visit.phone) if visit.phone else None)],
         ["E-mail:", _safe_text(visit.email)],
     ]
 

@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from fastapi.responses import HTMLResponse
+from fastapi.responses import JSONResponse
 from fastapi.responses import RedirectResponse
 
 from app.web.template_env import templates
@@ -19,6 +20,7 @@ from app.models.user import User
 from app.models.role import Role
 from app.models.permission import Permission
 
+from app.services.auth_service import INACTIVE
 from app.services.auth_service import authenticate_user
 from app.core.security import create_access_token
 from app.services.user_service import (
@@ -28,6 +30,8 @@ from app.services.user_service import (
     change_user_password
 )
 from app.services.user_email_service import send_password_changed_email
+from app.services import offboarding_service
+from app.services.offboarding_service import OffboardingError
 from app.schemas.user import UserCreate, UserUpdate
 from app.web.utils.flash import set_flash
 
@@ -78,6 +82,8 @@ async def auth_page(
             "roles": roles,
             "permissions": permissions,
             "current_user": current_user,
+            # Eliminar solo sin historial (PLAN_BAJA_USUARIOS.md §7.1)
+            "history_by_user_id": offboarding_service.history_by_user_id(db, users),
             # Empresas asignables en los formularios de usuario
             "all_companies": list_active_companies(db),
         }
@@ -116,6 +122,17 @@ async def login(
         username,
         password
     )
+
+    if user is INACTIVE:
+
+        return templates.TemplateResponse(
+            request=request,
+            name="auth/login.html",
+            context={
+                "request": request,
+                "error": "Tu usuario está dado de baja. Contacta con un administrador."
+            }
+        )
 
     if not user:
 
@@ -343,5 +360,124 @@ async def delete_user_endpoint(
 
     except HTTPException as e:
         set_flash(response, "error", e.detail)
+
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Baja lógica (PLAN_BAJA_USUARIOS.md §6)
+# ---------------------------------------------------------------------------
+
+def reassign_to_from_form(form) -> dict:
+    """{company_id: agent_id} de los campos `reassign_to_<company_id>` del modal de baja."""
+    prefix = "reassign_to_"
+    result = {}
+    for key, value in form.items():
+        if not key.startswith(prefix):
+            continue
+        try:
+            company_id = int(key[len(prefix):])
+        except ValueError:
+            continue
+        result[company_id] = value
+    return result
+
+
+def json_admin_denied(request: Request):
+    """403 JSON si quien pide no es admin; None si puede seguir."""
+    from app.web.dependencies.auth import is_admin
+
+    if not is_admin(getattr(request.state, "user", None)):
+        return JSONResponse(status_code=403, content={"detail": "Solo un administrador puede dar de baja"})
+    return None
+
+
+@router.get("/auth/users/{user_id}/offboarding")
+async def user_offboarding_summary(
+    request: Request,
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """JSON del modal de baja (§6.1)."""
+    denied = json_admin_denied(request)
+    if denied:
+        return denied
+
+    user = db.get(User, user_id)
+    if user is None:
+        return JSONResponse(status_code=404, content={"detail": "Usuario no encontrado"})
+
+    summary = offboarding_service.summary_for_user(db, user)
+    return JSONResponse(content=offboarding_service.summary_to_dict(summary))
+
+
+@router.post("/auth/users/{user_id}/deactivate")
+async def deactivate_user_endpoint(
+    request: Request,
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """Da de baja al usuario y a su ficha, reasignando sus alertas abiertas (§5)."""
+    from app.web.dependencies.auth import require_admin_role
+
+    admin_user = require_admin_role(request, db)
+    if isinstance(admin_user, RedirectResponse):
+        return admin_user
+
+    response = RedirectResponse(url="/auth", status_code=303)
+
+    user = db.get(User, user_id)
+    if user is None:
+        set_flash(response, "error", "Usuario no encontrado")
+        return response
+
+    form = await request.form()
+
+    try:
+        summary = offboarding_service.deactivate(
+            db,
+            user=user,
+            by_user=admin_user,
+            reassign_to=reassign_to_from_form(form),
+            reason=form.get("reason"),
+        )
+        set_flash(response, "success", offboarding_service.deactivation_message(summary))
+
+    except OffboardingError as e:
+        set_flash(response, "error", str(e))
+
+    return response
+
+
+@router.post("/auth/users/{user_id}/reactivate")
+async def reactivate_user_endpoint(
+    request: Request,
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    """Reactiva al usuario y su ficha (§2-5)."""
+    from app.web.dependencies.auth import require_admin_role
+
+    admin_user = require_admin_role(request, db)
+    if isinstance(admin_user, RedirectResponse):
+        return admin_user
+
+    response = RedirectResponse(url="/auth", status_code=303)
+
+    user = db.get(User, user_id)
+    if user is None:
+        set_flash(response, "error", "Usuario no encontrado")
+        return response
+
+    try:
+        offboarding_service.reactivate(db, user=user)
+        set_flash(
+            response,
+            "success",
+            f"{user.full_name} reactivado. Lo que se reasignó en la baja no vuelve solo."
+        )
+
+    except OffboardingError as e:
+        set_flash(response, "error", str(e))
 
     return response

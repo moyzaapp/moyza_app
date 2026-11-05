@@ -46,7 +46,7 @@
             >
                 <option value="">Selecciona un agente</option>
                 {% for agent in agents %}
-                <option value="{{ agent.id }}" {% if agent.id == selected_agent_id %}selected{% endif %}>{{ agent.name }}</option>
+                <option value="{{ agent.id }}" {% if agent.id == selected_agent_id %}selected{% endif %}>{{ agent.name }}{% if agent.is_active is false %} (baja){% endif %}</option>
                 {% endfor %}
             </select>
 
@@ -119,7 +119,7 @@
                 {% if group_agents %}
                 <optgroup label="{{ group.label }}">
                     {% for agent in group_agents %}
-                    <option value="{{ agent.id }}" {% if agent.id == selected_companion_agent_id %}selected{% endif %}>{{ agent.name }}</option>
+                    <option value="{{ agent.id }}" {% if agent.id == selected_companion_agent_id %}selected{% endif %}>{{ agent.name }}{% if agent.is_active is false %} (baja){% endif %}</option>
                     {% endfor %}
                 </optgroup>
                 {% endif %}
