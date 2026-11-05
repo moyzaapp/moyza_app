@@ -92,7 +92,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 User.email == email
             ).first()
 
-            if not user:
+            # Sin usuario o dado de baja (NULL cuenta como activo): fuera,
+            # también las sesiones vivas (PLAN_BAJA_USUARIOS.md §4.1)
+            if not user or user.is_active is False:
 
                 response = RedirectResponse(
                     url="/",

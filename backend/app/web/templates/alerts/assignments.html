@@ -26,7 +26,7 @@
                 <select id="hAgent" name="agent_id" class="{{ ui.input_class }}" aria-describedby="hAgentHelp">
                     <option value="">Todos</option>
                     {% for agent in agents %}
-                    <option value="{{ agent.id }}" {% if agent.id == selected_agent_id %}selected{% endif %}>{{ agent.name }}</option>
+                    <option value="{{ agent.id }}" {% if agent.id == selected_agent_id %}selected{% endif %}>{{ agent.name }}{% if agent.is_active is false %} (baja){% endif %}</option>
                     {% endfor %}
                 </select>
                 <p id="hAgentHelp" class="text-xs text-gray-500 mt-1">Cede o recibe</p>

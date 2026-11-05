@@ -17,7 +17,7 @@
     <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
       <div>
         <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Resultados Comerciales</h1>
-        <p class="text-sm text-gray-500 mt-1">Objetivos, resultados y compradores del equipo · {{ brand_name }}</p>
+        <p class="text-sm text-gray-500 mt-1">Objetivos, resultados, compradores y cierres del equipo · {{ brand_name }}</p>
       </div>
       <a href="/alerts" class="text-blue-600 hover:text-blue-800 hover:underline text-sm">
         Ver Compradores →
@@ -30,6 +30,7 @@
         ('rendimiento', 'Rendimiento', '/commercial-results?tab=rendimiento', none),
         ('evolucion', 'Evolución', '/commercial-results?tab=evolucion', none),
         ('compradores', 'Compradores', '/commercial-results?tab=compradores', none),
+        ('cierres', 'Cierres', '/commercial-results?tab=cierres', none),
       ], tab, label='Pestañas de Resultados Comerciales') }}
     </div>
 
@@ -37,6 +38,8 @@
       {% include "commercial_results/_performance.html" %}
     {% elif tab == 'evolucion' %}
       {% include "commercial_results/_evolution.html" %}
+    {% elif tab == 'cierres' %}
+      {% include "commercial_results/_closings.html" %}
     {% else %}
       {% include "commercial_results/_buyers.html" %}
     {% endif %}

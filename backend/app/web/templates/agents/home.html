@@ -43,8 +43,13 @@ Agentes
 
 {% include 'agents/signature_modal.html' %}
 
+{# Baja de fichas sin usuario (las que tienen usuario se gestionan en Usuarios) #}
+{% if can_manage %}
+{% include 'components/deactivate_modal.html' %}
+{% endif %}
+
 {# Errores devueltos por el servidor tras guardar o eliminar (llegan por ?error=) #}
-{% if error in ["email_exists", "missing_fields", "save_failed", "agent_not_found", "in_use"] %}
+{% if error in ["email_exists", "missing_fields", "save_failed", "agent_not_found", "in_use", "use_offboarding"] %}
 {% call ui.modal("errorModal", "No se pudo completar la acción", size="md") %}
 <div class="p-6">
     <p class="text-sm text-gray-700">
@@ -56,6 +61,8 @@ Agentes
             No se encontró el agente que intentas modificar.
         {% elif error == "in_use" %}
             No se puede eliminar el agente porque tiene propiedades asociadas.
+        {% elif error == "use_offboarding" %}
+            Este agente tiene historial. Dale de baja en lugar de eliminarlo.
         {% else %}
             No se pudo guardar el agente. Inténtalo de nuevo.
         {% endif %}

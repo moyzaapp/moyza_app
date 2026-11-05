@@ -390,7 +390,8 @@
 
 {# ---------------------------------------------------------------- Tabs #}
 {% macro tabs(items, current, label="Secciones") -%}
-<nav class="flex gap-6 border-b border-gray-200 -mb-px overflow-x-auto" role="tablist" aria-label="{{ label }}">
+{# gap-3 en móvil: cuatro pestañas ("Rendimiento … Cierres") caben a 375 px sin cortar la activa #}
+<nav class="flex gap-3 sm:gap-6 border-b border-gray-200 -mb-px overflow-x-auto" role="tablist" aria-label="{{ label }}">
     {% for key, text, href, count in items %}
     {% set active = key == current %}
     <a href="{{ href }}" role="tab" aria-selected="{{ 'true' if active else 'false' }}"

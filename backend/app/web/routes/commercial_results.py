@@ -6,6 +6,8 @@ Una sección con tres pestañas, todas sobre la empresa activa:
 - evolucion: gráficas del año (barras por agente y evolución mensual).
 - compradores: estado de las alertas y desempeño por agente (antes la
   pestaña "General" de /alerts-dashboard).
+- cierres: cierres registrados a mano (alta y borrado), que son el resultado
+  de la métrica Cierres (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1).
 
 Sustituye a /alerts-dashboard y /performance-reports, que redirigen aquí.
 """
@@ -14,7 +16,7 @@ import io
 import logging
 import re
 import unicodedata
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import urlencode
 
 from fastapi import APIRouter
@@ -28,18 +30,26 @@ from fastapi.responses import RedirectResponse
 from fastapi.responses import Response
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload
 
+from app.core.business_calendar import madrid_today
 from app.core.constants import AlertStatus
+from app.core.constants import BusinessType
 from app.core.constants import PerformanceObjectives
 from app.core.constants import PeriodType
 from app.db.deps import get_db
 from app.models.agent import Agent
+from app.models.closing import Closing
+from app.models.property import Property
 from app.models.property_alert import PropertyAlert
 from app.services.company_scope import get_agent_in_company
+from app.services.company_scope import scope_active_agents
 from app.services.company_scope import scope_agents
 from app.services.company_scope import scope_alerts
+from app.services.company_scope import scope_properties
 from app.services.notification_service import notify_admin_note
 from app.services.performance_report_service import INDICATOR_ROWS_PAGE
+from app.services.performance_report_service import MIN_PERIOD_YEAR
 from app.services.performance_report_service import PerformanceReportService
 from app.web.dependencies.auth import is_admin
 from app.web.dependencies.company import get_active_company
@@ -55,7 +65,8 @@ BASE_URL = "/commercial-results"
 TAB_PERFORMANCE = "rendimiento"
 TAB_EVOLUTION = "evolucion"
 TAB_BUYERS = "compradores"
-TABS = (TAB_PERFORMANCE, TAB_EVOLUTION, TAB_BUYERS)
+TAB_CLOSINGS = "cierres"
+TABS = (TAB_PERFORMANCE, TAB_EVOLUTION, TAB_BUYERS, TAB_CLOSINGS)
 
 # Pestañas de /alerts-dashboard -> pestañas nuevas
 LEGACY_DASHBOARD_TABS = {
@@ -150,6 +161,58 @@ def buyers_context(db: Session, company_id: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Pestaña Cierres (registro manual; PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1)
+# ---------------------------------------------------------------------------
+
+def _closings_url(year: int = None) -> str:
+    return _results_url(tab=TAB_CLOSINGS, year=year)
+
+
+def _closings_year(year: str, today: date) -> int:
+    """Año del listado: el pedido si es válido y no futuro; si no, el en curso."""
+    if year.isdigit() and MIN_PERIOD_YEAR <= int(year) <= today.year:
+        return int(year)
+    return today.year
+
+
+def closings_context(db: Session, company_id: int, year: int, today: date) -> dict:
+    """Cierres del año en la empresa (más reciente primero) y opciones del modal de alta."""
+    closings = (
+        db.query(Closing)
+        .options(joinedload(Closing.agent), joinedload(Closing.property), joinedload(Closing.creator))
+        .filter(
+            Closing.company_id == company_id,
+            Closing.closed_on >= date(year, 1, 1),
+            Closing.closed_on <= date(year, 12, 31),
+        )
+        .order_by(Closing.closed_on.desc(), Closing.id.desc())
+        .all()
+    )
+    # Propiedades de la empresa, también vendidas y archivadas: el cierre suele
+    # registrarse cuando la propiedad ya no está activa
+    properties = (
+        scope_properties(db.query(Property), company_id)
+        .order_by(Property.title.asc(), Property.id.asc())
+        .all()
+    )
+    return {
+        "closings": closings,
+        "closings_year": year,
+        "closings_prev_year": year - 1 if year > MIN_PERIOD_YEAR else None,
+        "closings_next_year": year + 1 if year < today.year else None,
+        "closings_totals": {
+            "total": len(closings),
+            "venta": sum(1 for c in closings if c.business_type == BusinessType.VENTA),
+            "alquiler": sum(1 for c in closings if c.business_type == BusinessType.ALQUILER),
+        },
+        "closing_agents": scope_active_agents(db.query(Agent), company_id).order_by(Agent.name.asc()).all(),
+        "closing_properties": properties,
+        "business_types": BusinessType.values(),
+        "today": today,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Página
 # ---------------------------------------------------------------------------
 
@@ -210,6 +273,10 @@ async def commercial_results(
     elif tab == TAB_BUYERS:
         context.update(buyers_context(db, company.id))
 
+    elif tab == TAB_CLOSINGS:
+        today = madrid_today()
+        context.update(closings_context(db, company.id, _closings_year(year, today), today))
+
     return templates.TemplateResponse(
         request=request,
         name="commercial_results/home.html",
@@ -247,9 +314,14 @@ def _csv_price(value) -> str:
     return "" if value is None else f"{float(value):.0f}"
 
 
-def _csv_property(row) -> str:
+def _csv_day(value) -> str:
+    """Fecha sin hora (cierres): sin conversión de zona horaria."""
+    return value.strftime("%d/%m/%Y") if value else ""
+
+
+def _csv_property(row, empty: str = "Búsqueda general") -> str:
     if row["property_id"] is None:
-        return "Búsqueda general"
+        return empty
     return " · ".join(p for p in (row["property_ref"], row["property_title"]) if p)
 
 
@@ -285,13 +357,15 @@ METRIC_CSV_COLUMNS = {
         ("Motivo", lambda r: r["reason"] or ""),
         ("Enlace", lambda r: f"/properties/{r['property_id']}"),
     ),
+    # Cierres registrados a mano (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1):
+    # fecha sin hora y propiedad opcional
     "cierres": (
-        ("Fecha", lambda r: _csv_date(r["date"])),
-        ("Comprador", lambda r: r["buyer_name"]),
-        ("Propiedad", _csv_property),
-        ("Tipo", lambda r: KIND_LABELS[r["kind"]]),
-        ("Nota del cierre", lambda r: r["notes"] or ""),
-        ("Alerta", lambda r: f"/alerts/{r['alert_id']}"),
+        ("Fecha de cierre", lambda r: _csv_day(r["date"])),
+        ("Operación", lambda r: KIND_LABELS[r["kind"]]),
+        ("Propiedad", lambda r: _csv_property(r, empty="")),
+        ("Ciudad", lambda r: r["property_city"] or ""),
+        ("Nota", lambda r: r["notes"] or ""),
+        ("Enlace", lambda r: f"/properties/{r['property_id']}" if r["property_id"] else ""),
     ),
     "hojas_visita": (
         ("Fecha", lambda r: _csv_date(r["date"])),
@@ -537,6 +611,125 @@ async def save_notes(
     response = RedirectResponse(url=back_url, status_code=302)
     set_flash(response, "success", "Observaciones guardadas")
     return response
+
+
+# ---------------------------------------------------------------------------
+# Alta y borrado de cierres (solo admin)
+# ---------------------------------------------------------------------------
+
+def _closing_redirect(category: str, message: str, year: int = None):
+    response = RedirectResponse(url=_closings_url(year), status_code=302)
+    set_flash(response, category, message)
+    return response
+
+
+def _parse_int(raw) -> int:
+    value = (raw or "").strip()
+    return int(value) if value.isdigit() else None
+
+
+@router.post(BASE_URL + "/closings")
+async def create_closing(
+    request: Request,
+    agent_id: str = Form(""),
+    closed_on: str = Form(""),
+    business_type: str = Form(""),
+    property_id: str = Form(""),
+    notes: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    """Registra un cierre: agente activo de la empresa, fecha no futura, Venta / Alquiler,
+    propiedad opcional de la empresa y nota. Refresca los snapshots congelados."""
+    current_user = request.state.user
+    if not is_admin(current_user):
+        return _forbidden_redirect("Solo administradores pueden registrar cierres")
+
+    company_id = get_active_company(request).id
+    today = madrid_today()
+
+    agent_pk = _parse_int(agent_id)
+    agent = (
+        scope_active_agents(db.query(Agent), company_id).filter(Agent.id == agent_pk).first()
+        if agent_pk else None
+    )
+    if agent is None:
+        return _closing_redirect("error", "Elige un agente activo de la empresa")
+
+    try:
+        closed_day = datetime.strptime((closed_on or "").strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return _closing_redirect("error", "Indica la fecha del cierre")
+    if closed_day > today:
+        return _closing_redirect("error", "La fecha del cierre no puede ser futura")
+    if closed_day.year < MIN_PERIOD_YEAR:
+        return _closing_redirect("error", "La fecha del cierre no es válida")
+
+    if not BusinessType.is_valid(business_type):
+        return _closing_redirect("error", "Indica si el cierre es de Venta o de Alquiler")
+
+    prop = None
+    if (property_id or "").strip():
+        prop_pk = _parse_int(property_id)
+        prop = (
+            scope_properties(db.query(Property), company_id).filter(Property.id == prop_pk).first()
+            if prop_pk else None
+        )
+        if prop is None:
+            return _closing_redirect("error", "La propiedad no pertenece a la empresa activa")
+
+    closing = Closing(
+        company_id=company_id,
+        agent_id=agent.id,
+        business_type=business_type,
+        closed_on=closed_day,
+        property_id=prop.id if prop else None,
+        notes=(notes or "").strip() or None,
+        created_by=current_user.id,
+    )
+    try:
+        db.add(closing)
+        db.commit()
+        PerformanceReportService(db, company_id).refresh_closings_snapshot(agent.id, closed_day)
+    except Exception:
+        db.rollback()
+        logger.exception("Error registrando cierre: agent_id=%s", agent.id)
+        return _closing_redirect("error", "Error al registrar el cierre", closed_day.year)
+
+    return _closing_redirect(
+        "success", f"Cierre de {agent.name} registrado ({closed_day.strftime('%d/%m/%Y')})", closed_day.year,
+    )
+
+
+@router.post(BASE_URL + "/closings/{closing_id}/delete")
+async def delete_closing(
+    closing_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    current_user = request.state.user
+    if not is_admin(current_user):
+        return _forbidden_redirect("Solo administradores pueden borrar cierres")
+
+    company_id = get_active_company(request).id
+    closing = (
+        db.query(Closing)
+        .filter(Closing.id == closing_id, Closing.company_id == company_id)
+        .first()
+    )
+    if closing is None:
+        return _closing_redirect("error", "Cierre no encontrado en la empresa activa")
+
+    agent_id, closed_day = closing.agent_id, closing.closed_on
+    try:
+        db.delete(closing)
+        db.commit()
+        PerformanceReportService(db, company_id).refresh_closings_snapshot(agent_id, closed_day)
+    except Exception:
+        db.rollback()
+        logger.exception("Error borrando cierre: closing_id=%s", closing_id)
+        return _closing_redirect("error", "Error al borrar el cierre", closed_day.year)
+
+    return _closing_redirect("success", "Cierre eliminado", closed_day.year)
 
 
 # ---------------------------------------------------------------------------

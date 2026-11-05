@@ -1,0 +1,289 @@
+{#
+  Modal de baja lógica (PLAN_BAJA_USUARIOS.md §7). Se incluye una vez por página:
+  Usuarios (`auth/user_modals.html`) y Agentes (`agents/home.html`, fichas sin usuario).
+
+  Abrir:
+    - con un botón: data-deactivate="{{ {"name": ..., "summaryUrl": ..., "actionUrl": ...} | tojson | forceescape }}"
+    - desde JS:    openDeactivateModal({name, summaryUrl, actionUrl}, opener)
+
+  Al abrir pide el resumen (JSON de §6.1) a `summaryUrl` y pinta una tarjeta por empresa.
+  El formulario hace POST a `actionUrl` con `reason` (opcional) y `reassign_to_<company_id>`
+  por cada empresa con compradores abiertos.
+#}
+{% import "components/ui_macros.html" as ui %}
+
+{% call ui.modal("userDeactivateModal", "Dar de baja", size="lg", subtitle="Deja de entrar en la app y de recibir trabajo nuevo. Su historial se conserva.") %}
+<form id="userDeactivateForm" method="POST" action="" data-once data-loading-text="Dando de baja…">
+    <div class="p-4 sm:p-6 space-y-4">
+
+        {# Cargando: esqueleto del tamaño de una tarjeta de empresa #}
+        <div id="userDeactivateLoading" class="space-y-3" aria-busy="true">
+            <span class="sr-only" role="status">Cargando lo que tiene pendiente…</span>
+            <div class="rounded-xl border border-gray-200 p-4 space-y-3 animate-pulse" aria-hidden="true">
+                <div class="h-4 w-24 rounded-lg bg-gray-200"></div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="h-12 rounded-lg bg-gray-100"></div>
+                    <div class="h-12 rounded-lg bg-gray-100"></div>
+                </div>
+                <div class="h-10 rounded-xl bg-gray-100"></div>
+            </div>
+        </div>
+
+        {# Error de red o del servidor #}
+        <div id="userDeactivateError" class="hidden">
+            {% call ui.banner("No se pudo cargar lo que tiene pendiente", tone="red") %}
+            <p id="userDeactivateErrorDetail" class="w-full text-xs opacity-90">Revisa la conexión e inténtalo de nuevo.</p>
+            <button type="button" id="userDeactivateRetry"
+                class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-red-300 bg-white px-3 py-2 text-xs font-medium text-red-800 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600/40">
+                <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+                Reintentar
+            </button>
+            {% endcall %}
+        </div>
+
+        {# Resumen #}
+        <div id="userDeactivateContent" class="hidden space-y-4">
+            <div id="userDeactivateBlocked" class="hidden">
+                {% call ui.banner("Aún no se puede dar de baja", tone="amber") %}
+                <ul id="userDeactivateBlockedList" class="w-full space-y-3"></ul>
+                {% endcall %}
+            </div>
+
+            <div id="userDeactivateCompanies" class="space-y-3"></div>
+
+            <div id="userDeactivateReasonWrap">
+                {{ ui.field("reason", "Motivo", type="textarea", optional_label=True, id="userDeactivateReason", placeholder="Ej.: deja la empresa", help="Se anota en el historial de cada comprador reasignado.") }}
+            </div>
+        </div>
+    </div>
+
+    {{ ui.modal_footer(submit_label="Dar de baja", submit_variant="danger", submit_id="userDeactivateSubmit", submit_attrs="disabled") }}
+</form>
+{% endcall %}
+
+<script>
+(function () {
+    'use strict';
+
+    var MODAL_ID = 'userDeactivateModal';
+    var INPUT_CLASS = {{ ui.input_class | tojson }};
+    var GENERIC_ERROR = 'Revisa la conexión e inténtalo de nuevo.';
+    var requestSeq = 0;
+    var current = null;
+
+    function byId(id) { return document.getElementById(id); }
+
+    // Todo el texto se pinta con textContent: nunca innerHTML con datos del servidor
+    function make(tag, cls, text) {
+        var node = document.createElement(tag);
+        if (cls) node.className = cls;
+        if (text !== undefined && text !== null) node.textContent = text;
+        return node;
+    }
+
+    function count(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+    function setState(state) {
+        byId('userDeactivateLoading').classList.toggle('hidden', state !== 'loading');
+        byId('userDeactivateError').classList.toggle('hidden', state !== 'error');
+        byId('userDeactivateContent').classList.toggle('hidden', state !== 'ready');
+    }
+
+    function setSubmit(enabled, why) {
+        var btn = byId('userDeactivateSubmit');
+        // Deshace el "Dando de baja…" de data-once si el modal se reabre
+        if (btn.dataset.originalText) {
+            btn.innerHTML = btn.dataset.originalText;
+            delete btn.dataset.originalText;
+        }
+        btn.removeAttribute('aria-busy');
+        btn.disabled = !enabled;
+        if (why) btn.title = why; else btn.removeAttribute('title');
+    }
+
+    function setTitle(name) {
+        byId(MODAL_ID + 'Title').textContent = name ? 'Dar de baja a ' + name : 'Dar de baja';
+    }
+
+    function stat(label, value, hint, warn) {
+        var box = make('div', 'rounded-lg bg-gray-50 px-3 py-2');
+        box.appendChild(make('dt', 'text-xs text-gray-500', label));
+        box.appendChild(make('dd', warn ? 'text-lg font-bold tabular-nums text-amber-600' : 'text-lg font-bold tabular-nums text-gray-900', String(value)));
+        box.appendChild(make('dd', 'text-xs text-gray-500', hint));
+        return box;
+    }
+
+    function blockedItem(company, live) {
+        var li = make('li', '');
+        li.appendChild(make('p', 'text-xs', 'Tiene ' + count(live, 'propiedad activa', 'propiedades activas') + ' en ' + company.name + '. Reasígnalas desde Propiedades antes de dar de baja.'));
+        if (company.properties_url) {
+            var link = make('a', 'mt-2 inline-flex items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-medium text-amber-800 hover:bg-amber-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-600/40', 'Ver sus propiedades en ' + company.name);
+            link.href = company.properties_url;
+            li.appendChild(link);
+        }
+        return li;
+    }
+
+    function companyCard(company, blocked) {
+        var live = Number(company.live_properties) || 0;
+        var open = Number(company.open_alerts) || 0;
+        var targets = Array.isArray(company.targets) ? company.targets : [];
+        var result = { card: make('section', 'rounded-xl border border-gray-200 p-4 space-y-3'), missingTarget: false };
+        var card = result.card;
+
+        card.appendChild(make('h3', 'text-sm font-semibold text-gray-900', company.name || company.code || 'Empresa'));
+
+        var dl = make('dl', 'grid grid-cols-2 gap-3');
+        dl.appendChild(stat('Propiedades activas', live, 'Activas, reservadas o pausadas', live > 0));
+        dl.appendChild(stat('Compradores abiertos', open, 'Pendientes o en proceso', false));
+        card.appendChild(dl);
+
+        // Con propiedades vivas no se elige destino: el envío está bloqueado
+        if (blocked || open === 0) return result;
+
+        if (!targets.length) {
+            result.missingTarget = true;
+            card.appendChild(make('p', 'text-xs text-red-600', 'No hay ningún otro agente activo en ' + company.name + ' que pueda recibir sus compradores. Da de alta o reactiva uno antes.'));
+            return result;
+        }
+
+        var fieldId = 'reassign_to_' + company.id;
+        var wrap = make('div', '');
+        var label = make('label', 'block text-sm font-medium text-gray-700 mb-1', open === 1 ? 'Reasignar su comprador a ' : 'Reasignar sus ' + open + ' compradores a ');
+        label.htmlFor = fieldId;
+        var star = make('span', 'text-red-500', '*');
+        star.setAttribute('aria-hidden', 'true');
+        label.appendChild(star);
+        wrap.appendChild(label);
+
+        var select = make('select', INPUT_CLASS);
+        select.id = fieldId;
+        select.name = fieldId;
+        select.required = true;
+        select.setAttribute('aria-describedby', fieldId + '_help');
+        var empty = make('option', '', 'Elige un agente…');
+        empty.value = '';
+        select.appendChild(empty);
+        targets.forEach(function (t) {
+            var opt = make('option', '', t.name);
+            opt.value = t.id;
+            select.appendChild(opt);
+        });
+        if (targets.length === 1) select.value = String(targets[0].id);
+        wrap.appendChild(select);
+
+        var help = make('p', 'text-xs text-gray-500 mt-1', 'Recibirá un aviso y quedará en el historial de cada comprador.');
+        help.id = fieldId + '_help';
+        wrap.appendChild(help);
+        card.appendChild(wrap);
+        return result;
+    }
+
+    function render(data) {
+        var companies = Array.isArray(data.companies) ? data.companies : [];
+        var list = byId('userDeactivateCompanies');
+        var blockedList = byId('userDeactivateBlockedList');
+        list.replaceChildren();
+        blockedList.replaceChildren();
+
+        var blocked = !!data.blocked || companies.some(function (c) { return (Number(c.live_properties) || 0) > 0; });
+        var missingTarget = false;
+
+        setTitle(data.name || current.name);
+
+        companies.forEach(function (company) {
+            var live = Number(company.live_properties) || 0;
+            if (live > 0) blockedList.appendChild(blockedItem(company, live));
+            var built = companyCard(company, blocked);
+            if (built.missingTarget) missingTarget = true;
+            list.appendChild(built.card);
+        });
+
+        if (!companies.length) {
+            list.appendChild(make('p', 'text-sm text-gray-600', 'No tiene propiedades ni compradores pendientes en ninguna empresa.'));
+        }
+
+        byId('userDeactivateBlocked').classList.toggle('hidden', !blocked);
+        byId('userDeactivateReasonWrap').classList.toggle('hidden', blocked);
+
+        if (blocked) {
+            setSubmit(false, 'Reasigna antes sus propiedades activas desde Propiedades');
+        } else if (missingTarget) {
+            setSubmit(false, 'No hay ningún agente activo que pueda recibir sus compradores');
+        } else {
+            setSubmit(true);
+        }
+        setState('ready');
+    }
+
+    function fail(message) {
+        byId('userDeactivateErrorDetail').textContent = message || GENERIC_ERROR;
+        setState('error');
+    }
+
+    function load() {
+        var seq = ++requestSeq;
+        setState('loading');
+        setSubmit(false);
+
+        fetch(current.summaryUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+            .then(function (response) {
+                return response.json()
+                    .catch(function () { return null; })
+                    .then(function (body) {
+                        if (!response.ok || !body || typeof body !== 'object') {
+                            var err = new Error('summary');
+                            // El 404 de FastAPI llega en inglés ("Not Found"): texto propio
+                            if (response.status === 404) err.userMessage = 'No se encontró. Recarga la página e inténtalo de nuevo.';
+                            else err.userMessage = body && typeof body.detail === 'string' ? body.detail : '';
+                            throw err;
+                        }
+                        return body;
+                    });
+            })
+            .then(function (data) {
+                if (seq === requestSeq) render(data);
+            })
+            .catch(function (err) {
+                if (seq === requestSeq) fail(err && err.userMessage);
+            });
+    }
+
+    function openDeactivateModal(opts, opener) {
+        opts = opts || {};
+        current = { name: opts.name || '', summaryUrl: opts.summaryUrl, actionUrl: opts.actionUrl };
+
+        var form = byId('userDeactivateForm');
+        form.reset();
+        form.action = current.actionUrl;
+        byId('userDeactivateCompanies').replaceChildren();
+        byId('userDeactivateBlockedList').replaceChildren();
+        byId('userDeactivateBlocked').classList.add('hidden');
+        byId('userDeactivateReasonWrap').classList.remove('hidden');
+        setTitle(current.name);
+
+        UI.openModal(MODAL_ID, opener);
+        // Mientras carga no hay campos visibles: el foco va al panel
+        var panel = byId(MODAL_ID).querySelector('[data-modal-panel]');
+        if (panel) setTimeout(function () { panel.focus({ preventScroll: true }); }, 30);
+
+        load();
+    }
+
+    window.openDeactivateModal = openDeactivateModal;
+
+    byId('userDeactivateRetry').addEventListener('click', function () {
+        if (current) load();
+    });
+
+    // Botones con data-deactivate='{"name":…,"summaryUrl":…,"actionUrl":…}'
+    document.addEventListener('click', function (event) {
+        var trigger = event.target.closest('[data-deactivate]');
+        if (!trigger) return;
+        event.preventDefault();
+        var opts;
+        try { opts = JSON.parse(trigger.getAttribute('data-deactivate')); } catch (e) { return; }
+        openDeactivateModal(opts, trigger);
+    });
+})();
+</script>

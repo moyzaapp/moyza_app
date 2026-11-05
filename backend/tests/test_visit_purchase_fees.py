@@ -36,9 +36,13 @@ def test_clean_purchase_fees_conserva_el_porcentaje(raw, expected):
 
 
 @pytest.mark.parametrize("stored, unit, amount, display", [
-    ("2500", "€", "2500", "€2500 + IVA"),
-    ("2%", "%", "2", "2% + IVA"),
-    ("2,5%", "%", "2,5", "2,5% + IVA"),
+    ("2500", "€", "2500", "2.500 € + IVA"),
+    ("2500,5", "€", "2500,5", "2.500,50 € + IVA"),
+    ("2%", "%", "2", "2 % + IVA"),
+    ("2,5%", "%", "2,5", "2,5 % + IVA"),
+    # Antiguos: punto de miles escrito a mano, y uno ambiguo que se muestra tal cual
+    ("2.500", "€", "2500", "2.500 € + IVA"),
+    ("1.2", "€", "1.2", "1.2 € + IVA"),
     (None, "€", "", None),
 ])
 def test_unidad_importe_y_texto_del_informe(stored, unit, amount, display):
@@ -65,14 +69,37 @@ def test_purchase_fees_from_form(form, expected):
     assert purchase_fees_from_form(form) == expected
 
 
-@pytest.mark.parametrize("value", ["2500", "2.500", "2500,50", "0%", "2%", "2,5%", "100%"])
+@pytest.mark.parametrize("value", ["2500", "2.500", "2500,50", "2.500,50", "1,2", "0%", "2%", "2,5%", "100%"])
 def test_honorarios_validos(value):
     assert purchase_fees_error(value) is None
 
 
 def test_porcentaje_fuera_de_rango():
-    for value in ("101%", "150%", "1.2.3%"):
+    for value in ("101%", "150%", "100,5%"):
         assert purchase_fees_error(value) == "El porcentaje de honorarios debe estar entre 0 y 100"
+
+
+@pytest.mark.parametrize("value", ["1.2", "1.2%", "1.2.3%", "2.50", "2,555", "12.34.5"])
+def test_separador_decimal_ambiguo(value):
+    # Coma decimal, punto solo de miles (PLAN_VISITAS_INDICATIVO_HONORARIOS.md §2.2)
+    assert purchase_fees_error(value).startswith("Revisa los honorarios")
+
+
+@pytest.mark.parametrize("raw, stored", [
+    ("2500", "2500"),
+    ("2.500", "2500"),
+    ("2.500,50", "2500,5"),
+    ("2,50%", "2,5%"),
+    ("2 % + IVA", "2%"),
+    ("", ""),
+])
+def test_normalize_purchase_fees(raw, stored):
+    assert PropertyVisit.normalize_purchase_fees(raw) == stored
+
+
+def test_normalize_rechaza_el_separador_ambiguo():
+    with pytest.raises(ValueError):
+        PropertyVisit.normalize_purchase_fees("1.2")
 
 
 def test_formato_no_valido():
@@ -196,7 +223,7 @@ def test_alta_y_edicion_con_porcentaje(fees_property):
     visit = _visit(prop_id)
     assert visit.purchase_fees == "2,5%"
     status, body, _ = _request("GET", f"/visits/preview/{visit.id}")
-    assert status == 200 and "2,5% + IVA" in body
+    assert status == 200 and "2,5 % + IVA" in body
 
     # La edición rellena el selector en % y el importe sin signo
     status, body, _ = _request("GET", f"/visits/edit/{visit.id}")
@@ -204,9 +231,17 @@ def test_alta_y_edicion_con_porcentaje(fees_property):
     assert '<option value="%" selected>%</option>' in body
     assert 'value="2,5"' in body
 
-    # Edición de vuelta a euros
+    # "1.2" es ambiguo: no se guarda y vuelve al formulario
+    status, _, headers = _request("POST", f"/visits/update/{visit.id}",
+                                  _form(fees_property, purchase_fees="1.2", purchase_fees_unit="€"))
+    assert status == 302 and headers["location"] == f"/visits/edit/{visit.id}"
+    assert _visit(prop_id).purchase_fees == "2,5%"
+
+    # Edición de vuelta a euros con punto de miles y decimales: se guarda normalizado
     status, _, _ = _request("POST", f"/visits/update/{visit.id}",
-                            _form(fees_property, purchase_fees="3000", purchase_fees_unit="€"))
+                            _form(fees_property, purchase_fees="3.000,50", purchase_fees_unit="€"))
     assert status == 302
     visit = _visit(prop_id)
-    assert visit.purchase_fees == "3000" and visit.purchase_fees_display == "€3000 + IVA"
+    assert visit.purchase_fees == "3000,5" and visit.purchase_fees_display == "3.000,50 € + IVA"
+    status, body, _ = _request("GET", f"/visits/edit/{visit.id}")
+    assert status == 200 and 'value="3000,5"' in body

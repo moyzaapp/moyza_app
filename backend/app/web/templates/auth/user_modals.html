@@ -57,6 +57,10 @@
 {% endcall %}
 
 
+<!-- Modal: dar de baja (userDeactivateModal, openDeactivateModal) -->
+{% include "components/deactivate_modal.html" %}
+
+
 <script>
 function editUser(id, fullName, email, phone, companyIds, roleId) {
     document.getElementById("userEditForm").reset()

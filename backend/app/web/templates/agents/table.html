@@ -1,4 +1,12 @@
 {% from 'components/company_macros.html' import company_badges %}
+{% import 'components/ui_macros.html' as ui %}
+{#
+  Baja lógica (PLAN_BAJA_USUARIOS.md §7.2): la ficha con usuario se gestiona en Usuarios;
+  la ficha sin usuario se da de baja o se reactiva aquí. En multiempresa se mantiene
+  "Quitar de <empresa activa>". Eliminar solo en una empresa, sin usuario y sin historial.
+#}
+{% set agent_user_ids = user_ids_by_email or {} %}
+{% set agent_history = history_by_agent_id or {} %}
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
     {% if can_manage %}
@@ -77,29 +85,38 @@
 
             {% for agent in agents %}
 
+            {% set inactive = agent.is_active is sameas false %}
+            {% set agent_user_id = agent_user_ids.get(agent.email) if agent.email else None %}
+            {% set dim = 'opacity-60' if inactive else '' %}
+
             <tr class="border-b border-gray-100 hover:bg-gray-50">
 
                 <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
-                    {{ agent.name }}
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span class="{{ dim }}">{{ agent.name }}</span>
+                        {% if inactive %}
+                        <span class="inline-flex" title="{{ ('Baja desde el ' ~ (agent.deactivated_at | madrid_dt('%d/%m/%Y'))) if agent.deactivated_at else 'Dado de baja' }}">{{ ui.badge("Baja", "gray") }}</span>
+                        {% endif %}
+                    </div>
                 </td>
 
-                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 {{ dim }}">
                     {{ agent.email or '-' }}
                 </td>
 
-                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 {{ dim }}">
                     {{ agent.dni or '-' }}
                 </td>
 
-                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap {{ dim }}">
                     {{ agent.phone or '-' }}
                 </td>
 
-                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 {{ dim }}">
                     {{ agent.zone or '-' }}
                 </td>
 
-                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
+                <td class="px-3 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 {{ dim }}">
                     {{ company_badges(agent.companies) }}
                 </td>
 
@@ -140,24 +157,116 @@
 
                         {% if can_manage %}
 
+                        {% set multi_company = agent.companies | length > 1 %}
+
+                        {% if multi_company and active_company %}
+
                         <form
                             action="/agents/delete/{{ agent.id }}"
                             method="POST"
-                            onsubmit="return confirm('¿Eliminar agente?')"
+                            data-confirm="¿Quitar a {{ agent.name }} de {{ active_company.name }}? Sigue activo en sus otras empresas."
+                            onsubmit="return confirm(this.dataset.confirm)"
+                            class="inline-block"
+                        >
+
+                            <button
+                                class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 sm:px-4 py-2 rounded-lg text-xs sm:text-sm transition-colors inline-flex items-center"
+                                type="submit"
+                                title="Quitar de {{ active_company.name }}"
+                                aria-label="Quitar a {{ agent.name }} de {{ active_company.name }}"
+                            >
+                                <span class="hidden sm:inline">Quitar de {{ active_company.name }}</span>
+                                <svg class="w-4 h-4 sm:hidden" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"></path>
+                                </svg>
+                            </button>
+
+                        </form>
+
+                        {% endif %}
+
+                        {% if agent_user_id %}
+
+                        <a
+                            href="/auth"
+                            class="bg-blue-50 hover:bg-blue-100 text-blue-700 px-2 sm:px-4 py-2 rounded-lg text-xs sm:text-sm transition-colors inline-flex items-center"
+                            title="Tiene usuario: la baja y el borrado se gestionan en Usuarios"
+                            aria-label="Gestionar a {{ agent.name }} en Usuarios"
+                        >
+                            <span class="hidden sm:inline">Usuarios</span>
+                            <svg class="w-4 h-4 sm:hidden" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"></path>
+                            </svg>
+                        </a>
+
+                        {% elif inactive %}
+
+                        <form
+                            action="/agents/{{ agent.id }}/reactivate"
+                            method="POST"
+                            data-once
+                            data-loading-text="Reactivando…"
+                            data-confirm="¿Reactivar a {{ agent.name }}? Volverá a recibir trabajo. Lo que se reasignó en la baja no vuelve solo."
+                            onsubmit="return confirm(this.dataset.confirm)"
+                            class="inline-block"
+                        >
+
+                            <button
+                                class="bg-green-50 hover:bg-green-100 text-green-700 px-2 sm:px-4 py-2 rounded-lg text-xs sm:text-sm transition-colors inline-flex items-center"
+                                type="submit"
+                                title="Reactivar"
+                                aria-label="Reactivar a {{ agent.name }}"
+                            >
+                                <span class="hidden sm:inline">Reactivar</span>
+                                <svg class="w-4 h-4 sm:hidden" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"></path>
+                                </svg>
+                            </button>
+
+                        </form>
+
+                        {% else %}
+
+                        <button
+                            type="button"
+                            class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 sm:px-4 py-2 rounded-lg text-xs sm:text-sm transition-colors inline-flex items-center"
+                            title="Dar de baja"
+                            aria-label="Dar de baja a {{ agent.name }}"
+                            data-deactivate="{{ {'name': agent.name, 'summaryUrl': '/agents/' ~ agent.id ~ '/offboarding', 'actionUrl': '/agents/' ~ agent.id ~ '/deactivate'} | tojson | forceescape }}"
+                        >
+                            <span class="hidden sm:inline">Dar de baja</span>
+                            <svg class="w-4 h-4 sm:hidden" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M22 10.5h-6m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM4 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 10.374 21c-2.331 0-4.512-.645-6.374-1.766Z"></path>
+                            </svg>
+                        </button>
+
+                        {% endif %}
+
+                        {% if not agent_user_id and not multi_company and not agent_history.get(agent.id, True) %}
+
+                        <form
+                            action="/agents/delete/{{ agent.id }}"
+                            method="POST"
+                            data-confirm="¿Eliminar a {{ agent.name }}? No tiene historial y se borrará del todo. Esta acción no se puede deshacer."
+                            onsubmit="return confirm(this.dataset.confirm)"
                             class="inline-block"
                         >
 
                             <button
                                 class="bg-red-100 hover:bg-red-200 text-red-700 px-2 sm:px-4 py-2 rounded-lg text-xs sm:text-sm transition-colors inline-flex items-center"
                                 type="submit"
+                                title="Eliminar"
+                                aria-label="Eliminar a {{ agent.name }}"
                             >
                                 <span class="hidden sm:inline">Eliminar</span>
-                                <svg class="w-4 h-4 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                <svg class="w-4 h-4 sm:hidden" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"></path>
                                 </svg>
                             </button>
 
                         </form>
+
+                        {% endif %}
 
                         {% endif %}
 

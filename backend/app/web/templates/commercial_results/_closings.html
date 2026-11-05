@@ -1,0 +1,190 @@
+{#
+  Pestaña Cierres (solo admin): cierres registrados a mano en la empresa activa.
+  PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1. Un registro por cierre y por
+  agente; son el resultado de la métrica "Cierres" (Rendimiento, Evolución e
+  Inicio). Alta en el modal #closingModal y borrado con #deleteClosingModal,
+  que reutiliza un único formulario: el botón de cada fila le pasa la URL y el
+  texto por data-*.
+#}
+{% import "components/ui_macros.html" as ui %}
+
+{% set th = "text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap" %}
+{% set td = "px-4 py-3 text-gray-700 align-top" %}
+{% set totals = closings_totals %}
+
+<section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="closingsTitle">
+  <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 px-4 sm:px-6 py-4 border-b border-gray-200">
+    <div class="flex items-center gap-3 min-w-0">
+      {# Año: misma navegación que la pestaña Evolución #}
+      <div class="flex items-center gap-2 shrink-0">
+        {% if closings_prev_year %}
+        <a href="/commercial-results?tab=cierres&year={{ closings_prev_year }}"
+           class="p-3 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors" aria-label="Año anterior ({{ closings_prev_year }})">
+          <svg class="w-4 h-4 text-gray-600" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
+        </a>
+        {% endif %}
+        <span class="px-3 py-1.5 rounded-lg border border-gray-200 text-sm font-semibold text-gray-800 tabular-nums">{{ closings_year }}</span>
+        {% if closings_next_year %}
+        <a href="/commercial-results?tab=cierres&year={{ closings_next_year }}"
+           class="p-3 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors" aria-label="Año siguiente ({{ closings_next_year }})">
+          <svg class="w-4 h-4 text-gray-600" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+        </a>
+        {% endif %}
+      </div>
+      <div class="min-w-0">
+        <h2 id="closingsTitle" class="text-lg font-bold text-gray-900">Cierres registrados</h2>
+        <p class="text-xs text-gray-500 mt-0.5">
+          {% if totals.total %}
+          <span class="tabular-nums">{{ totals.total }}</span> {{ 'cierre' if totals.total == 1 else 'cierres' }} · venta <span class="tabular-nums">{{ totals.venta }}</span> · alquiler <span class="tabular-nums">{{ totals.alquiler }}</span>
+          {% else %}
+          Firma o venta de una propiedad, un registro por agente
+          {% endif %}
+        </p>
+      </div>
+    </div>
+    {% call ui.button('Registrar cierre', 'primary', attrs='data-modal-open="closingModal"', full_mobile=True) %}
+    <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+    {% endcall %}
+  </header>
+
+  {% if closings %}
+  <div class="overflow-x-auto">
+    <table class="w-full min-w-[760px] text-sm">
+      <caption class="sr-only">Cierres registrados en {{ closings_year }} · {{ brand_name }}</caption>
+      <thead class="bg-gray-50 border-b border-gray-200">
+        <tr>
+          <th scope="col" class="{{ th }}">Fecha</th>
+          <th scope="col" class="{{ th }}">Agente</th>
+          <th scope="col" class="{{ th }}">Operación</th>
+          <th scope="col" class="{{ th }}">Propiedad</th>
+          <th scope="col" class="{{ th }}">Nota</th>
+          <th scope="col" class="{{ th }}">Registrado por</th>
+          <th scope="col" class="{{ th }} text-right"><span class="sr-only">Acciones</span></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for c in closings %}
+        {% set date_text = c.closed_on.strftime('%d/%m/%Y') %}
+        {% set agent_name = c.agent.name if c.agent else 'Agente eliminado' %}
+        <tr class="hover:bg-gray-50 transition-colors" data-closing-row="{{ c.id }}">
+          <td class="{{ td }} whitespace-nowrap tabular-nums text-gray-900">{{ date_text }}</td>
+          <td class="{{ td }}">
+            <span class="font-medium text-gray-900">{{ agent_name }}</span>
+            {% if c.agent and c.agent.is_active is false %}<span class="block text-xs text-gray-500">De baja</span>{% endif %}
+          </td>
+          <td class="{{ td }}">{{ ui.status_badge('business', c.business_type, dot=False) }}</td>
+          <td class="{{ td }}">
+            {% if c.property %}
+            <a href="/properties/{{ c.property.id }}" class="font-medium text-gray-900 hover:text-blue-600 hover:underline">{{ c.property.title or ('Propiedad #' ~ c.property.id) }}</a>
+            {% if c.property.referencia and c.property.referencia != c.property.title %}<span class="block text-xs text-gray-500">{{ c.property.referencia }}</span>{% endif %}
+            {% else %}
+            <span class="text-gray-500">—</span>
+            {% endif %}
+          </td>
+          <td class="{{ td }} min-w-[12rem] whitespace-pre-line">{{ c.notes or '—' }}</td>
+          <td class="{{ td }}">
+            {{ c.creator.full_name or c.creator.email if c.creator else '—' }}
+            {% if c.created_at %}<span class="block text-xs text-gray-500 tabular-nums">{{ c.created_at | madrid_dt('%d/%m/%Y %H:%M') }}</span>{% endif %}
+          </td>
+          <td class="{{ td }} text-right whitespace-nowrap">
+            <button type="button"
+                    data-delete-closing="/commercial-results/closings/{{ c.id }}/delete"
+                    data-closing-label="{{ agent_name }} · {{ date_text }} · {{ c.business_type }}"
+                    class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600/40"
+                    title="Eliminar cierre" aria-label="Eliminar el cierre de {{ agent_name }} del {{ date_text }}">
+              <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>
+              <span class="hidden sm:inline">Eliminar</span>
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  {{ ui.empty_state('Aún no hay cierres registrados en ' ~ closings_year,
+                    'Registra cada firma o venta con «Registrar cierre». Cuentan en la métrica Cierres del agente en Rendimiento, Evolución e Inicio.') }}
+  {% endif %}
+</section>
+
+<p class="text-xs text-gray-500 mt-3">
+  Si un cierre lo comparten dos agentes, regístralo una vez para cada uno. Un cierre con fecha en un mes o año ya congelado actualiza ese período.
+</p>
+
+{# ---------------------------------------------------------------- Alta #}
+{% call ui.modal("closingModal", "Registrar cierre", size="lg", subtitle="Firma o venta de una propiedad de " ~ brand_name) %}
+<form method="POST" action="/commercial-results/closings" data-once>
+  <div class="p-4 sm:p-6 space-y-4">
+    {% if closing_agents %}
+    <div>
+      <label for="closing_agent" class="block text-sm font-medium text-gray-700 mb-1">Agente <span class="text-red-500" aria-hidden="true">*</span></label>
+      <select id="closing_agent" name="agent_id" required class="{{ ui.input_class }}">
+        <option value="">Elige un agente</option>
+        {% for a in closing_agents %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
+      </select>
+    </div>
+    {% else %}
+    {{ ui.banner('No hay agentes activos en ' ~ brand_name, 'amber', 'Da de alta un agente en la empresa para poder registrarle cierres.') }}
+    {% endif %}
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label for="closing_date" class="block text-sm font-medium text-gray-700 mb-1">Fecha del cierre <span class="text-red-500" aria-hidden="true">*</span></label>
+        <input type="date" id="closing_date" name="closed_on" required
+               value="{{ today.isoformat() }}" max="{{ today.isoformat() }}"
+               class="{{ ui.input_class }}" aria-describedby="closing_date_help">
+        <p id="closing_date_help" class="text-xs text-gray-500 mt-1">No puede ser futura</p>
+      </div>
+      <fieldset>
+        <legend class="block text-sm font-medium text-gray-700 mb-1">Operación <span class="text-red-500" aria-hidden="true">*</span></legend>
+        <div class="grid grid-cols-2 gap-2">
+          {% for value in business_types %}
+          <label class="flex items-center gap-2 rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-700 cursor-pointer hover:bg-gray-50 has-[:checked]:border-gray-900 has-[:checked]:bg-gray-50">
+            <input type="radio" name="business_type" value="{{ value }}" required {% if loop.first %}checked{% endif %}
+                   class="h-4 w-4 border-gray-300 text-gray-900 focus:ring-blue-500/40">
+            {{ value }}
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+    </div>
+
+    <div>
+      <label for="closing_property" class="block text-sm font-medium text-gray-700 mb-1">Propiedad <span class="text-gray-400 font-normal">(opcional)</span></label>
+      <select id="closing_property" name="property_id" class="{{ ui.input_class }}" aria-describedby="closing_property_help">
+        <option value="">Sin propiedad</option>
+        {% for p in closing_properties %}
+        <option value="{{ p.id }}">{{ p.title or ('Propiedad #' ~ p.id) }}{% if p.referencia and p.referencia != p.title %} · {{ p.referencia }}{% endif %}{% if p.status and p.status != 'Activa' %} ({{ p.status }}){% endif %}</option>
+        {% endfor %}
+      </select>
+      <p id="closing_property_help" class="text-xs text-gray-500 mt-1">Propiedades de {{ brand_name }}, también vendidas y archivadas</p>
+    </div>
+
+    {{ ui.field("notes", "Nota", type="textarea", optional_label=True, id="closing_notes",
+                placeholder="Notaría, comprador, comisión…") }}
+  </div>
+  {{ ui.modal_footer(submit_label="Registrar cierre", submit_attrs=('' if closing_agents else 'disabled')) }}
+</form>
+{% endcall %}
+
+{# ---------------------------------------------------------------- Borrado #}
+{% call ui.modal("deleteClosingModal", "¿Eliminar el cierre?", size="md") %}
+<form method="POST" action="" id="deleteClosingForm" data-once>
+  <div class="p-4 sm:p-6 space-y-2">
+    <p class="text-sm font-medium text-gray-900" id="deleteClosingLabel"></p>
+    <p class="text-sm text-gray-700">Dejará de contar en la métrica Cierres del agente, también en los períodos ya congelados. Esta acción no se puede deshacer.</p>
+  </div>
+  {{ ui.modal_footer(submit_label="Eliminar", submit_variant="danger") }}
+</form>
+{% endcall %}
+
+<script>
+  // Borrado: un solo modal; cada fila le pasa su URL y su descripción
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-delete-closing]');
+    if (!btn) return;
+    document.getElementById('deleteClosingForm').setAttribute('action', btn.getAttribute('data-delete-closing'));
+    document.getElementById('deleteClosingLabel').textContent = btn.getAttribute('data-closing-label');
+    UI.openModal('deleteClosingModal', btn);
+  });
+</script>

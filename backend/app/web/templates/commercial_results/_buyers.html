@@ -1,4 +1,5 @@
 {# Pestaña Compradores: estado de las alertas de la empresa activa (antes "General" de /alerts-dashboard) #}
+{% import "components/ui_macros.html" as ui %}
 
 <!-- Métricas Generales -->
 <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
@@ -124,7 +125,7 @@
         {% if agents_data %}
           {% for item in agents_data %}
           <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-            <td class="px-6 py-4 text-sm text-gray-800 font-medium">{{ item.agent.name }}</td>
+            <td class="px-6 py-4 text-sm text-gray-800 font-medium">{{ item.agent.name }}{% if item.agent.is_active is false %} {{ ui.badge("Baja", "gray") }}{% endif %}</td>
             <td class="px-6 py-4 text-center text-sm text-gray-800">{{ item.total_alerts }}</td>
             <td class="px-6 py-4 text-center">
               {% if item.pending > 0 %}

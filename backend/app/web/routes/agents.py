@@ -11,11 +11,13 @@ from fastapi import File
 from fastapi import UploadFile
 
 from fastapi.responses import HTMLResponse
+from fastapi.responses import JSONResponse
 from fastapi.responses import RedirectResponse
 
 from app.web.template_env import templates
 
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
@@ -39,6 +41,10 @@ from app.services.company_service import (
     company_ids_from_form,
 )
 from app.web.utils.flash import set_flash
+from app.services import offboarding_service
+from app.services.offboarding_service import OffboardingError
+from app.web.routes.auth import json_admin_denied
+from app.web.routes.auth import reassign_to_from_form
 
 
 router = APIRouter()
@@ -105,9 +111,16 @@ async def agents_page(
 
         agents = base_query.order_by(Agent.name).all()
 
+        # Ficha con usuario -> "Gestionar en Usuarios"; Eliminar solo sin
+        # historial (PLAN_BAJA_USUARIOS.md §7.2)
+        user_ids_by_email = offboarding_service.user_ids_by_agent_email(db, agents)
+        history_by_agent_id = offboarding_service.history_by_agent_id(db, agents)
+
     else:
         agent = get_agent_from_user(current_user, db)
         agents = [agent] if agent else []
+        user_ids_by_email = {}
+        history_by_agent_id = {}
 
     return templates.TemplateResponse(
         request=request,
@@ -119,6 +132,8 @@ async def agents_page(
             "error": error,
             "search": search,
             "can_manage": can_manage,
+            "user_ids_by_email": user_ids_by_email,
+            "history_by_agent_id": history_by_agent_id,
             # Empresas asignables en el formulario de agente
             "all_companies": list_active_companies(db),
         }
@@ -326,6 +341,11 @@ async def delete_agent(
     request: Request,
     db: Session = Depends(get_db)
 ):
+    """Quita al agente de la empresa activa o, en una sola empresa, lo borra si no tiene historial.
+
+    Con historial en una sola empresa se responde `?error=use_offboarding`:
+    se da de baja (PLAN_BAJA_USUARIOS.md §6).
+    """
 
     # Solo el admin puede eliminar agentes
     denied = deny_if_not_admin(request, "/agents")
@@ -343,7 +363,7 @@ async def delete_agent(
             status_code=302
         )
 
-    # No se puede dar de baja si tiene propiedades en la empresa activa
+    # No se puede quitar si tiene propiedades en la empresa activa
     properties = scope_properties(
         db.query(Property).filter(Property.agent_id == agent_id),
         active_company.id
@@ -369,14 +389,126 @@ async def delete_agent(
         )
         return response
 
-    db.delete(agent)
+    # Una sola empresa: borrado físico solo sin usuario y sin historial
+    if (
+        offboarding_service.find_user(db, agent) is not None
+        or offboarding_service.has_history(db, agent=agent)
+    ):
+        return RedirectResponse(
+            url="/agents?error=use_offboarding",
+            status_code=302
+        )
 
-    db.commit()
+    try:
+        db.delete(agent)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.exception("Error eliminando agente con historial: agent_id=%s", agent_id)
+        return RedirectResponse(
+            url="/agents?error=use_offboarding",
+            status_code=302
+        )
 
-    return RedirectResponse(
-        url="/agents",
-        status_code=302
-    )
+    response = RedirectResponse(url="/agents", status_code=302)
+    set_flash(response, "success", f"{agent.name} eliminado.")
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Baja lógica de fichas sin usuario (PLAN_BAJA_USUARIOS.md §6). Las fichas
+# con usuario se gestionan desde Usuarios (/auth).
+# ---------------------------------------------------------------------------
+
+@router.get("/agents/{agent_id}/offboarding")
+async def agent_offboarding_summary(
+    agent_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """JSON del modal de baja (§6.1) para una ficha sin usuario."""
+    denied = json_admin_denied(request)
+    if denied:
+        return denied
+
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        return JSONResponse(status_code=404, content={"detail": "Agente no encontrado"})
+
+    if offboarding_service.find_user(db, agent) is not None:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": f"{agent.name} tiene usuario: dale de baja desde Usuarios"},
+        )
+
+    summary = offboarding_service.summary_for_agent(db, agent)
+    return JSONResponse(content=offboarding_service.summary_to_dict(summary))
+
+
+@router.post("/agents/{agent_id}/deactivate")
+async def deactivate_agent(
+    agent_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Da de baja una ficha sin usuario, reasignando sus alertas abiertas (§5)."""
+    denied = deny_if_not_admin(request, "/agents")
+    if denied:
+        return denied
+
+    response = RedirectResponse(url="/agents", status_code=303)
+
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        return RedirectResponse(url="/agents?error=agent_not_found", status_code=303)
+
+    form = await request.form()
+
+    try:
+        summary = offboarding_service.deactivate(
+            db,
+            agent=agent,
+            by_user=request.state.user,
+            reassign_to=reassign_to_from_form(form),
+            reason=form.get("reason"),
+        )
+        set_flash(response, "success", offboarding_service.deactivation_message(summary))
+
+    except OffboardingError as e:
+        set_flash(response, "error", str(e))
+
+    return response
+
+
+@router.post("/agents/{agent_id}/reactivate")
+async def reactivate_agent(
+    agent_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Reactiva una ficha sin usuario (§2-5)."""
+    denied = deny_if_not_admin(request, "/agents")
+    if denied:
+        return denied
+
+    response = RedirectResponse(url="/agents", status_code=303)
+
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        return RedirectResponse(url="/agents?error=agent_not_found", status_code=303)
+
+    try:
+        offboarding_service.reactivate(db, agent=agent)
+        set_flash(
+            response,
+            "success",
+            f"{agent.name} reactivado. Lo que se reasignó en la baja no vuelve solo."
+        )
+
+    except OffboardingError as e:
+        set_flash(response, "error", str(e))
+
+    return response
 
 
 @router.post("/agents/{agent_id}/upload-signature")

@@ -32,6 +32,13 @@ def get_current_user(
             detail="User not found"
         )
 
+    # Dado de baja (NULL cuenta como activo), PLAN_BAJA_USUARIOS.md §4.1
+    if user.is_active is False:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario dado de baja"
+        )
+
     return user
 
 

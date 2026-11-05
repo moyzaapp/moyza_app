@@ -9,6 +9,8 @@
     el resumen y el nuevo "Ver más"; el JS las añade a la tabla existente.
   - Captaciones y bajadas: título/referencia y ciudad, sin dirección
     (decisión §4, nota).
+  - Cierres: registros manuales del admin (fecha sin hora, operación,
+    propiedad opcional y nota). PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1.
 #}
 {% import "components/ui_macros.html" as ui %}
 
@@ -69,10 +71,9 @@
   <th scope="col" class="{{ th }}">Motivo</th>
   {% elif key == 'cierres' %}
   <th scope="col" class="{{ th }}">Fecha</th>
-  <th scope="col" class="{{ th }}">Comprador</th>
+  <th scope="col" class="{{ th }}">Operación</th>
   <th scope="col" class="{{ th }}">Propiedad</th>
-  <th scope="col" class="{{ th }}">Tipo</th>
-  <th scope="col" class="{{ th }}">Nota del cierre</th>
+  <th scope="col" class="{{ th }}">Nota</th>
   {% else %}
   <th scope="col" class="{{ th }}">Fecha</th>
   <th scope="col" class="{{ th }}">Visitante</th>
@@ -85,7 +86,12 @@
 
 {% macro table_row(r) -%}
 <tr class="hover:bg-gray-50 transition-colors" data-metric-row>
+  {% if key == 'cierres' %}
+  {# Cierre manual: fecha sin hora ni zona horaria #}
+  <td class="{{ td }} whitespace-nowrap tabular-nums">{{ r.date.strftime('%d/%m/%Y') }}</td>
+  {% else %}
   {{ date_cell(r.date) }}
+  {% endif %}
   {% if key == 'contactos' %}
     {{ buyer_cell(r) }}
     {{ property_cell(r) }}
@@ -107,9 +113,8 @@
     </td>
     <td class="{{ td }}">{{ r.reason or '–' }}</td>
   {% elif key == 'cierres' %}
-    {{ buyer_cell(r) }}
-    {{ property_cell(r, 'Sin propiedad') }}
     <td class="{{ td }}">{{ kind_badge(r.kind) }}</td>
+    {{ property_cell(r, 'Sin propiedad') }}
     <td class="{{ td }} min-w-[12rem]">{{ r.notes or '–' }}</td>
   {% else %}
     <td class="{{ td }} font-medium text-gray-900">{{ r.visitor_name }}</td>

@@ -21,6 +21,7 @@ import pytest
 from app.models.agent import Agent
 from app.models.agent_performance_report import AgentPerformanceReport
 from app.models.alert_follow_up import AlertFollowUp
+from app.models.closing import Closing
 from app.models.property import Property
 from app.models.property_alert import PropertyAlert
 from app.models.property_price_history import PropertyPriceHistory
@@ -139,6 +140,13 @@ def _alert(c, prop, business_type, created_at, agent=None, company=None, closed_
     return alert
 
 
+def _closing(c, closed_on, business_type="Venta", prop=None, agent=None, company=None, notes="Firmado"):
+    """Cierre registrado a mano (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1)."""
+    c.db.add(Closing(company_id=(company or c.moyza).id, agent_id=(agent or c.agent).id,
+                     business_type=business_type, closed_on=closed_on,
+                     property_id=prop.id if prop else None, notes=notes, created_by=c.user.id))
+
+
 def _visit(c, prop, created_at, agent=None, companion=None):
     c.db.add(PropertyVisit(property_id=prop.id, visitor_name="PYTEST VISITANTE",
                            agent_id=agent.id if agent else None,
@@ -168,7 +176,8 @@ def _seed(c):
     _drop(c, moes, IN)
     _drop(c, ajena, IN)
 
-    # Contactos: venta, alquiler, búsqueda sin propiedad (venta); sin tipo no cuenta (otros)
+    # Contactos: venta, alquiler, búsqueda sin propiedad (venta); sin tipo no cuenta (otros).
+    # Los seguimientos «Cerrado» ya no son cierres: no deben sumar en cierres
     _alert(c, venta, "Venta", IN, closed_at=IN)
     _alert(c, alquiler, "Alquiler", IN, closed_at=IN_LATE)
     _alert(c, None, "Venta", IN, company=c.moyza, closed_at=IN)       # búsqueda general cerrada
@@ -179,6 +188,16 @@ def _seed(c):
     # Seguimiento que no es cierre
     c.db.add(AlertFollowUp(alert_id=sin_tipo.id, action_type="CONTACTADO",
                            created_by=c.user.id, created_at=IN))
+
+    # Cierres manuales: venta con propiedad, alquiler sin propiedad, venta el primer
+    # y el último día del mes; fuera de mes, MOES y otro agente no cuentan
+    _closing(c, IN.date(), "Venta", prop=venta)
+    _closing(c, MARCH[0].date(), "Venta", prop=fuera)
+    _closing(c, IN_LATE.date(), "Alquiler", notes=None)
+    _closing(c, BEFORE.date(), "Venta", prop=venta)
+    _closing(c, AFTER.date(), "Alquiler")
+    _closing(c, IN.date(), "Venta", prop=moes, company=c.moes)
+    _closing(c, IN.date(), "Alquiler", prop=ajena, agent=c.other)
 
     # Visitas: principal, acompañante; MOES, otro agente y fuera de período no cuentan
     _visit(c, venta, IN, agent=c.agent)
@@ -193,7 +212,7 @@ EXPECTED_MOYZA = {
     "captaciones_crm": 4,   # venta, alquiler, traspaso, venta del último segundo
     "bajadas": 3,
     "contactos": 3,         # venta, alquiler, búsqueda (venta); el sin tipo no suma
-    "cierres": 4,           # venta, alquiler, búsqueda, sin tipo (otros)
+    "cierres": 3,           # cierres manuales: 2 venta (días 1 y 10), 1 alquiler (día 31)
     "hojas_visita": 2,
 }
 
@@ -259,7 +278,11 @@ def test_contenido_de_las_filas(ctx):
     assert all(r["new_price"] < r["old_price"] for r in drops)
 
     closings = svc.indicator_rows("cierres", ctx.agent.id, *MARCH)
-    assert {r["notes"] for r in closings} == {"Firmado"}
+    # Más reciente primero; fecha sin hora; propiedad opcional
+    assert [(r["date"].day, r["kind"]) for r in closings] == [(31, "alquiler"), (10, "venta"), (1, "venta")]
+    assert closings[0]["property_id"] is None and closings[0]["notes"] is None
+    assert (closings[1]["property_ref"], closings[1]["notes"]) == ("PYT-REF", "Firmado")
+    assert "buyer_name" not in closings[0]
 
     visits = svc.indicator_rows("hojas_visita", ctx.agent.id, *MARCH)
     assert sorted(r["role"] for r in visits) == ["acompañante", "principal"]
@@ -273,6 +296,9 @@ def test_frase_de_la_regla(ctx):
         assert "entre el 1 y el 31 de marzo de 2025" in text
     assert "fecha de entrada al mercado" in svc_cls.indicator_rule_text(
         "captaciones_crm", ctx.agent, *MARCH, ctx.moes)
+    closings_text = svc_cls.indicator_rule_text("cierres", ctx.agent, *MARCH, ctx.moyza)
+    assert "registrados por el administrador" in closings_text
+    assert "Cerrado" not in closings_text
 
 
 def test_congelado_frente_a_recalculado(ctx):

@@ -42,6 +42,7 @@ from app.models.buyer_search_criteria import BuyerSearchCriteria
 from app.services.company_scope import (
     scope_alerts,
     scope_agents,
+    scope_active_agents,
     scope_buyers,
     scope_properties,
     get_alert_in_company,
@@ -673,8 +674,10 @@ async def alerts_page(
         .all()
     )
 
-    # Agentes para el formulario de creación (solo admin). Las propiedades no se
-    # precargan: el formulario las busca por /alerts/search-properties.
+    # `agents`: filtro "Agente" del listado (solo admin). Es una consulta: incluye
+    # a los dados de baja, con "(baja)" en la opción, para ver sus alertas
+    # cerradas (PLAN_BAJA_USUARIOS.md §4.4). Las propiedades no se precargan:
+    # el formulario de alta las busca por /alerts/search-properties.
     agents = []
     assignable_groups = []
     if admin_view:
@@ -2977,7 +2980,12 @@ async def buyer_detail(
     property_types = filter_values["property_types"]
     business_types = filter_values["business_types"]
 
-    agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
+    # "Agente responsable" del perfil: solo activos (PLAN_BAJA_USUARIOS.md §4.3),
+    # más el actual si está dado de baja para que guardar el perfil no lo quite
+    # sin querer (opción "(baja)")
+    agents = scope_active_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
+    if criteria is not None and criteria.agent is not None and criteria.agent.is_active is False:
+        agents = sorted([*agents, criteria.agent], key=lambda a: a.name or "")
 
     # "Agente asignado" del formulario rápido: solo el admin elige (§4-2)
     assignable_groups = assignment.assignable_agents(db, company.id) if is_admin(current_user) else []

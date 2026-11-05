@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% from 'components/company_macros.html' import company_badges, company_checkboxes %}
+{% import 'components/ui_macros.html' as ui %}
 
 {% block title %}
 Auth - {{ brand_name }}
@@ -109,6 +110,93 @@ Auth - {{ brand_name }}
     </form>
 </div>
 
+{#
+  Estado y acciones de cada usuario (PLAN_BAJA_USUARIOS.md §7.1).
+  - Activo: Editar · Contraseña · Dar de baja · Eliminar (solo sin historial)
+  - Baja:   Reactivar · Eliminar (solo sin historial)
+  - El propio admin no tiene Dar de baja ni Eliminar.
+  `is_active` None cuenta como activo. Sin dato de historial, no se ofrece Eliminar.
+#}
+{% set user_history = history_by_user_id or {} %}
+
+{% macro user_status(user) -%}
+{% if user.is_active is sameas false %}
+<span class="inline-flex" title="{{ ('Baja desde el ' ~ (user.deactivated_at | madrid_dt('%d/%m/%Y'))) if user.deactivated_at else 'Dado de baja' }}">{{ ui.badge("Baja", "gray", dot=True) }}</span>
+{% else %}
+{{ ui.badge("Activo", "green", dot=True) }}
+{% endif %}
+{%- endmacro %}
+
+{% macro user_actions(user, is_self, can_delete, compact) -%}
+{% set base = "inline-flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20 " ~ ("w-9" if compact else "px-3") %}
+{% if user.is_active is sameas false %}
+<form action="/auth/users/{{ user.id }}/reactivate" method="POST" class="inline-flex" data-once data-loading-text="Reactivando…"
+      data-confirm="¿Reactivar a {{ user.full_name }}? Podrá volver a entrar y recibir trabajo. Lo que se reasignó en la baja no vuelve solo."
+      onsubmit="return confirm(this.dataset.confirm)">
+    <button type="submit" class="{{ base }} bg-green-50 text-green-700 hover:bg-green-100" title="Reactivar usuario" aria-label="Reactivar a {{ user.full_name }}">
+        <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/></svg>
+        {% if not compact %}Reactivar{% endif %}
+    </button>
+</form>
+{% else %}
+<button
+    type="button"
+    class="{{ base }} bg-blue-50 text-blue-700 hover:bg-blue-100"
+    title="Editar usuario"
+    aria-label="Editar a {{ user.full_name }}"
+    onclick='editUser(
+        {{ user.id | tojson }},
+        {{ user.full_name | tojson }},
+        {{ user.email | tojson }},
+        {{ (user.phone or "") | tojson }},
+        {{ (user.companies | map(attribute="id") | list) | tojson }},
+        {{ user.role_id | tojson }}
+    )'
+>
+    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"/></svg>
+    {% if not compact %}Editar{% endif %}
+</button>
+
+<button
+    type="button"
+    class="{{ base }} bg-amber-50 text-amber-700 hover:bg-amber-100"
+    title="Cambiar contraseña"
+    aria-label="Cambiar la contraseña de {{ user.full_name }}"
+    onclick='openUserPasswordModal(
+        {{ user.id | tojson }},
+        {{ user.full_name | tojson }}
+    )'
+>
+    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"/></svg>
+    {% if not compact %}Contraseña{% endif %}
+</button>
+
+{% if not is_self %}
+<button
+    type="button"
+    class="{{ base }} bg-gray-100 text-gray-700 hover:bg-gray-200"
+    title="Dar de baja"
+    aria-label="Dar de baja a {{ user.full_name }}"
+    data-deactivate="{{ {'name': user.full_name, 'summaryUrl': '/auth/users/' ~ user.id ~ '/offboarding', 'actionUrl': '/auth/users/' ~ user.id ~ '/deactivate'} | tojson | forceescape }}"
+>
+    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M22 10.5h-6m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM4 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 10.374 21c-2.331 0-4.512-.645-6.374-1.766Z"/></svg>
+    {% if not compact %}Dar de baja{% endif %}
+</button>
+{% endif %}
+{% endif %}
+
+{% if can_delete %}
+<form action="/auth/users/delete/{{ user.id }}" method="POST" class="inline-flex" data-once data-loading-text="Eliminando…"
+      data-confirm="¿Eliminar a {{ user.full_name }}? No tiene historial y se borrará del todo. Esta acción no se puede deshacer."
+      onsubmit="return confirm(this.dataset.confirm)">
+    <button type="submit" class="{{ base }} bg-red-50 text-red-700 hover:bg-red-100" title="Eliminar usuario" aria-label="Eliminar a {{ user.full_name }}">
+        <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>
+        {% if not compact %}Eliminar{% endif %}
+    </button>
+</form>
+{% endif %}
+{%- endmacro %}
+
 <div class="bg-white rounded-2xl p-4 sm:p-6 mb-6 sm:mb-8">
 
     <h2 class="text-lg sm:text-xl font-bold mb-4">
@@ -118,87 +206,50 @@ Auth - {{ brand_name }}
     <!-- Vista móvil: cards -->
     <div class="block lg:hidden space-y-4">
         {% for user in users %}
+        {% set inactive = user.is_active is sameas false %}
+        {% set is_self = current_user.id == user.id %}
+        {% set can_delete = not is_self and not user_history.get(user.id, True) %}
         <div class="border border-gray-200 rounded-xl p-4">
-            <div class="flex justify-between items-start mb-2">
-                <div class="font-semibold text-base">
-                    {{ user.full_name }}
+            <div class="{{ 'opacity-60' if inactive else '' }}">
+                <div class="flex justify-between items-start gap-3 mb-2">
+                    <div class="min-w-0">
+                        <div class="font-semibold text-base text-gray-900 break-words">
+                            {{ user.full_name }}{% if is_self %} <span class="text-sm font-normal text-gray-500">(Tú)</span>{% endif %}
+                        </div>
+                        <div class="text-sm text-gray-600 break-all">
+                            {{ user.email }}
+                        </div>
+                    </div>
+                    <div class="shrink-0 text-right">
+                        {{ user_status(user) }}
+                        {% if inactive and user.deactivated_at %}
+                        <p class="text-xs text-gray-500 mt-1">desde {{ user.deactivated_at | madrid_dt('%d/%m/%Y') }}</p>
+                        {% endif %}
+                    </div>
                 </div>
-                <div class="flex items-center gap-2">
-                    {% if user.is_active %}
-                    <span class="text-green-600 text-sm font-medium px-2 py-1 bg-green-50 rounded-lg">
-                        Activo
+                <div class="text-sm">
+                    <span class="text-gray-500">Rol:</span>
+                    <span class="font-medium">
+                        {% if user.role %}
+                            {{ user.role.name }}
+                        {% else %}
+                            Sin rol
+                        {% endif %}
                     </span>
-                    {% else %}
-                    <span class="text-red-600 text-sm font-medium px-2 py-1 bg-red-50 rounded-lg">
-                        Inactivo
+                </div>
+                <div class="text-sm">
+                    <span class="text-gray-500">Teléfono:</span>
+                    <span class="font-medium">
+                        {{ user.phone or '—' }}
                     </span>
-                    {% endif %}
-
-                    <button
-                        type="button"
-                        title="Editar usuario"
-                        class="text-blue-600 hover:text-blue-800 p-1"
-                        onclick='editUser(
-                            {{ user.id | tojson }},
-                            {{ user.full_name | tojson }},
-                            {{ user.email | tojson }},
-                            {{ (user.phone or "") | tojson }},
-                            {{ (user.companies | map(attribute="id") | list) | tojson }},
-                            {{ user.role_id | tojson }}
-                        )'
-                    >
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                        </svg>
-                    </button>
-
-                    <button
-                        type="button"
-                        title="Cambiar contraseña"
-                        class="text-amber-600 hover:text-amber-800 p-1"
-                        onclick='openUserPasswordModal(
-                            {{ user.id | tojson }},
-                            {{ user.full_name | tojson }}
-                        )'
-                    >
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                        </svg>
-                    </button>
-
-                    {% if current_user.id != user.id %}
-                    <form action="/auth/users/delete/{{ user.id }}" method="POST" onsubmit="return confirm('¿Estás seguro de eliminar este usuario?');">
-                        <button type="submit" title="Eliminar usuario" class="text-red-600 hover:text-red-800 p-1">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                            </svg>
-                        </button>
-                    </form>
-                    {% endif %}
+                </div>
+                <div class="text-sm flex items-center gap-2">
+                    <span class="text-gray-500">Empresas:</span>
+                    {{ company_badges(user.companies) }}
                 </div>
             </div>
-            <div class="text-sm text-gray-600 mb-2">
-                {{ user.email }}
-            </div>
-            <div class="text-sm">
-                <span class="text-gray-500">Rol:</span>
-                <span class="font-medium">
-                    {% if user.role %}
-                        {{ user.role.name }}
-                    {% else %}
-                        Sin rol
-                    {% endif %}
-                </span>
-            </div>
-            <div class="text-sm">
-                <span class="text-gray-500">Teléfono:</span>
-                <span class="font-medium">
-                    {{ user.phone or '—' }}
-                </span>
-            </div>
-            <div class="text-sm flex items-center gap-2">
-                <span class="text-gray-500">Empresas:</span>
-                {{ company_badges(user.companies) }}
+            <div class="flex flex-wrap gap-2 mt-3 pt-3 border-t border-gray-100">
+                {{ user_actions(user, is_self, can_delete, False) }}
             </div>
         </div>
         {% endfor %}
@@ -234,81 +285,41 @@ Auth - {{ brand_name }}
             </thead>
             <tbody>
                 {% for user in users %}
+                {% set inactive = user.is_active is sameas false %}
+                {% set is_self = current_user.id == user.id %}
+                {% set can_delete = not is_self and not user_history.get(user.id, True) %}
+                {% set dim = 'opacity-60' if inactive else '' %}
                 <tr class="border-b border-gray-100">
-                    <td class="py-4">
+                    <td class="py-4 pr-4 {{ dim }}">
                         {{ user.full_name }}
                     </td>
-                    <td class="py-4">
+                    <td class="py-4 pr-4 {{ dim }}">
                         {{ user.email }}
                     </td>
-                    <td class="py-4">
+                    <td class="py-4 pr-4 {{ dim }}">
                         {{ user.phone or '—' }}
                     </td>
-                    <td class="py-4">
+                    <td class="py-4 pr-4 {{ dim }}">
                         {{ company_badges(user.companies) }}
                     </td>
-                    <td class="py-4">
+                    <td class="py-4 pr-4 {{ dim }}">
                         {% if user.role %}
                             {{ user.role.name }}
                         {% else %}
                             Sin rol
                         {% endif %}
                     </td>
-                    <td class="py-4">
-                        {% if user.is_active %}
-                            <span class="text-green-600">
-                                Activo
-                            </span>
-                        {% else %}
-                            <span class="text-red-600">
-                                Inactivo
-                            </span>
+                    <td class="py-4 pr-4 {{ dim }}">
+                        {{ user_status(user) }}
+                        {% if inactive and user.deactivated_at %}
+                        <p class="text-xs text-gray-500 mt-1">desde {{ user.deactivated_at | madrid_dt('%d/%m/%Y') }}</p>
                         {% endif %}
                     </td>
                     <td class="py-4">
                         <div class="flex items-center gap-1">
-                            <button
-                                type="button"
-                                title="Editar usuario"
-                                class="text-blue-600 hover:text-blue-800 transition-colors p-2 rounded-lg hover:bg-blue-50"
-                                onclick='editUser(
-                                    {{ user.id | tojson }},
-                                    {{ user.full_name | tojson }},
-                                    {{ user.email | tojson }},
-                                    {{ (user.phone or "") | tojson }},
-                                    {{ (user.companies | map(attribute="id") | list) | tojson }},
-                                    {{ user.role_id | tojson }}
-                                )'
-                            >
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                                </svg>
-                            </button>
-
-                            <button
-                                type="button"
-                                title="Cambiar contraseña"
-                                class="text-amber-600 hover:text-amber-800 transition-colors p-2 rounded-lg hover:bg-amber-50"
-                                onclick='openUserPasswordModal(
-                                    {{ user.id | tojson }},
-                                    {{ user.full_name | tojson }}
-                                )'
-                            >
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                                </svg>
-                            </button>
-
-                            {% if current_user.id != user.id %}
-                            <form action="/auth/users/delete/{{ user.id }}" method="POST" onsubmit="return confirm('¿Estás seguro de eliminar este usuario?');" class="inline">
-                                <button type="submit" title="Eliminar usuario" class="text-red-600 hover:text-red-800 transition-colors p-2 rounded-lg hover:bg-red-50">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                                    </svg>
-                                </button>
-                            </form>
-                            {% else %}
-                            <span class="text-gray-400 text-sm ml-1">
+                            {{ user_actions(user, is_self, can_delete, True) }}
+                            {% if is_self %}
+                            <span class="text-gray-500 text-sm ml-1">
                                 (Tú)
                             </span>
                             {% endif %}

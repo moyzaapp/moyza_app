@@ -47,6 +47,21 @@ def scope_agents(query, company_id: int):
     return query.filter(Agent.companies.any(Company.id == company_id))
 
 
+def active_agents(query):
+    """Solo fichas activas (baja lógica, PLAN_BAJA_USUARIOS.md §4.2).
+
+    Para los sitios donde un agente recibe trabajo nuevo (selectores de
+    asignación, equipo del Inicio, snapshots nuevos). Listados, filtros e
+    historial siguen usando `scope_agents` y ven también a los inactivos.
+    """
+    return query.filter(Agent.is_active.is_(True))
+
+
+def scope_active_agents(query, company_id: int):
+    """Agentes activos de la empresa (PLAN_BAJA_USUARIOS.md §4.2)."""
+    return active_agents(scope_agents(query, company_id))
+
+
 def scope_clients(query, company_id: int):
     return query.filter(Client.companies.any(Company.id == company_id))
 

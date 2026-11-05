@@ -92,7 +92,7 @@
                                 <span class="text-gray-600 text-xs">{{ visit.email }}</span>
                             {% endif %}
                             {% if visit.phone %}
-                                <span class="text-gray-600 text-xs">Tel: +{{ visit.phone }}</span>
+                                <span class="text-gray-600 text-xs">Tel: {{ visit.phone | phone_display }}</span>
                             {% endif %}
                             {% if not visit.dni and not visit.email and not visit.phone %}
                                 <span>-</span>

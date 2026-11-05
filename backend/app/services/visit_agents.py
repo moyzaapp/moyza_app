@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.agent import Agent
 from app.models.company import Company
+from app.services.company_scope import active_agents
 from app.services.company_scope import get_agent_in_company
 from app.web.dependencies.auth import get_agent_from_user
 from app.web.dependencies.auth import is_admin
@@ -92,7 +93,7 @@ def resolve_visit_agents(
         if companion_agent_id == agent_id:
             raise VisitAgentsError("El agente acompañante debe ser distinto del que realizó la visita")
         if lookup_any_agent(companion_agent_id) is None:
-            raise VisitAgentsError("El agente acompañante no existe o ya no pertenece a ninguna empresa")
+            raise VisitAgentsError("El agente acompañante no existe, está dado de baja o ya no pertenece a ninguna empresa")
 
     return agent_id, companion_agent_id
 
@@ -115,7 +116,12 @@ def parse_visit_agents(form, request, db, property_item, visit=None, locked=Fals
         return get_agent_in_company(db, agent_id, company_id)
 
     def lookup_any_agent(agent_id):
-        return get_agent_in_any_company(db, agent_id)
+        agent = get_agent_in_any_company(db, agent_id)
+        # El acompañante ya fijado en la visita se conserva aunque esté dado
+        # de baja (PLAN_BAJA_USUARIOS.md §4.3); solo no se le pueden asignar nuevas.
+        if agent is None and visit is not None and agent_id == visit.companion_agent_id:
+            return visit.companion_agent
+        return agent
 
     return resolve_visit_agents(
         form,
@@ -132,9 +138,12 @@ def parse_visit_agents(form, request, db, property_item, visit=None, locked=Fals
 # ---------------------------------------------------------------------------
 
 def get_agent_in_any_company(db: Session, agent_id: int):
-    """Agente que pertenece al menos a una empresa activa, sin mirar la activa."""
+    """Agente activo que pertenece al menos a una empresa activa, sin mirar la activa.
+
+    Los dados de baja no reciben trabajo nuevo (PLAN_BAJA_USUARIOS.md §4.3).
+    """
     return (
-        db.query(Agent)
+        active_agents(db.query(Agent))
         .filter(Agent.id == agent_id, Agent.companies.any(Company.is_active.is_(True)))
         .first()
     )
@@ -159,8 +168,9 @@ def companion_agent_groups(db: Session, active_company_id: int) -> list[dict]:
     )
     names = {c.id: c.name for c in companies}
 
+    # Solo activos: los dados de baja no reciben trabajo nuevo (PLAN_BAJA_USUARIOS.md §4.3)
     agents = (
-        db.query(Agent)
+        active_agents(db.query(Agent))
         .options(selectinload(Agent.companies))
         .filter(Agent.companies.any(Company.is_active.is_(True)))
         .order_by(Agent.name)

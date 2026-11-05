@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import Column
 from sqlalchemy import Integer
+from sqlalchemy import Boolean
 from sqlalchemy import String
 from sqlalchemy import DateTime
 
@@ -28,6 +29,12 @@ class Agent(Base):
     zone = Column(String, nullable=True)
 
     company = Column(String, nullable=True)
+
+    # Baja lógica (PLAN_BAJA_USUARIOS.md §3): un inactivo no recibe trabajo
+    # nuevo pero conserva su historial
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true", index=True)
+
+    deactivated_at = Column(DateTime, nullable=True)
 
     # Campos de firma digital del agente
     signature_filename = Column(
