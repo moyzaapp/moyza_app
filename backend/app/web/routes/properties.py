@@ -12,7 +12,7 @@ from fastapi.responses import RedirectResponse
 
 from app.web.template_env import templates
 
-from sqlalchemy import or_, cast, Integer, case, func
+from sqlalchemy import or_, cast, Integer, case, func, null
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -145,33 +145,40 @@ def _build_change_logs(property_obj, new_values: dict, user_id: int, db) -> list
     return logs
 
 
-def _readonly_property_rows(query, search: str) -> list[dict]:
+def _readonly_property_rows(query, search: str, include_address: bool = True) -> list[dict]:
     """Filas de solo lectura para "Resto de propiedades" y "Propiedades de {otra empresa}".
 
     Se construyen con `with_entities` sobre columnas explícitas (sin
     `Property.client`/`client_id`) para que el propietario ni siquiera se
     cargue desde el backend, en vez de depender de que la plantilla
     simplemente no lo muestre. Incluye el nombre del agente captador.
+
+    Con `include_address=False` la calle tampoco sale del servidor: no se
+    carga `Property.address` (la fila lleva `address=None`) y la búsqueda por
+    texto no mira la dirección, para que no se pueda adivinar buscándola
+    (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.2).
     """
     query = query.outerjoin(Agent, Agent.id == Property.agent_id)
 
     if search:
         pattern = f"%{search}%"
-        query = query.filter(
-            or_(
-                Property.title.ilike(pattern),
-                Property.address.ilike(pattern),
-                Property.city.ilike(pattern),
-                Property.referencia.ilike(pattern),
-            )
-        )
+        conditions = [
+            Property.title.ilike(pattern),
+            Property.city.ilike(pattern),
+            Property.referencia.ilike(pattern),
+        ]
+        if include_address:
+            conditions.append(Property.address.ilike(pattern))
+        query = query.filter(or_(*conditions))
+
+    address_column = Property.address if include_address else null().label("address")
 
     rows = (
         query
         .with_entities(
             Property.id,
             Property.title,
-            Property.address,
+            address_column,
             Property.city,
             Property.zona,
             Property.property_type,
@@ -347,6 +354,8 @@ async def properties_page(
     # Pestañas de las otras empresas: contador por empresa y filas solo de la
     # seleccionada. Mismo criterio de inventario que "Resto de propiedades".
     other_company_tabs = []
+    # False solo si la calle de la otra empresa se oculta (ver más abajo)
+    readonly_address_visible = True
 
     for other in other_companies:
         other_company_base = scope_properties(
@@ -363,7 +372,19 @@ async def properties_page(
         })
 
         if selected_other_company is not None and other.id == selected_other_company.id:
-            other_properties = _readonly_property_rows(other_company_base, search)
+            # La calle de una propiedad de otra empresa solo la ve quien puede
+            # usar esa empresa (las suyas y las de su ficha de agente, en
+            # `request.state.allowed_companies`); el admin, todas. Si no, la
+            # fila se queda en población y zona. Por ahora solo en esta
+            # pestaña: sugerencias, alertas, compradores y visitas se tratarán
+            # más adelante (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.2).
+            allowed_ids = {c.id for c in getattr(request.state, "allowed_companies", None) or []}
+            readonly_address_visible = admin_view or other.id in allowed_ids
+            other_properties = _readonly_property_rows(
+                other_company_base,
+                search,
+                include_address=readonly_address_visible,
+            )
 
     return templates.TemplateResponse(
         request=request,
@@ -388,6 +409,7 @@ async def properties_page(
             "company_name": company.name,
             "other_company_tabs": other_company_tabs,
             "selected_other_company": selected_other_company,
+            "readonly_address_visible": readonly_address_visible,
         }
     )
 

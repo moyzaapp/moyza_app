@@ -2,10 +2,17 @@
   Tabla de solo lectura compartida por "Resto de propiedades" y
   "Propiedades de {otra empresa}". Sin datos del propietario y sin enlace
   al detalle. Variables: other_properties, search, readonly_tab,
-  readonly_company_id, readonly_tab_href, readonly_empty_text.
+  readonly_company_id, readonly_tab_href, readonly_empty_text,
+  readonly_address_visible.
+
+  Sin readonly_address_visible (propiedades de una empresa a la que el
+  usuario no pertenece) las filas llegan sin calle (address = None) y la
+  búsqueda no mira la dirección: se queda la columna Ciudad / Zona.
 #}
 {% import "components/ui_macros.html" as ui %}
 {% set readonly_tab_href = readonly_tab_href or "/properties?tab=others" %}
+{% set readonly_address_visible = readonly_address_visible is not defined or readonly_address_visible %}
+{% set readonly_search_fields = "título, dirección, ciudad o referencia" if readonly_address_visible else "título, ciudad o referencia" %}
 
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
@@ -23,7 +30,7 @@
                 type="search"
                 id="readonly_search"
                 name="search"
-                placeholder="Buscar por título, dirección, ciudad o referencia..."
+                placeholder="Buscar por {{ readonly_search_fields }}..."
                 value="{{ search or '' }}"
                 class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
             >
@@ -97,7 +104,9 @@
                 <td data-sort-value="{{ property.title or '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
                     <div class="flex flex-col">
                         <span class="font-medium">{{ property.title }}</span>
+                        {% if readonly_address_visible %}
                         <span class="text-xs text-gray-500">{{ (property.address | street) or '-' }}</span>
+                        {% endif %}
                     </div>
                 </td>
 
@@ -144,7 +153,7 @@
             {% if not other_properties %}
 
             {% if search %}
-            {{ ui.empty_state('No se encontraron propiedades para "' ~ search ~ '"', hint="Prueba con otro título, dirección, ciudad o referencia.", colspan=8) }}
+            {{ ui.empty_state('No se encontraron propiedades para "' ~ search ~ '"', hint="Prueba con otro " ~ readonly_search_fields ~ ".", colspan=8) }}
             {% else %}
             {{ ui.empty_state(readonly_empty_text or "No hay más propiedades activas en el inventario de la empresa", colspan=8) }}
             {% endif %}
