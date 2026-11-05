@@ -97,6 +97,17 @@ cualquier agente en:
 
 ## 5. Estado
 
-Árbol limpio al empezar (el usuario commiteó la tanda de visitas y la baja de usuarios en
-`37de935`). Migración de cierres tras `f5a6b7c8d9e0`. Ejecución con agentes Opus 5.5 high: un
-agente para A+B (un commit por fase) y otro para C, en paralelo.
+Hecho el 2026-11-04 (commits `97489be` fase C, `30ce6ef` fase A, `4d8b6b8` fase B, `dc02e1c`
+pestañas en móvil). Suite: 3 fallos, los mismos del baseline. Comprobado a 375 px por CDP.
+
+Decisiones de implementación: `Closing.business_type` es `String` con "Venta"/"Alquiler";
+la actividad del Inicio usa `created_at` (cuándo se registró); el refresco de snapshots solo
+toca mes y año (la semana no tiene objetivo de cierres); el selector de propiedad es un
+`<select>` (cambiar por buscador si el inventario crece); un error de alta devuelve flash y no
+conserva lo escrito. En la pestaña de la otra empresa el texto del buscador deja de mencionar
+"dirección" cuando la calle no se ve.
+
+Despliegue: `alembic upgrade head` (`a6b7c8d9e0f1`, tabla `closings`); no hay migración de
+datos, así que la métrica en vivo arranca en 0 hasta que el admin registre cierres y los
+snapshots ya congelados conservan la cifra antigua hasta que se registre o borre un cierre de
+ese período. El CSS se recompila en la build de la imagen.
