@@ -74,4 +74,15 @@ Fuera de alcance: el email diario y la campana de los agentes (siguen con las do
 
 ## 5. Estado
 
-En ejecución con un agente Opus 5.5 high (tres commits, uno por fase).
+Hecho el 2026-11-10: `b98f7d0` (fase A), `d44f827` (fase B), `f6acbbd` (fase C). Suite con los
+3 fallos del baseline. Comprobado a 375 px (ventana, listado filtrado, barra de selección, modal).
+
+Decisiones de implementación: "ya reasignada" = `previous_agent_id` relleno (solo lo pone
+`assign(is_new=False)`, que a la vez mueve `assigned_at`; incluye cesiones), expuesto como
+`reassigned` en `as_dict()`; con el filtro activo se ocultan las casillas de estado y el orden es
+solo por fecha de asignación ascendente; la marca "Reasignada el dd/mm · antes Nombre" solo se
+pinta en el listado filtrado; la reasignación múltiple (`POST /alerts/reassign-bulk`) reutiliza
+`assign_fields("rb", mode="reassign")`, valida cada alerta como la individual, cada una en su
+savepoint y un solo commit, y muestra dos flashes (éxitos y fallos) con `set_flashes`.
+
+Sin cambios de BD ni de despliegue (el CSS se recompila en la build).
