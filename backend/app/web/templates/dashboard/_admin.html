@@ -235,7 +235,7 @@
             <div class="min-w-0 flex-1">
                 <p class="text-sm font-medium text-gray-900 truncate">{{ g.agent_name }}</p>
                 <p class="text-xs text-gray-500">{{ g.count }} sin gestionar · el más antiguo, <span class="font-medium text-red-700">{{ g.oldest_label }} hábiles</span></p>
-                {% if g.reassigned %}<p class="text-xs font-medium text-red-700">{{ g.reassigned }} {{ "ya reasignada y sigue" if g.reassigned == 1 else "ya reasignadas y siguen" }} sin gestión</p>{% endif %}
+                {% if g.reassigned %}<p class="text-xs font-medium text-red-700">{{ g.reassigned }} {{ "ya reasignada y sigue" if g.reassigned == 1 else "ya reasignadas y siguen" }} sin gestionar</p>{% endif %}
             </div>
             {{ ui.button("Ver compradores", "secondary", href="/alerts?agent_id=" ~ g.agent_id ~ "&attention=sin_gestion", full_mobile=True) }}
         </li>

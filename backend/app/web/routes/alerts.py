@@ -845,7 +845,7 @@ async def alerts_page(
             }
 
     # Compradores que requieren atención (PLAN_RECORDATORIO_SIN_RESPUESTA.md):
-    # badge «Volver a llamar · intento N de 3» o «Sin gestión» en horas hábiles.
+    # badge «Volver a llamar · intento N de 3», «Sin gestionar» o «Sin actividad» en horas hábiles.
     # Se calcula sobre los seguimientos ya cargados de la página, sin consultas nuevas.
     alert_attention = buyer_attention_service.evaluate_alerts(alerts)
 

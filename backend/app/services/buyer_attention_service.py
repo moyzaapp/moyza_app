@@ -12,12 +12,13 @@ PLAN_ALERTAS_DIAS_HABILES.md, ajustado por PLAN_RECORDATORIO_SIN_RESPUESTA.md
   último «Sin respuesta». El tercer intento pide cerrar la alerta como «Sin
   interés». Cualquier seguimiento posterior la resuelve (otro «Sin respuesta»
   abre el intento siguiente).
-- **R1 · Sin gestión** (`no_action`, como antes): si R3 no aplica, horas
-  hábiles desde el último seguimiento real (sin notas del sistema como
-  `REASIGNADA`) registrado desde la asignación o, si no hay ninguno, desde la
-  asignación. Umbral `settings.BUYER_REMINDER_HOURS` (48 h hábiles). Cubre las
-  alertas nunca gestionadas, las que tienen otra gestión como último
-  seguimiento y las que acumulan más de 3 «Sin respuesta» seguidos.
+- **R1** (`no_action`, como antes): si R3 no aplica, horas hábiles desde el
+  último seguimiento real (sin notas del sistema como `REASIGNADA`) registrado
+  desde la asignación o, si no hay ninguno, desde la asignación. Umbral
+  `settings.BUYER_REMINDER_HOURS` (48 h hábiles). Se muestra como **«Sin
+  gestionar»** si no hay ninguna gestión desde la asignación (`never_managed`)
+  y como **«Sin actividad»** si la hubo y luego nada (otra gestión como último
+  seguimiento, o más de 3 «Sin respuesta» seguidos).
 
 La antigua R2 «sin avance de Primera llamada» ya no existe.
 
@@ -54,10 +55,14 @@ from app.services import alert_view
 RULE_CALLBACK = "callback"
 RULE_NO_ACTION = "no_action"
 
+# R1 se nombra según haya habido o no alguna gestión desde la asignación
+# (petición del 2026-11-10: «Sin gestión» bajo una etapa «Contactado» confundía):
+# «Sin gestionar» = ninguna; «Sin actividad» = hubo gestión y luego nada.
 RULE_LABELS = {
     RULE_CALLBACK: "Volver a llamar",
-    RULE_NO_ACTION: "Sin gestión",
+    RULE_NO_ACTION: "Sin gestionar",
 }
+NO_ACTIVITY_LABEL = "Sin actividad"
 
 _ORDINALS = {1: "Primer", 2: "Segundo", 3: "Tercer", 4: "Cuarto", 5: "Quinto"}
 
@@ -142,6 +147,13 @@ class BuyerAttention:
         return f"intento {self.attempts} de {self.max_attempts}" if self.is_callback else ""
 
     @property
+    def rule_label(self) -> str:
+        """'Volver a llamar', 'Sin gestionar' (R1 sin ninguna gestión) o 'Sin actividad' (R1 parada)."""
+        if self.rule == RULE_NO_ACTION and not self.never_managed:
+            return NO_ACTIVITY_LABEL
+        return RULE_LABELS[self.rule]
+
+    @property
     def text(self) -> str:
         """Frase completa para el Inicio, el email y las notificaciones."""
         if self.is_callback:
@@ -149,14 +161,14 @@ class BuyerAttention:
                 ordinal = _ORDINALS.get(self.attempts, "Último")
                 return f"{ordinal} intento sin respuesta · cierra la alerta (Sin interés)"
             return f"Intento {self.attempts} de {self.max_attempts} sin respuesta · vuelve a llamar"
-        return f"{self.elapsed_label} hábiles sin gestión"
+        return f"{self.elapsed_label} hábiles {self.rule_label.lower()}"
 
     @property
     def badge(self) -> str:
         """Texto corto del badge del listado."""
         if self.is_callback:
             return f"Volver a llamar · {self.attempt_label}"
-        return f"Sin gestión · {self.elapsed_label} hábiles"
+        return f"{self.rule_label} · {self.elapsed_label} hábiles"
 
     def as_dict(self) -> dict:
         """Forma de `get_pending_buyers_by_agent` (Inicio y email) + campos de la regla."""
@@ -170,7 +182,7 @@ class BuyerAttention:
             "since_label": self.since_label,
             "hours_elapsed": int(self.business_hours_elapsed),
             "rule": self.rule,
-            "rule_label": RULE_LABELS[self.rule],
+            "rule_label": self.rule_label,
             "due_at": self.due_at,
             "due_label": self.due_label,
             "business_hours_elapsed": self.business_hours_elapsed,

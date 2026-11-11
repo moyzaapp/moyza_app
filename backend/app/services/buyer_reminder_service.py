@@ -123,7 +123,7 @@ def _build_email_body(
     hours_threshold: int,
     system_name: str = "sistema MOYZA",
 ) -> str:
-    """Email diario con dos secciones: "Pendientes de volver a llamar" (R3) y "Sin gestión" (R1).
+    """Email diario con dos secciones: "Pendientes de volver a llamar" (R3) y "Sin gestionar o sin actividad" (R1).
 
     Horas hábiles (lunes a viernes sin festivos de Jaén). Cada comprador sale
     una sola vez, en la sección de su regla.
@@ -143,11 +143,13 @@ def _build_email_body(
         ],
         callback,
     ) + _section(
-        "Sin gestión",
-        f"Llevan más de <strong>{hours_threshold} horas hábiles</strong> sin ninguna gestión registrada. "
+        "Sin gestionar o sin actividad",
+        f"Llevan más de <strong>{hours_threshold} horas hábiles</strong> sin ninguna gestión desde que se "
+        "asignaron («Sin gestionar») o sin nada nuevo desde la última («Sin actividad»). "
         "Registra un seguimiento (también «Sin respuesta» si no contestan).",
         [
-            ("Sin gestión (horas hábiles)", lambda b: b["elapsed_label"], True),
+            ("Situación", lambda b: b.get("rule_label") or "Sin gestionar", False),
+            ("Horas hábiles", lambda b: b["elapsed_label"], True),
             ("Venció el", lambda b: b["due_label"], False),
         ],
         no_action,

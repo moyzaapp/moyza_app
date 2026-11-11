@@ -250,7 +250,8 @@ def test_sin_agente_aisla_por_empresa(data):
 def test_agente_ignora_el_parametro(data):
     status, body, _ = _Client(EMAIL.format("ana"), "MOYZA").get("/alerts?attention=sin_gestion")
     assert status == 200
-    assert "Sin gestionar ·" not in body
+    # Sin chip del filtro (el badge «Sin gestionar · N d hábiles» de una fila sí puede salir)
+    assert "Quitar el filtro Sin gestionar" not in body
     assert 'name="attention"' not in body
     # Vista por defecto de siempre (abiertas, con las casillas de estado)
     assert "Mostrando alertas pendientes y en proceso" in body

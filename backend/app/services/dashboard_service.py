@@ -112,14 +112,21 @@ def long_date_es(value) -> str:
 
 
 def attention_summary(buyers: list) -> str:
-    """'2 pendientes de volver a llamar · 1 sin gestión' (filas de `get_pending_buyers_by_agent`)."""
+    """'2 pendientes de volver a llamar · 1 sin gestionar · 1 sin actividad' (filas de `get_pending_buyers_by_agent`).
+
+    R1 se parte en «sin gestionar» (ninguna gestión desde la asignación) y «sin
+    actividad» (hubo gestión y luego nada), como el badge del listado.
+    """
     callback = sum(1 for b in buyers if b["rule"] == RULE_CALLBACK)
-    no_action = sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION)
+    unmanaged = sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION and b.get("never_managed"))
+    stalled = sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION and not b.get("never_managed"))
     parts = []
     if callback:
         parts.append(f"{callback} {'pendiente' if callback == 1 else 'pendientes'} de volver a llamar")
-    if no_action:
-        parts.append(f"{no_action} sin gestión")
+    if unmanaged:
+        parts.append(f"{unmanaged} sin gestionar")
+    if stalled:
+        parts.append(f"{stalled} sin actividad")
     return " · ".join(parts)
 
 

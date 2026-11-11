@@ -457,7 +457,7 @@ def _buyer_notification_text(item) -> tuple[str, str]:
         else:
             body += " Vuelve a llamar y registra el seguimiento."
         return f"Vuelve a llamar · {name}", body
-    return (f"Comprador sin gestión · {name}",
+    return (f"Comprador {item.rule_label.lower()} · {name}",
             f"{item.text} · venció el {item.due_label}. Registra un seguimiento.")
 
 

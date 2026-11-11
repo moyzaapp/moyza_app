@@ -256,7 +256,7 @@ def test_ventana_de_inicio_solo_con_compradores_sin_gestionar(setup):
         assert "data-auto-open-on-login" in modal
         assert f"{TAG} CAPTADOR" in text
         assert "2 sin gestionar · el más antiguo," in text
-        assert "1 ya reasignada y sigue sin gestión" in text
+        assert "1 ya reasignada y sigue sin gestionar" in text
         assert f"/alerts?agent_id={setup['owner_id']}&amp;attention=sin_gestion" in modal
         # El visitante solo tiene un "volver a llamar": fuera de la ventana, pero en "Requiere atención"
         assert f"{TAG} VISITANTE" not in text
