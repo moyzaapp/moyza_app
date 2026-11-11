@@ -706,7 +706,9 @@ class DashboardService:
 
         week_block = self.admin_period_block(week, agents, now=now)
         month_block = self.admin_period_block(month, agents, now=now)
-        pending = self.pending_buyers_by_agent(agents, now=now)
+        # Una sola consulta de atención para la sección y la ventana de inicio
+        raw_pending = self._pending_buyers(now)
+        pending = self.pending_buyers_by_agent(agents, now=now, raw=raw_pending)
 
         # Visitas y contactos (sin objetivo) solo del mes, frente al mes anterior (D4)
         prev_month = self.previous_period(month, now=now)
@@ -728,6 +730,7 @@ class DashboardService:
             "feed": self.activity_feed(now),
             "trend": self.team_trend(agents, week, now=now),
             "pending_by_agent": pending,
+            "unmanaged_by_agent": self.unmanaged_by_agent(agents, now=now, raw=raw_pending),
             "recent_cessions": self.recent_cessions(now),
             "recent_cessions_days": DashboardThresholds.RECENT_CESSIONS_DAYS,
         }
@@ -880,16 +883,20 @@ class DashboardService:
 
     # -- Requiere atención -------------------------------------------------
 
-    def pending_buyers_by_agent(self, agents, now: Optional[datetime] = None) -> list:
+    def _pending_buyers(self, now: Optional[datetime] = None) -> dict:
+        """{(agent_id, company_id): [filas]} de los compradores que requieren atención en la empresa."""
+        return get_pending_buyers_by_agent(
+            self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id,
+        )
+
+    def pending_buyers_by_agent(self, agents, now: Optional[datetime] = None, raw: Optional[dict] = None) -> list:
         """Compradores que requieren atención agrupados por agente (horas hábiles).
 
         Por grupo: total, cuántos "volver a llamar" (R3, y de ellos en el
         último intento) y cuántos "sin gestión" (R1), y el más antiguo en horas
-        hábiles.
+        hábiles. `raw`: resultado de `_pending_buyers` ya calculado.
         """
-        pending = get_pending_buyers_by_agent(
-            self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id,
-        )
+        pending = raw if raw is not None else self._pending_buyers(now)
         names = {a.id: a.name for a in agents}
         groups = []
         for (agent_id, company_id), buyers in pending.items():
@@ -906,6 +913,37 @@ class DashboardService:
                 "oldest_hours": int(oldest),
                 "oldest_label": format_business_duration(oldest),
                 "summary": attention_summary(buyers),
+            })
+        return sorted(groups, key=lambda g: (-g["count"], -g["oldest_hours"]))
+
+    def unmanaged_by_agent(self, agents, now: Optional[datetime] = None, raw: Optional[dict] = None) -> list:
+        """Compradores sin gestionar agrupados por agente (ventana de inicio del admin).
+
+        PLAN_VENTANA_SIN_GESTION.md: solo R1 con `never_managed` (ninguna
+        gestión desde la asignación; en las reasignadas, desde la última
+        reasignación). Fuera los "volver a llamar" y las "paradas", que siguen
+        en "Requiere atención". Por grupo: `count`, el más antiguo en horas
+        hábiles y `reassigned`, cuántas llegaron al agente por una
+        reasignación o cesión (`previous_agent_id`, ver `BuyerAttention.as_dict`)
+        y siguen sin gestión. `raw`: resultado de `_pending_buyers` ya calculado.
+        """
+        pending = raw if raw is not None else self._pending_buyers(now)
+        names = {a.id: a.name for a in agents}
+        groups = []
+        for (agent_id, company_id), buyers in pending.items():
+            if company_id != self.company_id:
+                continue
+            unmanaged = [b for b in buyers if b["never_managed"]]
+            if not unmanaged:
+                continue
+            oldest = max(b["business_hours_elapsed"] for b in unmanaged)
+            groups.append({
+                "agent_id": agent_id,
+                "agent_name": names.get(agent_id) or "Sin agente",
+                "count": len(unmanaged),
+                "reassigned": sum(1 for b in unmanaged if b["reassigned"]),
+                "oldest_hours": int(oldest),
+                "oldest_label": format_business_duration(oldest),
             })
         return sorted(groups, key=lambda g: (-g["count"], -g["oldest_hours"]))
 

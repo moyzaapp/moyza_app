@@ -239,6 +239,36 @@ def test_callback_state():
 
 
 # ---------------------------------------------------------------------------
+# never_managed (PLAN_VENTANA_SIN_GESTION.md)
+# ---------------------------------------------------------------------------
+
+def test_never_managed_r1_sin_ninguna_gestion():
+    # La nota REASIGNADA no es gestión; la reasignada solo mira desde la reasignación
+    alert = _alert(
+        L(2026, 10, 19, 9, 0),
+        [_fu("CONTACTADO", L(2026, 10, 1, 10, 0)), _fu("REASIGNADA", L(2026, 10, 19, 9, 0))],
+        created=L(2026, 9, 30, 9, 0),
+    )
+    item = _eval(alert, L(2026, 10, 21, 9, 0))
+    assert item.rule == RULE_NO_ACTION and item.never_managed
+    assert item.as_dict()["never_managed"] is True
+
+
+def test_never_managed_falso_en_r1_parada():
+    # Gestionada y luego nada en más de 48 h hábiles
+    alert = _alert(L(2026, 10, 13, 9, 0), [_fu("CONTACTADO", L(2026, 10, 13, 10, 0))])
+    item = _eval(alert, L(2026, 10, 16, 10, 0))
+    assert item.rule == RULE_NO_ACTION and not item.never_managed
+    assert item.as_dict()["never_managed"] is False
+
+
+def test_never_managed_falso_en_r3():
+    alert = _alert(L(2026, 10, 13, 9, 0), [_fu("SIN_RESPUESTA", L(2026, 10, 13, 10, 0))])
+    item = _eval(alert, L(2026, 10, 14, 10, 0))
+    assert item.rule == RULE_CALLBACK and not item.never_managed
+
+
+# ---------------------------------------------------------------------------
 # Base de datos
 # ---------------------------------------------------------------------------
 

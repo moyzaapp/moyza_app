@@ -318,3 +318,59 @@ def test_admin_home_kpis_equipo_cumplimiento_y_atencion(ctx):
     missing = [i for i in home["attention"] if i["icon"] == "flag"]
     assert len(missing) == 2
     assert ctx.laura.id not in svc.team_targets([ctx.laura.id, ctx.carlos.id], week)
+
+
+def test_unmanaged_by_agent_solo_sin_gestionar_y_reasignadas(ctx):
+    """Ventana de inicio del admin (PLAN_VENTANA_SIN_GESTION.md): solo R1 sin
+    ninguna gestión desde la asignación; cuenta las que llegaron reasignadas."""
+    from app.core.constants import AlertStatus
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.models.property_alert import PropertyAlert
+
+    now = datetime(2026, 10, 23, 10, 0)      # viernes
+    assigned = datetime(2026, 10, 13, 8, 0)  # martes de la semana anterior
+
+    def alert(agent, name, previous=None, company=None):
+        a = PropertyAlert(company_id=(company or ctx.moyza).id, agent_id=agent.id, lead_name=f"PYTEST-DASH {name}",
+                          status=AlertStatus.IN_PROGRESS, created_by=ctx.user.id, created_at=assigned,
+                          assigned_at=assigned, origin="search", business_type="Venta",
+                          previous_agent_id=previous.id if previous else None)
+        ctx.db.add(a)
+        ctx.db.flush()
+        return a
+
+    def follow_up(a, action, when):
+        ctx.db.add(AlertFollowUp(alert_id=a.id, action_type=action, created_at=when, created_by=ctx.user.id))
+        ctx.db.flush()
+
+    alert(ctx.laura, "NUNCA")
+    reassigned = alert(ctx.laura, "REASIGNADA", previous=ctx.carlos)
+    follow_up(reassigned, "REASIGNADA", assigned)            # la nota del sistema no es gestión
+    stopped = alert(ctx.laura, "PARADA")
+    follow_up(stopped, "CONTACTADO", datetime(2026, 10, 13, 9, 0))
+    callback = alert(ctx.laura, "VOLVER A LLAMAR")
+    follow_up(callback, "SIN_RESPUESTA", datetime(2026, 10, 21, 9, 0))
+    called = alert(ctx.carlos, "SOLO VOLVER A LLAMAR")
+    follow_up(called, "SIN_RESPUESTA", datetime(2026, 10, 21, 9, 0))
+    alert(ctx.laura, "EN MOES", company=ctx.moes)
+
+    svc = DashboardService(ctx.db, ctx.moyza.id)
+    agents = [ctx.laura, ctx.carlos]
+    groups = {g["agent_id"]: g for g in svc.unmanaged_by_agent(agents, now=now)}
+    # Carlos solo tiene un "volver a llamar": no sale en la ventana
+    assert ctx.carlos.id not in groups
+    laura = groups[ctx.laura.id]
+    assert (laura["count"], laura["reassigned"]) == (2, 1)
+    assert laura["agent_name"] == "PYTEST-DASH LAURA"
+    from app.core import business_calendar as bc
+    oldest = bc.business_hours_between(assigned, now)
+    assert laura["oldest_hours"] == int(oldest)
+    assert laura["oldest_label"] == bc.format_business_duration(oldest)
+
+    # "Requiere atención" sigue contando las cuatro de Laura en MOYZA y la de Carlos
+    pending = {g["agent_id"]: g for g in svc.pending_buyers_by_agent(agents, now=now)}
+    assert pending[ctx.laura.id]["count"] == 4 and pending[ctx.carlos.id]["count"] == 1
+
+    # En MOES, solo la suya de MOES
+    moes = {g["agent_id"]: g for g in DashboardService(ctx.db, ctx.moes.id).unmanaged_by_agent(agents, now=now)}
+    assert moes[ctx.laura.id]["count"] == 1 and moes[ctx.laura.id]["reassigned"] == 0

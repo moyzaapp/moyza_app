@@ -206,6 +206,72 @@ def test_usuario_sin_ficha_de_agente_ve_aviso(setup):
     assert "no está vinculado a una ficha de agente" in _text(body)
 
 
+def _modal_html(body, modal_id):
+    """HTML del modal `modal_id` (hasta el script o el final del documento)."""
+    start = body.find(f'id="{modal_id}"')
+    if start < 0:
+        return ""
+    end = body.find("<script", start)
+    return body[start:end if end > 0 else len(body)]
+
+
+def test_ventana_de_inicio_solo_con_compradores_sin_gestionar(setup):
+    """PLAN_VENTANA_SIN_GESTION.md: la ventana del admin solo cuenta los que no
+    tienen ninguna gestión desde la asignación (y cuántos ya se reasignaron);
+    los "volver a llamar" se quedan en "Requiere atención"."""
+    from datetime import timedelta
+    from app.db.session import SessionLocal
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.models.property_alert import PropertyAlert
+    from app.models.user import User
+
+    db = SessionLocal()
+    now = datetime.utcnow()
+    assigned = now - timedelta(days=8)   # tras el corte de avisos y con más de 48 h hábiles
+    admin_id = db.query(User.id).filter(User.email == ADMIN_EMAIL).scalar()
+    names = [f"{TAG} NUNCA", f"{TAG} REASIGNADA", f"{TAG} VOLVER"]
+    try:
+        rows = [
+            PropertyAlert(company_id=setup["moyza_id"], agent_id=agent_id, lead_name=name, status="PENDING",
+                          created_by=admin_id, created_at=assigned, assigned_at=assigned, origin="search",
+                          business_type="Venta", previous_agent_id=previous)
+            for name, agent_id, previous in (
+                (names[0], setup["owner_id"], None),
+                (names[1], setup["owner_id"], setup["visitor_id"]),
+                (names[2], setup["visitor_id"], None),
+            )
+        ]
+        db.add_all(rows)
+        db.flush()
+        db.add(AlertFollowUp(alert_id=rows[2].id, action_type="SIN_RESPUESTA",
+                             created_at=now - timedelta(days=4), created_by=admin_id))
+        db.commit()
+
+        status, body, _ = Client(ADMIN_EMAIL, "MOYZA").get("/dashboard")
+        assert status == 200
+        modal = _modal_html(body, "pendingBuyersModal")
+        text = _text(modal)
+        assert "Compradores sin gestionar" in text and "requieren atención" not in text
+        assert "h hábiles desde que se asignaron sin ninguna gestión" in text
+        assert "data-auto-open-on-login" in modal
+        assert f"{TAG} CAPTADOR" in text
+        assert "2 sin gestionar · el más antiguo," in text
+        assert "1 ya reasignada y sigue sin gestión" in text
+        assert f"/alerts?agent_id={setup['owner_id']}&amp;attention=sin_gestion" in modal
+        # El visitante solo tiene un "volver a llamar": fuera de la ventana, pero en "Requiere atención"
+        assert f"{TAG} VISITANTE" not in text
+        assert f"{TAG} VISITANTE · 1 comprador requiere atención" in _text(body)
+        # Botón para reabrirla
+        assert "Compradores sin gestionar" in _text(body.replace(modal, ""))
+    finally:
+        ids = [a.id for a in db.query(PropertyAlert.id).filter(PropertyAlert.lead_name.in_(names))]
+        if ids:
+            db.query(AlertFollowUp).filter(AlertFollowUp.alert_id.in_(ids)).delete(synchronize_session=False)
+            db.query(PropertyAlert).filter(PropertyAlert.id.in_(ids)).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+
 # ---------------------------------------------------------------------------
 # Visita cruzada -> notificación al captador
 # ---------------------------------------------------------------------------

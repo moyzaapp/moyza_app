@@ -86,6 +86,10 @@ class BuyerAttention:
 
     `attempts` / `max_attempts`: «Sin respuesta» en la ventana y máximo (R3);
     0 en R1.
+
+    `never_managed` (PLAN_VENTANA_SIN_GESTION.md): R1 sin ningún seguimiento
+    real desde la asignación (la ventana empieza en la última reasignación).
+    False en R3 y en R1 «parada» (hubo gestión y luego nada).
     """
 
     alert: PropertyAlert
@@ -96,6 +100,7 @@ class BuyerAttention:
     threshold_hours: int
     attempts: int = 0
     max_attempts: int = 0
+    never_managed: bool = False
     now: datetime = field(default_factory=datetime.utcnow)
 
     @property
@@ -174,6 +179,12 @@ class BuyerAttention:
             "max_attempts": self.max_attempts,
             "attempt_label": self.attempt_label,
             "is_last_attempt": self.is_last_attempt,
+            "never_managed": self.never_managed,
+            # Llegó al agente actual por una reasignación o una cesión: solo
+            # `assign(is_new=False)` rellena `previous_agent_id`, y a la vez
+            # mueve `assigned_at`, así que esa reasignación es la que abre la
+            # ventana actual
+            "reassigned": getattr(alert, "previous_agent_id", None) is not None,
             "tone": self.tone,
             "text": self.text,
             "badge": self.badge,
@@ -260,6 +271,7 @@ def alert_clock(
         due_at=bc.add_business_hours(since, no_action_hours),
         business_hours_elapsed=bc.business_hours_between(since, now),
         threshold_hours=no_action_hours,
+        never_managed=not window,
         now=now,
     )
 
