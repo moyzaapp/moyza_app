@@ -243,6 +243,15 @@
                     <table class="w-full">
                         <thead class="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                             <tr>
+                                {# Reasignación múltiple (solo admin, solo en el listado sin gestionar; PLAN_VENTANA_SIN_GESTION.md fase C) #}
+                                {% if bulk_reassign %}
+                                <th class="w-10 pl-4 pr-1 py-4">
+                                    <label for="bulkSelectAll" class="inline-flex items-center justify-center w-9 h-9 cursor-pointer">
+                                        <input type="checkbox" id="bulkSelectAll" class="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-2 focus:ring-blue-500/40">
+                                        <span class="sr-only">Seleccionar todas las de la página</span>
+                                    </label>
+                                </th>
+                                {% endif %}
                                 <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Propiedad</th>
                                 <th class="text-left px-6 py-4 text-sm font-semibold text-gray-600">Comprador</th>
                                 {% if is_admin %}
@@ -288,6 +297,18 @@
                                         </span>
                                     </td>
                                     {% else %}
+                                    {% if bulk_reassign %}
+                                    <td class="w-10 pl-4 pr-1 py-4">
+                                        {% if alert.status in [AlertStatus.PENDING, AlertStatus.IN_PROGRESS] %}
+                                        <label for="bulkPick{{ alert.id }}" class="inline-flex items-center justify-center w-9 h-9 cursor-pointer">
+                                            <input type="checkbox" name="alert_ids" value="{{ alert.id }}" id="bulkPick{{ alert.id }}"
+                                                form="bulkReassignForm" data-bulk-pick
+                                                class="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-2 focus:ring-blue-500/40">
+                                            <span class="sr-only">Seleccionar a {{ alert.lead_name }}</span>
+                                        </label>
+                                        {% endif %}
+                                    </td>
+                                    {% endif %}
                                     <td class="px-6 py-4 text-sm text-gray-700">
                                         {% if alert.property %}
                                         <div class="flex flex-col items-start">
@@ -463,7 +484,7 @@
                                 {{ ui.empty_state(
                                     "No hay compradores sin gestionar",
                                     "Todos tienen alguna gestión desde que se asignaron. Quita el filtro para ver el resto.",
-                                    colspan='9'
+                                    colspan='10'
                                 ) }}
                                 {% elif default_status_view %}
                                 {{ ui.empty_state(
@@ -484,6 +505,18 @@
                 </div>
                 {{ ui.pagination(alert_pagination, request.query_params, param="page", label="alertas", anchor="alertas") }}
             </div>
+            {% if bulk_reassign and alerts %}
+            {# Barra de selección: se pega abajo mientras se ve la tabla; oculta sin selección #}
+            <div id="bulkBar" class="hidden sticky bottom-0 z-20 mt-3 pb-[env(safe-area-inset-bottom)]" aria-live="polite">
+                <div class="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 shadow-lg">
+                    <p class="text-sm text-gray-700 min-w-0"><span id="bulkCount" class="font-semibold text-gray-900 tabular-nums">0</span> <span id="bulkCountLabel">seleccionadas</span></p>
+                    <div class="flex items-center gap-2 shrink-0">
+                        {{ ui.button("Quitar", "text", attrs='data-bulk-clear') }}
+                        {{ ui.button("Reasignar", "primary", attrs='data-bulk-open') }}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
         </div>
 
@@ -631,6 +664,20 @@
     {{ ui.modal_footer(submit_label="Reasignar") }}
 </form>
 {% endcall %}
+
+{% if bulk_reassign and alerts %}
+<!-- Modal: Reasignar varias (listado sin gestionar; las casillas de las filas van a este formulario con form=) -->
+{% call ui.modal("bulkReassignModal", "Reasignar compradores", size="lg", subtitle=" ", subtitle_id="bulkReassignSubtitle") %}
+<form method="POST" action="/alerts/reassign-bulk" id="bulkReassignForm" data-once data-loading-text="Reasignando…">
+    <input type="hidden" name="next" value="/alerts{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+    <div class="p-6 space-y-4">
+        {{ assign_fields("rb", groups=assignable_groups, is_admin=True, mode="reassign") }}
+        <p class="text-sm text-gray-500">Cada comprador volverá a Pendiente y sin leer para el nuevo agente, que recibirá un aviso por cada uno. Los seguimientos se conservan.</p>
+    </div>
+    {{ ui.modal_footer(submit_label="Reasignar") }}
+</form>
+{% endcall %}
+{% endif %}
 {% endif %}
 
 {% if not is_admin and cedable_ids and cession_groups %}
@@ -904,6 +951,55 @@
         UI.openModal('reassignModal', btn);
     });
 })();
+{% if bulk_reassign and alerts %}
+
+// ---- Reasignar varias (listado sin gestionar, PLAN_VENTANA_SIN_GESTION.md fase C) ----
+(function () {
+    var bar = document.getElementById('bulkBar');
+    if (!bar || !window.AlertAssign) return;
+    var all = document.getElementById('bulkSelectAll');
+    var picks = Array.prototype.slice.call(document.querySelectorAll('[data-bulk-pick]'));
+    var count = document.getElementById('bulkCount');
+    var countLabel = document.getElementById('bulkCountLabel');
+    var subtitle = document.getElementById('bulkReassignSubtitle');
+    var assign = AlertAssign.init('rb');
+    // Con el filtro de agente todas son del mismo: no se puede volver a elegir
+    var current = {{ {'id': selected_agent_id or '', 'name': (agents | selectattr('id', 'equalto', selected_agent_id) | map(attribute='name') | first) or ''} | tojson }};
+
+    function chosen() { return picks.filter(function (p) { return p.checked; }); }
+
+    function sync() {
+        var n = chosen().length;
+        count.textContent = n;
+        countLabel.textContent = n === 1 ? 'seleccionada' : 'seleccionadas';
+        bar.classList.toggle('hidden', n === 0);
+        if (all) {
+            all.checked = n > 0 && n === picks.length;
+            all.indeterminate = n > 0 && n < picks.length;
+        }
+    }
+
+    picks.forEach(function (p) { p.addEventListener('change', sync); });
+    if (all) {
+        all.addEventListener('change', function () {
+            picks.forEach(function (p) { p.checked = all.checked; });
+            sync();
+        });
+    }
+    bar.querySelector('[data-bulk-clear]').addEventListener('click', function () {
+        picks.forEach(function (p) { p.checked = false; });
+        sync();
+    });
+    bar.querySelector('[data-bulk-open]').addEventListener('click', function (e) {
+        var n = chosen().length;
+        if (!n) return;
+        if (subtitle) subtitle.textContent = n + (n === 1 ? ' comprador seleccionado' : ' compradores seleccionados');
+        assign.setCurrent(current.id, current.name);
+        UI.openModal('bulkReassignModal', e.currentTarget);
+    });
+    sync();
+})();
+{% endif %}
 </script>
 {% else %}
 <script>

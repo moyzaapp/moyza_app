@@ -1,5 +1,5 @@
 """
-Listado de compradores sin gestionar (PLAN_VENTANA_SIN_GESTION.md, fase B),
+Listado de compradores sin gestionar (PLAN_VENTANA_SIN_GESTION.md, fases B y C),
 contra la app levantada (se omite si no responde).
 
 - `/alerts?attention=sin_gestion` (admin): solo las alertas sin ninguna
@@ -11,6 +11,9 @@ contra la app levantada (se omite si no responde).
 - Un agente que manda el parámetro ve su listado de siempre.
 - Aislamiento por empresa.
 - La reasignación de fila desde el listado filtrado vuelve a ese listado.
+- Fase C: casillas y "Reasignar" de varias solo en el listado filtrado;
+  `POST /alerts/reassign-bulk` reasigna las válidas con un solo commit, informa
+  de las que fallan, solo admin y solo alertas de la empresa activa.
 
 Datos propios con el prefijo del TAG (agentes, usuarios y alertas de
 búsqueda general); se borran al terminar.
@@ -269,3 +272,130 @@ def test_reasignar_de_fila_vuelve_al_listado_filtrado(data):
     assert status == 302
     assert headers.get("location") == back
     assert _flashes(headers)[0]["category"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# Fase C · Reasignación múltiple
+# ---------------------------------------------------------------------------
+
+def _new_alerts(data, *specs):
+    """[(nombre, agente, estado)] -> ids, asignadas hace 7 días."""
+    from app.db.session import SessionLocal
+    db = SessionLocal()
+    try:
+        ids = []
+        for name, agent_key, status in specs:
+            alert = _add_alert(db, data, name, agent_key, datetime.utcnow() - timedelta(days=7))
+            alert.status = status
+            ids.append(alert.id)
+        db.commit()
+        return ids
+    finally:
+        db.close()
+
+
+def test_casillas_solo_en_el_listado_filtrado(data):
+    _, body, _ = _Client(ADMIN_EMAIL, "MOYZA").get(_unmanaged_url(data))
+    table = _alerts_table(body)
+    assert 'id="bulkSelectAll"' in table
+    assert table.count("data-bulk-pick") == table.count("<tr") - 1   # una por fila (sin la cabecera)
+    assert 'id="bulkBar"' in body and 'action="/alerts/reassign-bulk"' in body
+    assert 'id="rbAgentSelect"' in body
+
+    _, plain, _ = _Client(ADMIN_EMAIL, "MOYZA").get(f"/alerts?agent_id={data['ana']}")
+    assert "bulkSelectAll" not in plain and "/alerts/reassign-bulk" not in plain
+
+
+def test_reasignar_varias_con_fallos(data):
+    from app.db.session import SessionLocal
+    from app.models.alert_assignment_log import AlertAssignmentLog
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.models.notification import Notification
+    from app.models.property_alert import PropertyAlert
+    from app.models.user import User
+
+    first, second, already, closed = _new_alerts(
+        data,
+        ("LOTE UNO", "ana", "PENDING"),
+        ("LOTE DOS", "ana", "IN_PROGRESS"),
+        ("LOTE YA DE CARLA", "carla", "PENDING"),
+        ("LOTE CERRADA", "ana", "COMPLETED"),
+    )
+    back = _unmanaged_url(data, page=1)
+    status, _, headers = _Client(ADMIN_EMAIL, "MOYZA").post("/alerts/reassign-bulk", {
+        "alert_ids": [first, second, already, closed], "agent_id": data["carla"],
+        "assignment_reason": "Pytest lote", "next": back,
+    })
+    assert status == 302
+    assert headers.get("location") == back
+    flashes = _flashes(headers)
+    assert flashes[0] == {"category": "success", "message": f"2 compradores reasignados a {TAG} CARLA"}
+    assert flashes[1]["category"] == "error"
+    assert flashes[1]["message"].startswith("No se pudieron reasignar: ")
+    assert f"{TAG} LOTE YA DE CARLA (la alerta ya está asignada a {TAG} CARLA)" in flashes[1]["message"]
+    assert f"{TAG} LOTE CERRADA (solo se pueden reasignar alertas abiertas" in flashes[1]["message"]
+
+    db = SessionLocal()
+    try:
+        for alert_id in (first, second):
+            alert = db.get(PropertyAlert, alert_id)
+            assert alert.agent_id == data["carla"] and alert.previous_agent_id == data["ana"]
+            assert alert.status == "PENDING" and alert.read_at is None
+            assert alert.assignment_reason == "Pytest lote"
+            [log] = db.query(AlertAssignmentLog).filter_by(alert_id=alert_id).all()
+            assert log.kind == "reassigned" and log.from_agent_id == data["ana"]
+            assert db.query(AlertFollowUp).filter_by(alert_id=alert_id, action_type="REASIGNADA").count() == 1
+        assert db.get(PropertyAlert, already).agent_id == data["carla"]
+        assert db.get(PropertyAlert, closed).agent_id == data["ana"]
+        assert db.query(AlertAssignmentLog).filter(AlertAssignmentLog.alert_id.in_([already, closed])).count() == 0
+        # El aviso in-app de siempre al nuevo agente, uno por comprador
+        carla_user = db.query(User.id).filter(User.email == EMAIL.format("carla")).scalar()
+        entity_ids = {n.entity_id for n in db.query(Notification).filter(
+            Notification.user_id == carla_user, Notification.kind == "alert_assigned")}
+        assert {first, second} <= entity_ids and already not in entity_ids
+    finally:
+        db.close()
+
+
+def test_reasignar_varias_solo_admin(data):
+    from app.db.session import SessionLocal
+    from app.models.property_alert import PropertyAlert
+
+    [alert_id] = _new_alerts(data, ("LOTE AGENTE", "ana", "PENDING"))
+    status, _, headers = _Client(EMAIL.format("ana"), "MOYZA").post("/alerts/reassign-bulk", {
+        "alert_ids": [alert_id], "agent_id": data["bea"], "next": _unmanaged_url(data),
+    })
+    assert status == 302 and headers.get("location") == "/alerts"
+    assert _flashes(headers)[0]["category"] == "error"
+    db = SessionLocal()
+    try:
+        assert db.get(PropertyAlert, alert_id).agent_id == data["ana"]
+    finally:
+        db.close()
+
+
+def test_reasignar_varias_aisla_por_empresa(data):
+    from app.db.session import SessionLocal
+    from app.models.property_alert import PropertyAlert
+
+    [alert_id] = _new_alerts(data, ("LOTE OTRA EMPRESA", "ana", "PENDING"))
+    # Desde MOES, una alerta de MOYZA no existe
+    status, _, headers = _Client(ADMIN_EMAIL, "MOES").post("/alerts/reassign-bulk", {
+        "alert_ids": [alert_id], "agent_id": data["moes"], "next": "/alerts?attention=sin_gestion",
+    })
+    assert status == 302 and headers.get("location") == "/alerts?attention=sin_gestion"
+    [flash] = _flashes(headers)
+    assert flash == {"category": "error", "message": f"No se pudieron reasignar: Alerta {alert_id} (no encontrada)"}
+    db = SessionLocal()
+    try:
+        assert db.get(PropertyAlert, alert_id).agent_id == data["ana"]
+    finally:
+        db.close()
+
+
+def test_reasignar_varias_next_externo_vuelve_al_listado(data):
+    status, _, headers = _Client(ADMIN_EMAIL, "MOYZA").post("/alerts/reassign-bulk", {
+        "alert_ids": [], "agent_id": data["carla"], "next": "https://example.com/alerts",
+    })
+    assert status == 302 and headers.get("location") == "/alerts?attention=sin_gestion"
+    assert _flashes(headers)[0]["message"] == "Selecciona al menos un comprador para reasignar"

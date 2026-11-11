@@ -35,7 +35,13 @@ def set_flash(response, category: str, message: str) -> None:
     Categories: success | error | warning
     """
 
-    payload = [{"category": category, "message": message}]
+    set_flashes(response, [(category, message)])
+
+
+def set_flashes(response, messages) -> None:
+    """Varios mensajes de una vez (`[(categoría, mensaje)]`), en el orden dado."""
+
+    payload = [{"category": category, "message": message} for category, message in messages]
     response.set_cookie(
         key=FLASH_COOKIE_NAME,
         value=_encode(payload),
