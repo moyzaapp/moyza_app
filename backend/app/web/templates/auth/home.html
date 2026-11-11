@@ -199,9 +199,26 @@ Auth - {{ brand_name }}
 
 <div class="bg-white rounded-2xl p-4 sm:p-6 mb-6 sm:mb-8">
 
-    <h2 class="text-lg sm:text-xl font-bold mb-4">
-        Usuarios
-    </h2>
+    {# Los dados de baja no se ven por defecto (objetivo: no verlos en la lista);
+       el enlace lleva a ?baja=1, donde siguen Reactivar y Eliminar sin historial #}
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <h2 class="text-lg sm:text-xl font-bold">
+            {% if show_inactive %}Usuarios dados de baja ({{ users | length }}){% else %}Usuarios{% endif %}
+        </h2>
+        {% if show_inactive %}
+        <a href="/auth" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">
+            Ver activos
+        </a>
+        {% elif inactive_count %}
+        <a href="/auth?baja=1" class="text-sm text-gray-500 hover:text-gray-800 hover:underline underline-offset-2">
+            Ver dados de baja ({{ inactive_count }})
+        </a>
+        {% endif %}
+    </div>
+
+    {% if show_inactive and not users %}
+    {{ ui.empty_state("No hay usuarios dados de baja", hint="Cuando des de baja a alguien aparecerá aquí, con la opción de reactivarlo.") }}
+    {% endif %}
 
     <!-- Vista móvil: cards -->
     <div class="block lg:hidden space-y-4">
@@ -255,7 +272,8 @@ Auth - {{ brand_name }}
         {% endfor %}
     </div>
 
-    <!-- Vista desktop: tabla -->
+    <!-- Vista desktop: tabla (no se pinta vacía bajo el estado vacío de dados de baja) -->
+    {% if users %}
     <div class="hidden lg:block overflow-x-auto">
         <table class="w-full">
             <thead>
@@ -330,6 +348,7 @@ Auth - {{ brand_name }}
             </tbody>
         </table>
     </div>
+    {% endif %}
 
 </div>
 

@@ -17,9 +17,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
 
 from app.core import geo
+from app.core.constants import PhoneCountryCodes
 from app.core.constants import PropertyInteractionType
 from app.core.constants import PropertyStatus
 from app.core.constants import ReportType
+from app.core.phone import PHONE_ERROR_MESSAGE, PhoneValidationError, phone_from_form, split_phone
 from app.db.deps import get_db
 
 from app.models.property import Property
@@ -45,6 +47,7 @@ from app.services.company_scope import (
     get_agent_in_company,
     get_client_in_company,
 )
+from app.services.phone_lookup_service import lookup_properties_by_phone
 from app.services.property_metrics import PropertyMetricsService
 from app.web.dependencies.company import get_active_company
 from app.services.report_generator import generate_property_report
@@ -198,12 +201,68 @@ def _readonly_property_rows(query, search: str, include_address: bool = True) ->
     return [dict(row._mapping) for row in rows]
 
 
+def _phone_check(db, country_code, number, other_code) -> dict:
+    """Contexto `phone_check` de la pestaña "Consultar teléfono".
+
+    Compone el número con los campos del macro `phone_field("phone_")` y
+    consulta las propiedades en cartera de ese propietario en las dos empresas
+    (`lookup_properties_by_phone`). Forma, siempre la misma:
+
+        {"searched", "error", "phone", "country_code", "local_number", "results"}
+
+    - `searched`: True solo si hubo consulta válida (sin error).
+    - `phone`: el número consultado en el formato guardado ("34600112233";
+      "+41791234567" si el indicativo se escribió a mano), o None.
+    - `country_code` / `local_number`: para repintar el formulario. Tras una
+      consulta válida, los de `split_phone`; si no, lo que llegó (con "Otro…",
+      el indicativo escrito).
+    """
+    number = (number or "").strip()
+    country_code = (country_code or "").strip() or None
+
+    # Para repintar: con "Otro…" el macro espera el indicativo escrito
+    shown_code = country_code
+    if country_code == PhoneCountryCodes.OTHER:
+        shown_code = (other_code or "").strip().lstrip("+").strip() or None
+
+    check = {
+        "searched": False,
+        "error": None,
+        "phone": None,
+        "country_code": shown_code,
+        "local_number": number,
+        "results": [],
+    }
+    if not number:
+        return check
+
+    try:
+        phone = phone_from_form(country_code, number, other_code=other_code)
+    except PhoneValidationError as exc:
+        check["error"] = str(exc)
+        return check
+
+    if not phone:
+        # Llegó texto sin ningún dígito
+        check["error"] = PHONE_ERROR_MESSAGE
+        return check
+
+    check["searched"] = True
+    check["phone"] = phone
+    check["country_code"], check["local_number"] = split_phone(phone)
+    check["results"] = lookup_properties_by_phone(db, phone)
+    return check
+
+
 @router.get("/properties", response_class=HTMLResponse)
 async def properties_page(
     request: Request,
     tab: str = Query(default="mine"),
     filtro: str = Query(default="activas"),
     company_id: int | None = Query(default=None),
+    phone_country_code: str | None = Query(default=None),
+    phone_number: str | None = Query(default=None),
+    phone_country_code_other: str | None = Query(default=None),
     db: Session = Depends(get_db)
 ):
 
@@ -240,9 +299,28 @@ async def properties_page(
         selected_other_company = next(
             (c for c in other_companies if c.id == company_id), other_companies[0]
         )
+    elif tab == "phone_check":
+        # "Consultar teléfono": visible para todos los roles
+        selected_other_company = None
     else:
         selected_other_company = None
         tab = "others" if (tab == "others" and show_others_tab) else "mine"
+
+    # "Consultar teléfono": propiedades en cartera del propietario con ese
+    # teléfono, en las dos empresas (excepción deliberada al aislamiento por
+    # empresa; sin datos del cliente, ver phone_lookup_service). Cada consulta
+    # válida queda en el registro de actividad: ActivityMiddleware guarda
+    # `request.state.activity_path` en lugar de la ruta.
+    if tab == "phone_check":
+        phone_check = _phone_check(db, phone_country_code, phone_number, phone_country_code_other)
+    else:
+        phone_check = _phone_check(db, None, None, None)
+
+    if phone_check["searched"]:
+        request.state.activity_path = (
+            f"/properties?tab=phone_check · tel {phone_check['phone']}"
+            f" · {len(phone_check['results'])} propiedades"
+        )
 
     # Si es admin, mostrar todas las propiedades de la empresa activa
     # Si es agente, mostrar solo sus propiedades
@@ -326,11 +404,15 @@ async def properties_page(
         (Property.title.op("~")(r"^\d+$"), cast(Property.title, Integer)),
         else_=None
     )
-    # El teléfono del propietario se pinta en "Mis propiedades": cliente en la misma consulta (sin N+1)
-    properties = filtered_query.options(joinedload(Property.client)).order_by(
-        Property.price.desc().nullslast(),
-        numeric_title.desc().nullslast()
-    ).all()
+    # El teléfono del propietario se pinta en "Mis propiedades": cliente en la misma consulta (sin N+1).
+    # "Consultar teléfono" no pinta el listado: no se carga.
+    if tab == "phone_check":
+        properties = []
+    else:
+        properties = filtered_query.options(joinedload(Property.client)).order_by(
+            Property.price.desc().nullslast(),
+            numeric_title.desc().nullslast()
+        ).all()
 
     # "Resto de propiedades": inventario activo de la empresa que NO está
     # asociado al agente logueado (sin datos del propietario).
@@ -410,6 +492,7 @@ async def properties_page(
             "other_company_tabs": other_company_tabs,
             "selected_other_company": selected_other_company,
             "readonly_address_visible": readonly_address_visible,
+            "phone_check": phone_check,
         }
     )
 

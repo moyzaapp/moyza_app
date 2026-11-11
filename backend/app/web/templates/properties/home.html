@@ -37,7 +37,9 @@ Propiedades
 
 </div>
 
-{# Tarjetas: cada una filtra la tabla (Activas por defecto) #}
+{# Tarjetas: cada una filtra la tabla (Activas por defecto). En "Consultar teléfono" no hay
+   tabla que filtrar y alejarían el formulario del pulgar en el móvil: no se pintan. #}
+{% if tab != 'phone_check' %}
 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6 sm:mb-8">
 
     <a
@@ -95,11 +97,11 @@ Propiedades
     </a>
 
 </div>
+{% endif %}
 
 {% import "components/ui_macros.html" as ui %}
 
-{% if show_others_tab or other_company_tabs %}
-
+{# La barra se pinta siempre: "Consultar teléfono" la ven todos los roles #}
 {% set ns = namespace(items=[("mine", "Mis propiedades" if not is_admin else "Propiedades de " ~ company_name, "/properties?tab=mine", active_count)]) %}
 {% if show_others_tab %}
 {% set ns.items = ns.items + [("others", "Resto de propiedades", "/properties?tab=others", other_count)] %}
@@ -107,15 +109,18 @@ Propiedades
 {% for oc in other_company_tabs %}
 {% set ns.items = ns.items + [("other_company:" ~ oc.id, "Propiedades de " ~ oc.name, "/properties?tab=other_company&company_id=" ~ oc.id, oc.count)] %}
 {% endfor %}
+{% set ns.items = ns.items + [("phone_check", "Consultar teléfono", "/properties?tab=phone_check", none)] %}
 {% set current_tab = ("other_company:" ~ selected_other_company.id) if tab == 'other_company' else tab %}
 
-<div class="mb-6">
+<div class="mb-6" id="propertyTabs">
     {{ ui.tabs(ns.items, current_tab, label="Listados de propiedades") }}
 </div>
 
-{% endif %}
+{% if tab == 'phone_check' %}
 
-{% if tab == 'others' %}
+{% include 'properties/phone_check.html' %}
+
+{% elif tab == 'others' %}
 
 <div class="mb-6">
     {{ ui.banner("Estas propiedades pertenecen al inventario general de la empresa y no están asociadas actualmente a tu gestión.", tone="blue", text="Se muestran únicamente con fines informativos.") }}
@@ -147,5 +152,20 @@ Propiedades
 {% include 'properties/form.html' %}
 
 {# La ordenación por columnas (table.js-sortable) la hace ui.js, cargado en base.html #}
+
+{% if tab == 'phone_check' %}
+<script src="{{ static_url('/static/js/phone-field.js') }}"></script>
+{% endif %}
+
+<script>
+    // En móvil la barra de pestañas se desplaza en horizontal: deja a la vista la activa
+    (function () {
+        var nav = document.querySelector('#propertyTabs [role="tablist"]');
+        var active = nav && nav.querySelector('[aria-selected="true"]');
+        if (!active) return;
+        var overflow = active.getBoundingClientRect().right - nav.getBoundingClientRect().right;
+        if (overflow > 0) nav.scrollLeft += overflow;
+    })();
+</script>
 
 {% endblock %}

@@ -1,0 +1,168 @@
+{#
+  Pestaña "Consultar teléfono" de Propiedades (GET /properties?tab=phone_check).
+
+  Antes de llamar a un propietario, el agente escribe el teléfono completo y ve
+  qué propiedades en cartera (Activa, Reservada o Pausada) tiene ya con MOYZA o
+  MOES PREMIUM. Del propietario solo sale el nombre enmascarado: sin enlace a
+  la ficha, sin teléfono y sin email.
+
+  Variable: phone_check = {searched, error, phone, country_code, local_number,
+  results}. Si no llega, se pinta el formulario vacío.
+  Necesita /static/js/phone-field.js (lo carga properties/home.html).
+
+  El formulario envía a "#consultar-telefono": al recargar, el navegador deja
+  el formulario y la respuesta arriba, sin tener que bajar con el dedo.
+#}
+{% import "components/ui_macros.html" as ui %}
+{% import "components/phone_macros.html" as phone %}
+
+{% set pc = phone_check if (phone_check is defined and phone_check) else {} %}
+{% set pc_results = pc.get("results") or [] %}
+{% set pc_total = pc_results | length %}
+{% set pc_searched = pc.get("searched") and not pc.get("error") %}
+{# Espacios duros: el número no se parte en dos líneas dentro del aviso #}
+{% set pc_shown_phone = (pc.get("phone") | phone_display | replace(" ", "\u00a0")) if pc.get("phone") else "" %}
+{% set pc_scope = "Se comprueban las propiedades activas, reservadas y pausadas de MOYZA y MOES PREMIUM." %}
+{% set pc_status_tones = {"Activa": "green", "Reservada": "blue", "Pausada": "amber"} %}
+
+<section id="consultar-telefono" class="max-w-2xl space-y-4 scroll-mt-20" aria-labelledby="phoneCheckTitle">
+
+    <div class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
+
+        <h2 id="phoneCheckTitle" class="text-lg sm:text-xl font-bold text-gray-900">
+            Consultar teléfono
+        </h2>
+
+        <p class="text-sm text-gray-500 mt-1">
+            Antes de llamar a un propietario, comprueba si ya tiene alguna propiedad en cartera con nosotros.
+        </p>
+
+        <form method="GET" action="/properties#consultar-telefono" class="mt-4 space-y-4">
+
+            <input type="hidden" name="tab" value="phone_check">
+
+            {{ phone.phone_field(
+                "phone_",
+                pc.get("country_code"),
+                pc.get("local_number") or "",
+                label="Teléfono del propietario",
+                required=True,
+                id="phoneCheckNumber",
+                error=pc.get("error")
+            ) }}
+
+            <button
+                type="submit"
+                class="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white rounded-xl px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/30"
+            >
+                <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/>
+                </svg>
+                Comprobar
+            </button>
+
+        </form>
+
+        <div class="mt-4 space-y-1 text-xs text-gray-500">
+            {% if not pc_searched %}
+            <p>{{ pc_scope }} Escribe el número completo.</p>
+            {% endif %}
+            <p>Las consultas quedan registradas.</p>
+        </div>
+
+    </div>
+
+    {% if pc_searched and pc_total %}
+
+    {# (c) El propietario ya tiene propiedades en cartera #}
+    {% if pc_total == 1 %}
+    {{ ui.banner(
+        "Este teléfono (" ~ pc_shown_phone ~ ") ya tiene 1 propiedad en cartera",
+        tone="amber",
+        text="No hace falta llamar para captarla ni volver a publicarla."
+    ) }}
+    {% else %}
+    {{ ui.banner(
+        "Este teléfono (" ~ pc_shown_phone ~ ") ya tiene " ~ pc_total ~ " propiedades en cartera",
+        tone="amber",
+        text="No hace falta llamar para captarlas ni volver a publicarlas."
+    ) }}
+    {% endif %}
+
+    <ul class="space-y-3" aria-label="Propiedades en cartera con este teléfono">
+
+        {% for item in pc_results %}
+
+        <li class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-5">
+
+            <div class="flex flex-wrap items-center gap-2">
+                {{ ui.badge(item.status or "-", pc_status_tones.get(item.status, "gray"), dot=True) }}
+                {{ ui.status_badge("business", item.business_type, dot=False) }}
+                {{ ui.company_badge(item.company) }}
+            </div>
+
+            <div class="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+
+                <h3 class="min-w-0 text-base font-semibold text-gray-900 break-words">
+                    {{ item.title or "Propiedad sin título" }}
+                </h3>
+
+                {% if item.price is not none %}
+                <p class="text-base font-semibold text-gray-900 tabular-nums whitespace-nowrap">
+                    {{ item.moneda or '' }} {{ "{:,.0f}".format(item.price) }}
+                </p>
+                {% else %}
+                <p class="text-sm text-gray-500 whitespace-nowrap">Sin precio</p>
+                {% endif %}
+
+            </div>
+
+            {% if item.referencia %}
+            <p class="text-xs text-gray-500 break-words">Ref. {{ item.referencia }}</p>
+            {% endif %}
+
+            {% if item.address | street %}
+            <p class="mt-2 text-sm text-gray-700 break-words">{{ item.address | street }}</p>
+            {% endif %}
+
+            <p class="{% if not (item.address | street) %}mt-2 {% endif %}text-sm text-gray-500 break-words">
+                {{ item.city or "Sin población" }}{% if item.zona %} / {{ item.zona }}{% endif %}{% if item.property_type %} · {{ item.property_type }}{% endif %}
+            </p>
+
+            <div class="mt-3 pt-3 border-t border-gray-100 space-y-1 text-sm text-gray-500">
+
+                {% if item.agent_name %}
+                <p class="break-words">Captada por <span class="font-medium text-gray-900">{{ item.agent_name }}</span></p>
+                {% else %}
+                <p>Sin agente asignado</p>
+                {% endif %}
+
+                <p class="break-words">
+                    Propietario:
+                    {% if item.owner_masked %}
+                    <span class="font-medium text-gray-900">{{ item.owner_masked }}</span>
+                    {% else %}
+                    sin nombre
+                    {% endif %}
+                </p>
+
+            </div>
+
+        </li>
+
+        {% endfor %}
+
+    </ul>
+
+    {% elif pc_searched %}
+
+    {# (d) Sin propiedades en cartera: no significa que nunca haya sido cliente #}
+    {{ ui.banner(
+        "No tenemos propiedades en cartera con este teléfono (" ~ pc_shown_phone ~ ")",
+        tone="green",
+        text=pc_scope ~ " Las vendidas o retiradas no se consultan, así que puede haber sido cliente antes."
+    ) }}
+
+    {% endif %}
+
+</section>

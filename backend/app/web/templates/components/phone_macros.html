@@ -13,10 +13,13 @@
   (acorta el select a "+34" cuando está cerrado y avisa si el número ya trae el
   indicativo). Las opciones salen de los globales `phone_country_choices` y
   `phone_default_country` y `phone_other_country` (template_env.py), visibles aunque se importe sin contexto.
+
+  `error` (opcional): mensaje de validación del servidor. Se pinta en rojo bajo
+  el campo con `role="alert"` y marca el número como `aria-invalid`.
 #}
 {% import "components/ui_macros.html" as ui %}
 
-{% macro phone_field(name_prefix="phone_", country_code=None, local_number="", label="Teléfono", required=False, id=None) -%}
+{% macro phone_field(name_prefix="phone_", country_code=None, local_number="", label="Teléfono", required=False, id=None, error=None) -%}
 {% set fid = id or (name_prefix ~ "number") %}
 {% set selected_code = country_code or phone_default_country %}
 {# Indicativo fuera del selector (guardado con "+", split_phone lo separa): "Otro…" con el código escrito #}
@@ -45,9 +48,11 @@
         </div>
         <input type="tel" id="{{ fid }}" name="{{ name_prefix }}number" value="{{ local_number or '' }}"
             inputmode="tel" autocomplete="tel-national" placeholder="600 112 233" data-phone-number
-            {% if required %}required{% endif %} aria-describedby="{{ fid }}_hint"
-            class="{{ ui.input_class }} min-w-[150px] flex-1">
+            {% if required %}required{% endif %} aria-describedby="{{ fid }}_hint{% if error %} {{ fid }}_error{% endif %}"
+            {% if error %}aria-invalid="true"{% endif %}
+            class="{{ ui.input_class }} min-w-[150px] flex-1{% if error %} border-red-500{% endif %}">
     </div>
     <p id="{{ fid }}_hint" class="hidden text-xs text-amber-700 mt-1" data-phone-hint aria-live="polite"></p>
+    {% if error %}<p id="{{ fid }}_error" class="text-xs text-red-600 mt-1" role="alert">{{ error }}</p>{% endif %}
 </div>
 {%- endmacro %}

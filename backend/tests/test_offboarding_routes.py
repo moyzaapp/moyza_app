@@ -487,17 +487,26 @@ def test_agents_delete_una_empresa_con_historial_pide_baja(data):
 # ---------------------------------------------------------------------------
 
 def test_auth_muestra_reactivar_para_el_inactivo(data):
+    # Los dados de baja no se ven por defecto: solo en ?baja=1, con el enlace
     status, body, _ = _admin().get("/auth")
     assert status == 200
-    assert f'action="/auth/users/{data["baja_user"]}/reactivate"' in body
-    assert f'/auth/users/{data["baja_user"]}/deactivate' not in body
+    assert f'/auth/users/{data["baja_user"]}/' not in body
+    assert 'href="/auth?baja=1"' in body
     # Activo: botón de baja y no reactivar
     assert f'/auth/users/{data["destino_user"]}/deactivate' in body
     assert f'action="/auth/users/{data["destino_user"]}/reactivate"' not in body
     # Eliminar solo sin historial
     assert f'action="/auth/users/delete/{data["limpio_user"]}"' in body
-    assert f'action="/auth/users/delete/{data["baja_user"]}"' not in body
     assert 'id="userDeactivateModal"' in body
+
+    status, body, _ = _admin().get("/auth?baja=1")
+    assert status == 200
+    assert f'action="/auth/users/{data["baja_user"]}/reactivate"' in body
+    assert f'/auth/users/{data["baja_user"]}/deactivate' not in body
+    assert f'action="/auth/users/delete/{data["baja_user"]}"' not in body
+    # Los activos no salen en la vista de dados de baja
+    assert f'/auth/users/{data["destino_user"]}/' not in body
+    assert 'href="/auth"' in body  # "Ver activos"
 
 
 def test_agents_botones_nuevos(data):
@@ -511,6 +520,15 @@ def test_agents_botones_nuevos(data):
     assert f'action="/agents/delete/{data["fichalimpia_agent"]}"' in body
     assert f'action="/agents/delete/{data["fichahist_agent"]}"' not in body
     assert 'id="userDeactivateModal"' in body
+    # La ficha dada de baja no sale por defecto; sí en ?baja=1 con Reactivar
+    # (el contador depende de lo que hayan dejado de baja los tests anteriores)
+    assert f'{TAG} BAJA' not in body
+    assert "Ver dados de baja (" in body
+    status, body, _ = _admin().get("/agents?baja=1&search=" + urllib.parse.quote(TAG))
+    assert status == 200
+    assert f'{TAG} BAJA' in body and f'{TAG} DESTINO' not in body
+    assert f'aria-label="Gestionar a {TAG} BAJA en Usuarios"' in body
+    assert "Ver activos" in body
 
 
 def test_inactivo_fuera_de_los_selectores_de_asignacion(data):

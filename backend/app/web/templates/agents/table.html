@@ -15,6 +15,9 @@
 
         <form method="GET" action="/agents" class="flex items-center gap-3">
 
+            {# El buscador conserva la vista de dados de baja #}
+            {% if show_inactive %}<input type="hidden" name="baja" value="1">{% endif %}
+
             <input
                 type="text"
                 name="search"
@@ -26,7 +29,7 @@
             {% if search %}
 
             <a
-                href="/agents"
+                href="/agents{% if show_inactive %}?baja=1{% endif %}"
                 class="text-xs sm:text-sm text-gray-500 hover:text-gray-800 whitespace-nowrap"
             >
                 Limpiar
@@ -35,6 +38,24 @@
             {% endif %}
 
         </form>
+
+        {# Los dados de baja no se ven por defecto: enlace para verlos y volver #}
+        {% if show_inactive %}
+        <div class="flex flex-wrap items-center justify-between gap-2 mt-3">
+            <p class="text-sm text-gray-700">
+                Mostrando <span class="font-semibold text-gray-900">agentes dados de baja</span> ({{ agents | length }})
+            </p>
+            <a href="/agents{% if search %}?search={{ search | urlencode }}{% endif %}" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">
+                Ver activos
+            </a>
+        </div>
+        {% elif inactive_count %}
+        <div class="flex justify-end mt-3">
+            <a href="/agents?baja=1{% if search %}&search={{ search | urlencode }}{% endif %}" class="text-sm text-gray-500 hover:text-gray-800 hover:underline underline-offset-2">
+                Ver dados de baja ({{ inactive_count }})
+            </a>
+        </div>
+        {% endif %}
 
     </div>
 
@@ -286,6 +307,8 @@
 
                     {% if search %}
                     No se encontraron agentes para "{{ search }}"
+                    {% elif show_inactive %}
+                    No hay agentes dados de baja
                     {% else %}
                     Aún no hay agentes registrados
                     {% endif %}
