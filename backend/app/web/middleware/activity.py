@@ -29,6 +29,12 @@ class ActivityMiddleware(BaseHTTPMiddleware):
         user_id = self._get_user_id(request)
         ip = self._get_ip(request)
 
+        # Una ruta puede dejar en `request.state.activity_path` un texto más
+        # descriptivo que la URL (p. ej. la consulta de teléfono de Propiedades,
+        # con el número y el resultado). El state viaja en el scope, así que lo
+        # que pone la ruta se ve aquí, igual que `request.state.user`.
+        path = getattr(request.state, "activity_path", None) or path
+
         response.background = BackgroundTask(
             _write_log,
             user_id=user_id,

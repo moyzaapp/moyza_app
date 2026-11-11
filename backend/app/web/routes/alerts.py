@@ -76,6 +76,7 @@ from app.services.alert_view import OPEN_ALERT_STATUSES
 from app.services.alert_view import agent_open_alerts_ordered as _get_agent_open_alerts_ordered  # noqa: F401
 from app.services.alert_view import get_locked_alert_ids
 from app.web.utils.flash import set_flash
+from app.web.utils.flash import set_flashes
 from app.web.dependencies.auth import is_admin, get_agent_from_user, require_admin_role
 from app.web.dependencies.company import get_active_company
 
@@ -97,6 +98,9 @@ PAGE_SIZES = (50, 100, 200, 300)
 DEFAULT_PAGE_SIZE = 100
 PER_PAGE_COOKIE = "alerts_per_page"
 PER_PAGE_COOKIE_MAX_AGE = 365 * 24 * 60 * 60  # 1 año
+
+# `/alerts?attention=sin_gestion` (solo admin, PLAN_VENTANA_SIN_GESTION.md)
+UNMANAGED_FILTER = "sin_gestion"
 
 
 def normalize_per_page(value) -> int:
@@ -558,12 +562,18 @@ async def alerts_page(
     per_page: Optional[str] = Query(default=None),
     b_q: str = Query(default=""),
     b_page: Optional[str] = Query(default=None),
+    attention: Optional[str] = Query(default=None),
     db: Session = Depends(get_db)
 ):
     """Lista de alertas - Admin ve todas, agentes solo las suyas.
 
     Las dos tablas (alertas y compradores) se paginan en servidor: los
     filtros se aplican sobre todo el conjunto y luego se corta la página.
+
+    `attention=sin_gestion` (solo admin, PLAN_VENTANA_SIN_GESTION.md): solo
+    las alertas sin ninguna gestión desde la asignación
+    (`BuyerAttention.never_managed`), de la más antigua a la más nueva, sin
+    filtro de estado (son abiertas por definición). Para un agente se ignora.
     """
 
     current_user = request.state.user
@@ -608,6 +618,19 @@ async def alerts_page(
     if agent_id_int and admin_view:
         base_query = base_query.filter(PropertyAlert.agent_id == agent_id_int)
 
+    # Solo sin gestionar (admin): los ids salen del servicio de atención, que
+    # carga en lote las abiertas vencidas de la empresa (y del agente)
+    unmanaged_view = admin_view and attention == UNMANAGED_FILTER
+    if unmanaged_view:
+        unmanaged_ids = [
+            item.alert.id
+            for item in buyer_attention_service.find_buyers_needing_attention(
+                db, company_id=company.id, agent_id=agent_id_int or None,
+            )
+            if item.never_managed
+        ]
+        base_query = base_query.filter(PropertyAlert.id.in_(unmanaged_ids))
+
     # Contar alertas por estado (una sola consulta agrupada) ANTES del filtro
     # de estado y sin paginar: las tarjetas muestran los totales reales bajo
     # los filtros de texto y agente, marque el usuario los estados que marque.
@@ -626,6 +649,9 @@ async def alerts_page(
     valid_status_filters = [s for s in status_filter if AlertStatus.is_valid(s)]
     effective_statuses = effective_alert_statuses(status_filter, q)
     default_status_view = not valid_status_filters and not (q and q.strip())
+    if unmanaged_view:
+        # Sin gestionar ya son abiertas: el filtro de estado no aplica
+        valid_status_filters, effective_statuses, default_status_view = [], [], False
     filtered_query = base_query
     if effective_statuses:
         filtered_query = filtered_query.filter(PropertyAlert.status.in_(effective_statuses))
@@ -650,16 +676,11 @@ async def alerts_page(
     # todos los roles (PLAN_CEDER_COMPRADORES.md §1): una alerta reasignada
     # sube arriba, también para el admin.
     date_order = alert_view.assignment_start_expr()
-    alerts = (
-        filtered_query
-        .options(
-            # Empresa de la propiedad: distintivo si es de la otra
-            # (PLAN_SUGERENCIAS_MULTIEMPRESA.md), una consulta para la página
-            contains_eager(PropertyAlert.property).selectinload(Property.company),
-            contains_eager(PropertyAlert.agent),
-            selectinload(PropertyAlert.follow_ups),
-        )
-        .order_by(
+    if unmanaged_view:
+        # Sin gestionar: la que más tiempo lleva esperando, primero
+        ordering = (date_order.asc(), PropertyAlert.id.asc())
+    else:
+        ordering = (
             case(
                 (PropertyAlert.priority == AlertPriority.ALTA, 1),
                 (PropertyAlert.priority == AlertPriority.NORMAL, 2),
@@ -669,6 +690,20 @@ async def alerts_page(
             date_order.desc(),
             PropertyAlert.id.desc(),
         )
+    page_options = [
+        # Empresa de la propiedad: distintivo si es de la otra
+        # (PLAN_SUGERENCIAS_MULTIEMPRESA.md), una consulta para la página
+        contains_eager(PropertyAlert.property).selectinload(Property.company),
+        contains_eager(PropertyAlert.agent),
+        selectinload(PropertyAlert.follow_ups),
+    ]
+    if unmanaged_view:
+        # Marca "Reasignada el dd/mm · antes Nombre": una consulta para la página
+        page_options.append(selectinload(PropertyAlert.previous_agent))
+    alerts = (
+        filtered_query
+        .options(*page_options)
+        .order_by(*ordering)
         .offset(alert_pagination["offset"])
         .limit(alert_pagination["per_page"])
         .all()
@@ -810,7 +845,7 @@ async def alerts_page(
             }
 
     # Compradores que requieren atención (PLAN_RECORDATORIO_SIN_RESPUESTA.md):
-    # badge «Volver a llamar · intento N de 3» o «Sin gestión» en horas hábiles.
+    # badge «Volver a llamar · intento N de 3», «Sin gestionar» o «Sin actividad» en horas hábiles.
     # Se calcula sobre los seguimientos ya cargados de la página, sin consultas nuevas.
     alert_attention = buyer_attention_service.evaluate_alerts(alerts)
 
@@ -871,6 +906,9 @@ async def alerts_page(
             "q": q,
             "status_filter": valid_status_filters,
             "selected_agent_id": agent_id_int,
+            "attention_filter": UNMANAGED_FILTER if unmanaged_view else None,
+            # Casillas y "Reasignar" de varias (PLAN_VENTANA_SIN_GESTION.md fase C)
+            "bulk_reassign": unmanaged_view,
         }
     )
 
@@ -2267,6 +2305,117 @@ def _safe_back_url(next_url: Optional[str], default: str) -> str:
     return default
 
 
+def _reassign(db: Session, alert, agent, current_user, reason):
+    """Lo común de la reasignación individual y la múltiple (el admin ya está comprobado).
+
+    Valida (`validate_reassignment`, lanza AlertAssignmentError) y reasigna con
+    `assign(..., is_new=False)`: Pendiente y sin leer, historial, nota
+    automática y aviso in-app al nuevo agente. Sin commit.
+    """
+    assignment.validate_reassignment(alert, agent, is_admin_user=True)
+    return assignment.assign(db, alert, agent, current_user, reason, is_new=False)
+
+
+def _after_reassign(db: Session, alert_ids) -> None:
+    """Tras confirmar: el reloj arranca de cero con el nuevo agente y los avisos del anterior ya no aplican."""
+    notification_service.safe_resolve_buyer_notifications(db, alert_ids)
+
+
+@router.post("/alerts/reassign-bulk")
+async def reassign_alerts_bulk(
+    request: Request,
+    alert_ids: List[str] = Form(default=[]),
+    agent_id: str = Form(None),
+    reason: str = Form(None),
+    assignment_reason: str = Form(None),
+    next_url: str = Form(None, alias="next"),
+    db: Session = Depends(get_db)
+):
+    """Reasigna varias alertas abiertas a un mismo agente (solo admin).
+
+    PLAN_VENTANA_SIN_GESTION.md, fase C: desde el listado de compradores sin
+    gestionar. Cada alerta se valida y reasigna igual que en la individual
+    (`_reassign`, cada una en su savepoint para que un fallo no arrastre a las
+    demás) y todo se confirma con un solo commit. Motivo opcional (`reason`
+    o `assignment_reason`, el nombre del campo de `assign_fields`). Flash con
+    las reasignadas y, si alguna falla, cuáles y por qué. Vuelve a `next`.
+    """
+    current_user = request.state.user
+    back_url = _safe_back_url(next_url, f"/alerts?attention={UNMANAGED_FILTER}")
+
+    if not is_admin(current_user):
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Solo un administrador puede reasignar alertas")
+        return response
+
+    ids = list(dict.fromkeys(i for i in (assignment._to_int(v) for v in alert_ids) if i is not None))
+    if not ids:
+        response = RedirectResponse(url=back_url, status_code=302)
+        set_flash(response, "error", "Selecciona al menos un comprador para reasignar")
+        return response
+
+    agent_id_int = assignment._to_int(agent_id)
+    agent = assignment.lookup_any_agent(db)(agent_id_int) if agent_id_int is not None else None
+    if agent is None:
+        response = RedirectResponse(url=back_url, status_code=302)
+        set_flash(response, "error", "El agente elegido no existe, está dado de baja o no pertenece a ninguna empresa activa")
+        return response
+
+    # Solo las de la empresa activa: las demás cuentan como no encontradas
+    found = {
+        alert.id: alert
+        for alert in scope_alerts(db.query(PropertyAlert), get_active_company(request).id)
+        .options(selectinload(PropertyAlert.property), selectinload(PropertyAlert.agent))
+        .filter(PropertyAlert.id.in_(ids))
+    }
+    reason = reason if reason not in (None, "") else assignment_reason
+
+    done, failed, granted = [], [], None
+    for alert_id in ids:
+        alert = found.get(alert_id)
+        if alert is None:
+            failed.append((f"Alerta {alert_id}", "no encontrada"))
+            continue
+        name = alert.lead_name or "Comprador"
+        try:
+            with db.begin_nested():
+                result = _reassign(db, alert, agent, current_user, reason)
+            done.append(alert.id)
+            granted = granted or result.granted_company
+        except AlertAssignmentError as error:
+            message = str(error)
+            failed.append((name, message[:1].lower() + message[1:]))
+        except Exception:
+            logger.exception("Error reasignando alerta en lote: alert_id=%s", alert_id)
+            failed.append((name, "error inesperado"))
+
+    if done:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Error confirmando la reasignación múltiple: alert_ids=%s", done)
+            response = RedirectResponse(url=back_url, status_code=302)
+            set_flash(response, "error", "Ocurrió un error al reasignar los compradores")
+            return response
+        _after_reassign(db, done)
+    else:
+        db.rollback()
+
+    messages = []
+    if done:
+        text = (f"{len(done)} {'comprador reasignado' if len(done) == 1 else 'compradores reasignados'} "
+                f"a {agent.name}")
+        if granted is not None:
+            text += f". {agent.name} ahora tiene acceso a {granted.name}"
+        messages.append(("success", text))
+    if failed:
+        messages.append(("error", "No se pudieron reasignar: " + ", ".join(f"{n} ({why})" for n, why in failed)))
+    response = RedirectResponse(url=back_url, status_code=302)
+    set_flashes(response, messages)
+    return response
+
+
 @router.post("/alerts/{alert_id}/reassign")
 async def reassign_alert(
     alert_id: int,
@@ -2304,15 +2453,13 @@ async def reassign_alert(
     agent = assignment.lookup_any_agent(db)(agent_id_int) if agent_id_int is not None else None
 
     try:
-        assignment.validate_reassignment(alert, agent, is_admin_user=True)
+        result = _reassign(db, alert, agent, current_user, assignment_reason)
+        db.commit()
     except AlertAssignmentError as error:
+        db.rollback()
         response = RedirectResponse(url=back_url, status_code=302)
         set_flash(response, "error", str(error))
         return response
-
-    try:
-        result = assignment.assign(db, alert, agent, current_user, assignment_reason, is_new=False)
-        db.commit()
     except Exception:
         db.rollback()
         logger.exception("Error reasignando alerta: alert_id=%s", alert_id)
@@ -2320,8 +2467,7 @@ async def reassign_alert(
         set_flash(response, "error", "Ocurrió un error al reasignar la alerta")
         return response
 
-    # El reloj arranca de cero con el nuevo agente: los avisos del anterior ya no aplican
-    notification_service.safe_resolve_buyer_notifications(db, alert.id)
+    _after_reassign(db, alert.id)
 
     previous_name = result.previous_agent.name if result.previous_agent is not None else "sin agente"
     message = f"Alerta de {alert.lead_name} reasignada de {previous_name} a {agent.name}"

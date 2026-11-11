@@ -68,6 +68,7 @@ Tonos por uso dentro de cada color:
 | | `BAJA` | Baja | gray |
 | Etapa de seguimiento | ver `FollowUpActionType.stage_badge_color` en `core/constants.py` | | ya definido en Python; cambia `yellow`→`amber` ahí si aparece |
 | Propiedad | Activa / disponible | | green |
+| | Reservada | | blue |
 | | Pausada | | amber |
 | | Vendida / No disponible | | red |
 | | Archivada | | gray |

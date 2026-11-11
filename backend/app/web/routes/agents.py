@@ -85,6 +85,8 @@ async def agents_page(
     company = get_active_company(request)
 
     search = (request.query_params.get("search") or "").strip()
+    show_inactive = request.query_params.get("baja") == "1"
+    inactive_count = 0
 
     # Solo el admin ve el listado completo, así que solo él necesita buscador
     # y es el único que puede crear o eliminar agentes
@@ -109,7 +111,12 @@ async def agents_page(
                 )
             )
 
-        agents = base_query.order_by(Agent.name).all()
+        # Las fichas dadas de baja no se ven por defecto: solo con ?baja=1
+        # (misma regla que en Usuarios). Se cuentan para el enlace.
+        all_agents = base_query.order_by(Agent.name).all()
+        inactive_agents = [a for a in all_agents if a.is_active is False]
+        agents = inactive_agents if show_inactive else [a for a in all_agents if a.is_active is not False]
+        inactive_count = len(inactive_agents)
 
         # Ficha con usuario -> "Gestionar en Usuarios"; Eliminar solo sin
         # historial (PLAN_BAJA_USUARIOS.md §7.2)
@@ -131,6 +138,8 @@ async def agents_page(
             "current_user": current_user,
             "error": error,
             "search": search,
+            "show_inactive": show_inactive,
+            "inactive_count": inactive_count,
             "can_manage": can_manage,
             "user_ids_by_email": user_ids_by_email,
             "history_by_agent_id": history_by_agent_id,

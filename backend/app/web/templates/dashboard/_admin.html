@@ -154,8 +154,8 @@
     <section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="attentionTitle">
         <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
             <h2 id="attentionTitle" class="text-lg font-bold text-gray-900">Requiere atención</h2>
-            {% if home.pending_by_agent %}
-            <button type="button" data-modal-open="pendingBuyersModal" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Compradores sin atender</button>
+            {% if home.unmanaged_by_agent %}
+            <button type="button" data-modal-open="pendingBuyersModal" class="text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Compradores sin gestionar</button>
             {% endif %}
         </header>
         {% if home.attention %}
@@ -220,22 +220,24 @@
                kind="bars", empty_title="Aún no hay visitas ni contactos en estas semanas",
                empty_hint="La gráfica se llenará con la actividad del equipo.") }}
 
-{# ---------------------------------------------------------------- Ventana de compradores sin atender (§3.4; se abre al iniciar sesión) #}
-{% if home.pending_by_agent %}
-{% set total = home.pending_by_agent | sum(attribute='count') %}
-{% call ui.modal("pendingBuyersModal", "Compradores que requieren atención", size="lg",
-                 subtitle=(total ~ (" comprador" if total == 1 else " compradores") ~ " · más de " ~ buyer_reminder_hours ~ " h hábiles sin gestión o pendientes de volver a llamar")) %}
+{# ---------------------------------------------------------------- Ventana de compradores sin gestionar (§3.4, PLAN_VENTANA_SIN_GESTION.md; se abre al iniciar sesión)
+   Solo los que no tienen ninguna gestión desde que se asignaron: los "volver a llamar" y las
+   paradas siguen en "Requiere atención". #}
+{% if home.unmanaged_by_agent %}
+{% set total = home.unmanaged_by_agent | sum(attribute='count') %}
+{% call ui.modal("pendingBuyersModal", "Compradores sin gestionar", size="lg",
+                 subtitle=(total ~ (" comprador" if total == 1 else " compradores") ~ " · más de " ~ buyer_reminder_hours ~ " h hábiles desde que se asignaron sin ninguna gestión")) %}
 <div data-auto-open-on-login>
     <div class="p-4 sm:p-6">
     <ul class="divide-y divide-gray-100 -my-2">
-        {% for g in home.pending_by_agent %}
+        {% for g in home.unmanaged_by_agent %}
         <li class="py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
             <div class="min-w-0 flex-1">
                 <p class="text-sm font-medium text-gray-900 truncate">{{ g.agent_name }}</p>
-                <p class="text-xs text-gray-500">{{ g.summary }} · el más antiguo, <span class="font-medium text-red-700">{{ g.oldest_label }} hábiles</span></p>
-                {% if g.last_attempt %}<p class="text-xs font-medium text-red-700">{{ g.last_attempt }} en el tercer intento: toca cerrar</p>{% endif %}
+                <p class="text-xs text-gray-500">{{ g.count }} sin gestionar · el más antiguo, <span class="font-medium text-red-700">{{ g.oldest_label }} hábiles</span></p>
+                {% if g.reassigned %}<p class="text-xs font-medium text-red-700">{{ g.reassigned }} {{ "ya reasignada y sigue" if g.reassigned == 1 else "ya reasignadas y siguen" }} sin gestionar</p>{% endif %}
             </div>
-            {{ ui.button("Ver compradores", "secondary", href="/alerts?agent_id=" ~ g.agent_id, full_mobile=True) }}
+            {{ ui.button("Ver compradores", "secondary", href="/alerts?agent_id=" ~ g.agent_id ~ "&attention=sin_gestion", full_mobile=True) }}
         </li>
         {% endfor %}
     </ul>

@@ -457,7 +457,7 @@ def _buyer_notification_text(item) -> tuple[str, str]:
         else:
             body += " Vuelve a llamar y registra el seguimiento."
         return f"Vuelve a llamar · {name}", body
-    return (f"Comprador sin gestión · {name}",
+    return (f"Comprador {item.rule_label.lower()} · {name}",
             f"{item.text} · venció el {item.due_label}. Registra un seguimiento.")
 
 
@@ -588,10 +588,14 @@ def resolve_buyer_notifications(db: Session, items: Optional[Iterable] = None, a
     return len(stale_ids)
 
 
-def safe_resolve_buyer_notifications(db: Session, alert_id: int, now: Optional[datetime] = None) -> int:
-    """`resolve_buyer_notifications` de una alerta tras gestionarla; nunca rompe el flujo."""
+def safe_resolve_buyer_notifications(db: Session, alert_id, now: Optional[datetime] = None) -> int:
+    """`resolve_buyer_notifications` de una alerta tras gestionarla; nunca rompe el flujo.
+
+    `alert_id`: un id o una lista de ids (reasignación múltiple, una sola pasada).
+    """
+    alert_ids = [alert_id] if isinstance(alert_id, int) else list(alert_id)
     try:
-        return resolve_buyer_notifications(db, alert_ids=[alert_id], now=now)
+        return resolve_buyer_notifications(db, alert_ids=alert_ids, now=now)
     except Exception:
         db.rollback()
         logger.exception("No se pudieron revisar los avisos de comprador de la alerta %s", alert_id)

@@ -72,10 +72,23 @@ def test_r1_con_fin_de_semana_por_medio():
     assert item.rule == RULE_NO_ACTION
     assert bc.to_madrid(item.due_at) == datetime(2026, 10, 20, 12, 0)
     assert item.due_label == "martes 20/10 a las 12:00"
-    assert item.text == "2 d hábiles sin gestión"
-    assert item.badge == "Sin gestión · 2 d hábiles"
+    assert item.text == "2 d hábiles sin gestionar"
+    assert item.badge == "Sin gestionar · 2 d hábiles"
+    assert item.rule_label == "Sin gestionar" and item.never_managed is True
     assert (item.attempts, item.max_attempts, item.is_last_attempt) == (0, 0, False)
     assert item.tone == "amber"
+
+
+def test_r1_parada_tras_una_gestion_se_llama_sin_actividad():
+    # Hubo gestión (Contactado) y luego nada: «Sin actividad», no «Sin gestionar»
+    alert = _alert(L(2026, 10, 12, 9, 0), [_fu("CONTACTADO", L(2026, 10, 16, 12, 0))])   # viernes 12:00
+    assert _eval(alert, L(2026, 10, 20, 11, 59)) is None
+    item = _eval(alert, L(2026, 10, 20, 12, 0))                  # martes 12:00
+    assert item.rule == RULE_NO_ACTION and item.never_managed is False
+    assert item.rule_label == "Sin actividad"
+    assert item.text == "2 d hábiles sin actividad"
+    assert item.badge == "Sin actividad · 2 d hábiles"
+    assert item.as_dict()["rule_label"] == "Sin actividad"
 
 
 def test_r1_con_lunes_festivo():
@@ -239,6 +252,36 @@ def test_callback_state():
 
 
 # ---------------------------------------------------------------------------
+# never_managed (PLAN_VENTANA_SIN_GESTION.md)
+# ---------------------------------------------------------------------------
+
+def test_never_managed_r1_sin_ninguna_gestion():
+    # La nota REASIGNADA no es gestión; la reasignada solo mira desde la reasignación
+    alert = _alert(
+        L(2026, 10, 19, 9, 0),
+        [_fu("CONTACTADO", L(2026, 10, 1, 10, 0)), _fu("REASIGNADA", L(2026, 10, 19, 9, 0))],
+        created=L(2026, 9, 30, 9, 0),
+    )
+    item = _eval(alert, L(2026, 10, 21, 9, 0))
+    assert item.rule == RULE_NO_ACTION and item.never_managed
+    assert item.as_dict()["never_managed"] is True
+
+
+def test_never_managed_falso_en_r1_parada():
+    # Gestionada y luego nada en más de 48 h hábiles
+    alert = _alert(L(2026, 10, 13, 9, 0), [_fu("CONTACTADO", L(2026, 10, 13, 10, 0))])
+    item = _eval(alert, L(2026, 10, 16, 10, 0))
+    assert item.rule == RULE_NO_ACTION and not item.never_managed
+    assert item.as_dict()["never_managed"] is False
+
+
+def test_never_managed_falso_en_r3():
+    alert = _alert(L(2026, 10, 13, 9, 0), [_fu("SIN_RESPUESTA", L(2026, 10, 13, 10, 0))])
+    item = _eval(alert, L(2026, 10, 14, 10, 0))
+    assert item.rule == RULE_CALLBACK and not item.never_managed
+
+
+# ---------------------------------------------------------------------------
 # Base de datos
 # ---------------------------------------------------------------------------
 
@@ -349,7 +392,7 @@ def test_envoltorio_conserva_la_forma(ctx):
     assert row["alert_status"] == AlertStatus.IN_PROGRESS
     assert row["last_action_at"] == L(2026, 10, 13, 9, 0)
     assert row["hours_elapsed"] == 123   # mar 15 + mié 24 + jue 24 + vie 24 + lun 24 + mar 12
-    assert row["rule"] == RULE_NO_ACTION and row["rule_label"] == "Sin gestión"
+    assert row["rule"] == RULE_NO_ACTION and row["rule_label"] == "Sin gestionar"
     assert row["attempts"] == 0 and row["is_last_attempt"] is False and row["tone"] == "amber"
     assert row["due_at"] == L(2026, 10, 15, 9, 0)
 

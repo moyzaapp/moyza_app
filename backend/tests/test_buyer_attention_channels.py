@@ -128,8 +128,8 @@ def test_notifica_al_cruzar_y_cada_dos_dias_habiles(ctx):
     # Viernes 8:00: una
     assert _run(ctx, L(2026, 10, 16, 8, 0)) == 1
     [first] = _mine(ctx, NotificationKind.BUYER_NO_ACTION)
-    assert first.title == "Comprador sin gestión · PYTEST-CANAL Comprador"
-    assert "hábiles sin gestión" in first.body and "venció el jueves 15/10 a las 09:00" in first.body
+    assert first.title == "Comprador sin gestionar · PYTEST-CANAL Comprador"
+    assert "hábiles sin gestionar" in first.body and "venció el jueves 15/10 a las 09:00" in first.body
     assert first.url == f"/alerts/{ctx.alert.id}"
     assert (first.entity_type, first.entity_id) == ("alert", ctx.alert.id)
     # Antes de 2 días hábiles no se repite, ni aunque la haya leído
@@ -194,7 +194,8 @@ def test_r3_un_aviso_por_intento_y_el_cuarto_pasa_a_r1(ctx):
     assert _run(ctx, L(2026, 10, 28, 11, 0)) == 1
     assert len(_mine(ctx, kind)) == 3
     [r1] = _mine(ctx, NotificationKind.BUYER_NO_ACTION)
-    assert r1.title == "Comprador sin gestión · PYTEST-CANAL Comprador"
+    # Hubo gestión (los «Sin respuesta») y luego nada: «sin actividad», no «sin gestionar»
+    assert r1.title == "Comprador sin actividad · PYTEST-CANAL Comprador"
     # Nunca dos avisos distintos sin leer a la vez para la misma alerta
     assert ns.unread_count(ctx.db, ctx.user.id, ctx.moyza.id) == 1
 
@@ -257,12 +258,14 @@ def test_inicio_agente_y_admin_con_las_dos_reglas(ctx):
     rows = svc.pending_buyers_for_agent(ctx.agent.id, now=now)
     by_name = {r["buyer_name"]: r for r in rows}
     assert by_name["PYTEST-CANAL Comprador"]["rule"] == "no_action"
-    assert by_name["PYTEST-CANAL Comprador"]["text"].endswith("hábiles sin gestión")
+    assert by_name["PYTEST-CANAL Comprador"]["text"].endswith("hábiles sin gestionar")
     callback = by_name["PYTEST-CANAL Tercero"]
     assert callback["rule"] == "callback" and callback["is_last_attempt"] and callback["tone"] == "red"
     assert callback["text"] == "Tercer intento sin respuesta · cierra la alerta (Sin interés)"
     assert callback["since_label"] == "jueves 15/10 a las 12:00"
-    assert attention_summary(rows) == "1 pendiente de volver a llamar · 1 sin gestión"
+    assert attention_summary(rows) == "1 pendiente de volver a llamar · 1 sin gestionar"
+    stalled = dict(by_name["PYTEST-CANAL Comprador"], never_managed=False)
+    assert attention_summary([stalled, callback]) == "1 pendiente de volver a llamar · 1 sin actividad"
 
     [group] = [g for g in svc.pending_buyers_by_agent([ctx.agent], now=now) if g["agent_id"] == ctx.agent.id]
     assert (group["count"], group["callback"], group["no_action"], group["last_attempt"]) == (2, 1, 1, 1)
@@ -270,7 +273,7 @@ def test_inicio_agente_y_admin_con_las_dos_reglas(ctx):
              if i["href"] == f"/alerts?agent_id={ctx.agent.id}" and i["icon"] == "user"]
     assert items[0]["tone"] == "red"
     assert items[0]["title"] == "PYTEST-CANAL ANA · 2 compradores requieren atención"
-    assert "1 pendiente de volver a llamar · 1 sin gestión" in items[0]["text"]
+    assert "1 pendiente de volver a llamar · 1 sin gestionar" in items[0]["text"]
     assert "tercer intento" in items[0]["text"]
 
 
@@ -328,8 +331,9 @@ def test_job_en_dia_habil_un_email_con_dos_secciones(ctx):
     assert len(mine) == 1
     email = mine[0]
     assert email.subject.endswith("2 comprador(es) requieren atención")
-    assert "Pendientes de volver a llamar (1)" in email.body and "Sin gestión (1)" in email.body
-    assert email.body.index("Pendientes de volver a llamar") < email.body.index("Sin gestión (1)")
+    assert "Pendientes de volver a llamar (1)" in email.body and "Sin gestionar o sin actividad (1)" in email.body
+    assert email.body.index("Pendientes de volver a llamar") < email.body.index("Sin gestionar o sin actividad (1)")
+    assert "<th" in email.body and "Situación" in email.body and ">Sin gestionar<" in email.body
     assert "PYTEST-CANAL Comprador" in email.body and "PYTEST-CANAL Volver" in email.body
     assert "Intento 1 de 3" in email.body
     assert "horas hábiles" in email.body
@@ -453,12 +457,12 @@ def test_listado_y_detalle_muestran_horas_habiles(live_alert):
     status, html = _get(f"/alerts?q={TAG}")
     assert status == 200
     assert f"{TAG} Comprador" in html
-    assert "Sin gestión · " in html and " hábiles" in html
+    assert "Sin gestionar · " in html and " hábiles" in html
     assert "Venció el " in html
 
     status, html = _get(f"/alerts/{live_alert.id}")
     assert status == 200
-    assert "Sin gestión · " in html
+    assert "Sin gestionar · " in html
     assert "Venció el " in html
 
 

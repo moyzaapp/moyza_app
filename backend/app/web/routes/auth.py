@@ -65,7 +65,13 @@ async def auth_page(
 
     from app.services.company_service import list_active_companies
 
-    users = db.query(User).order_by(User.full_name).all()
+    # Los dados de baja no se ven por defecto: solo con ?baja=1 (opción 1 acordada
+    # el 2026-11-10 sobre PLAN_BAJA_USUARIOS.md). Se cuentan para el enlace.
+    show_inactive = request.query_params.get("baja") == "1"
+
+    all_users = db.query(User).order_by(User.full_name).all()
+    inactive_users = [u for u in all_users if u.is_active is False]
+    users = inactive_users if show_inactive else [u for u in all_users if u.is_active is not False]
 
     roles = db.query(Role).all()
 
@@ -82,6 +88,8 @@ async def auth_page(
             "roles": roles,
             "permissions": permissions,
             "current_user": current_user,
+            "show_inactive": show_inactive,
+            "inactive_count": len(inactive_users),
             # Eliminar solo sin historial (PLAN_BAJA_USUARIOS.md §7.1)
             "history_by_user_id": offboarding_service.history_by_user_id(db, users),
             # Empresas asignables en los formularios de usuario
