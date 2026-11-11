@@ -98,6 +98,9 @@ DEFAULT_PAGE_SIZE = 100
 PER_PAGE_COOKIE = "alerts_per_page"
 PER_PAGE_COOKIE_MAX_AGE = 365 * 24 * 60 * 60  # 1 año
 
+# `/alerts?attention=sin_gestion` (solo admin, PLAN_VENTANA_SIN_GESTION.md)
+UNMANAGED_FILTER = "sin_gestion"
+
 
 def normalize_per_page(value) -> int:
     """Tamaño de página válido: uno de PAGE_SIZES; cualquier otra cosa → 100."""
@@ -558,12 +561,18 @@ async def alerts_page(
     per_page: Optional[str] = Query(default=None),
     b_q: str = Query(default=""),
     b_page: Optional[str] = Query(default=None),
+    attention: Optional[str] = Query(default=None),
     db: Session = Depends(get_db)
 ):
     """Lista de alertas - Admin ve todas, agentes solo las suyas.
 
     Las dos tablas (alertas y compradores) se paginan en servidor: los
     filtros se aplican sobre todo el conjunto y luego se corta la página.
+
+    `attention=sin_gestion` (solo admin, PLAN_VENTANA_SIN_GESTION.md): solo
+    las alertas sin ninguna gestión desde la asignación
+    (`BuyerAttention.never_managed`), de la más antigua a la más nueva, sin
+    filtro de estado (son abiertas por definición). Para un agente se ignora.
     """
 
     current_user = request.state.user
@@ -608,6 +617,19 @@ async def alerts_page(
     if agent_id_int and admin_view:
         base_query = base_query.filter(PropertyAlert.agent_id == agent_id_int)
 
+    # Solo sin gestionar (admin): los ids salen del servicio de atención, que
+    # carga en lote las abiertas vencidas de la empresa (y del agente)
+    unmanaged_view = admin_view and attention == UNMANAGED_FILTER
+    if unmanaged_view:
+        unmanaged_ids = [
+            item.alert.id
+            for item in buyer_attention_service.find_buyers_needing_attention(
+                db, company_id=company.id, agent_id=agent_id_int or None,
+            )
+            if item.never_managed
+        ]
+        base_query = base_query.filter(PropertyAlert.id.in_(unmanaged_ids))
+
     # Contar alertas por estado (una sola consulta agrupada) ANTES del filtro
     # de estado y sin paginar: las tarjetas muestran los totales reales bajo
     # los filtros de texto y agente, marque el usuario los estados que marque.
@@ -626,6 +648,9 @@ async def alerts_page(
     valid_status_filters = [s for s in status_filter if AlertStatus.is_valid(s)]
     effective_statuses = effective_alert_statuses(status_filter, q)
     default_status_view = not valid_status_filters and not (q and q.strip())
+    if unmanaged_view:
+        # Sin gestionar ya son abiertas: el filtro de estado no aplica
+        valid_status_filters, effective_statuses, default_status_view = [], [], False
     filtered_query = base_query
     if effective_statuses:
         filtered_query = filtered_query.filter(PropertyAlert.status.in_(effective_statuses))
@@ -650,16 +675,11 @@ async def alerts_page(
     # todos los roles (PLAN_CEDER_COMPRADORES.md §1): una alerta reasignada
     # sube arriba, también para el admin.
     date_order = alert_view.assignment_start_expr()
-    alerts = (
-        filtered_query
-        .options(
-            # Empresa de la propiedad: distintivo si es de la otra
-            # (PLAN_SUGERENCIAS_MULTIEMPRESA.md), una consulta para la página
-            contains_eager(PropertyAlert.property).selectinload(Property.company),
-            contains_eager(PropertyAlert.agent),
-            selectinload(PropertyAlert.follow_ups),
-        )
-        .order_by(
+    if unmanaged_view:
+        # Sin gestionar: la que más tiempo lleva esperando, primero
+        ordering = (date_order.asc(), PropertyAlert.id.asc())
+    else:
+        ordering = (
             case(
                 (PropertyAlert.priority == AlertPriority.ALTA, 1),
                 (PropertyAlert.priority == AlertPriority.NORMAL, 2),
@@ -669,6 +689,20 @@ async def alerts_page(
             date_order.desc(),
             PropertyAlert.id.desc(),
         )
+    page_options = [
+        # Empresa de la propiedad: distintivo si es de la otra
+        # (PLAN_SUGERENCIAS_MULTIEMPRESA.md), una consulta para la página
+        contains_eager(PropertyAlert.property).selectinload(Property.company),
+        contains_eager(PropertyAlert.agent),
+        selectinload(PropertyAlert.follow_ups),
+    ]
+    if unmanaged_view:
+        # Marca "Reasignada el dd/mm · antes Nombre": una consulta para la página
+        page_options.append(selectinload(PropertyAlert.previous_agent))
+    alerts = (
+        filtered_query
+        .options(*page_options)
+        .order_by(*ordering)
         .offset(alert_pagination["offset"])
         .limit(alert_pagination["per_page"])
         .all()
@@ -871,6 +905,7 @@ async def alerts_page(
             "q": q,
             "status_filter": valid_status_filters,
             "selected_agent_id": agent_id_int,
+            "attention_filter": UNMANAGED_FILTER if unmanaged_view else None,
         }
     )
 

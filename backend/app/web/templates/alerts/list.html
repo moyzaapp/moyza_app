@@ -125,6 +125,16 @@
                 {# Total con los filtros aplicados (todas las páginas), no el tamaño de página #}
                 <span class="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full font-medium">{{ total_alerts }}</span>
             </h2>
+            {# Filtro "sin gestionar" (solo admin, PLAN_VENTANA_SIN_GESTION.md): chip para quitarlo #}
+            {% if attention_filter %}
+            {% set attention_keep = request.query_params.multi_items() | rejectattr("0", "in", ["attention", "page"]) | list %}
+            <a href="/alerts{{ ('?' ~ (attention_keep | urlencode)) if attention_keep else '' }}#alertas"
+               class="inline-flex items-center gap-1.5 min-h-[2.25rem] rounded-lg bg-gray-100 hover:bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors"
+               aria-label="Quitar el filtro Sin gestionar ({{ total_alerts }})">
+                Sin gestionar · {{ total_alerts }}
+                <svg class="w-3.5 h-3.5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+            </a>
+            {% endif %}
         </div>
 
         <!-- Búsqueda y filtros. Sin campo `page`: filtrar o cambiar el tamaño vuelve a la página 1 -->
@@ -132,6 +142,7 @@
               {% if default_status_view %}data-default-statuses{% endif %}>
             {# Conserva la búsqueda de compradores al filtrar alertas (su página vuelve a la 1) #}
             {% if b_q %}<input type="hidden" name="b_q" value="{{ b_q }}">{% endif %}
+            {% if attention_filter %}<input type="hidden" name="attention" value="{{ attention_filter }}">{% endif %}
             <!-- Búsqueda por texto -->
             <div class="relative">
                 <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -165,6 +176,10 @@
             <!-- Filtro por estado (checkboxes). Marcadas según los estados que filtra
                  realmente el listado: en la vista por defecto, Pendiente y En Proceso;
                  al buscar texto sin marcar ninguno, ninguna (= todos los estados). -->
+            {% if attention_filter %}
+            {# Sin gestionar: siempre abiertas, el filtro de estado no aplica #}
+            <p class="text-xs text-gray-500">Solo compradores sin ninguna gestión desde que se asignaron, del más antiguo al más nuevo. Quita el filtro «Sin gestionar» para filtrar por estado.</p>
+            {% else %}
             <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
                 <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Estados:</span>
                 <label class="flex items-center gap-1.5 cursor-pointer">
@@ -192,13 +207,14 @@
                     <span class="text-sm text-gray-700">Cancelada</span>
                 </label>
             </div>
+            {% endif %}
 
             <!-- Acciones + tamaño de página (compartido por alertas y compradores) -->
             <div class="flex flex-wrap items-center gap-2">
                 <button type="submit" class="px-4 py-2 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-gray-800 transition-colors">
                     Filtrar
                 </button>
-                {% if q or status_filter or selected_agent_id %}
+                {% if q or status_filter or selected_agent_id or attention_filter %}
                 <a href="/alerts" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors border border-gray-300">
                     Limpiar filtros
                 </a>
@@ -296,6 +312,10 @@
                                             <span class="font-medium">{{ alert.lead_name }}</span>
                                             {% if alert.lead_phone %}
                                             <span class="text-xs text-gray-500">{{ alert.lead_phone | phone_display }}</span>
+                                            {% endif %}
+                                            {# Sin gestionar: ya se reasignó y el nuevo agente tampoco la ha tocado #}
+                                            {% if attention_filter and alert.previous_agent_id and alert.assigned_at %}
+                                            <span class="text-xs font-medium text-red-700">Reasignada el {{ alert.assigned_at | madrid_dt('%d/%m') }}{% if alert.previous_agent %} · antes {{ alert.previous_agent.name }}{% endif %}</span>
                                             {% endif %}
                                         </div>
                                     </td>
@@ -439,7 +459,13 @@
                                 </tr>
                                 {% endfor %}
                             {% else %}
-                                {% if default_status_view %}
+                                {% if attention_filter %}
+                                {{ ui.empty_state(
+                                    "No hay compradores sin gestionar",
+                                    "Todos tienen alguna gestión desde que se asignaron. Quita el filtro para ver el resto.",
+                                    colspan='9'
+                                ) }}
+                                {% elif default_status_view %}
                                 {{ ui.empty_state(
                                     "No hay alertas pendientes ni en proceso",
                                     "Marca Completada o Cancelada para ver las cerradas" ~ (", o limpia los filtros." if selected_agent_id else "."),
@@ -489,6 +515,7 @@
                 {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
                 {% for status in status_filter %}<input type="hidden" name="status_filter" value="{{ status }}">{% endfor %}
                 {% if selected_agent_id %}<input type="hidden" name="agent_id" value="{{ selected_agent_id }}">{% endif %}
+                {% if attention_filter %}<input type="hidden" name="attention" value="{{ attention_filter }}">{% endif %}
                 {% if alert_pagination.page > 1 %}<input type="hidden" name="page" value="{{ alert_pagination.page }}">{% endif %}
                 <input type="hidden" name="per_page" value="{{ per_page }}">
                 <div class="flex-1">
