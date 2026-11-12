@@ -152,6 +152,10 @@ unificada (el selector y el listado ya son de "todas mis empresas"). Un commit p
   o "Visita registrada en X") y enlace a `/visits` si la ficha no se abre. Contadores (visitas
   del equipo, última actividad, envíos fallidos de WhatsApp) por la empresa de la visita.
 - **Logs de envío de la ficha** (`/report-logs`): por la empresa de la visita.
+- **Salidas del flujo legal** (commit posterior a la fase D, "fix(visitas): volver a Visitas
+  …"): tras finalizar, en "Volver a la propiedad" de la página final y en las redirecciones
+  de "ya procesada" / "ya finalizada" / archivo inexistente, si la ficha de la propiedad no es
+  accesible (visita cruzada) se vuelve a `/visits`.
 - **Lupa**: la fila lleva `property_company` si la propiedad es de otra empresa (distintivo, sin
   enlace). El CSV no cambia.
 - Tests existentes cambiados: `test_visit_agent_signatures.py` (la API resuelve `company_ids`

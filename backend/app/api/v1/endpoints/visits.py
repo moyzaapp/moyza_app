@@ -503,7 +503,12 @@ async def finalize_visit(
             "pdf_sent": len(sent_to) > 0,
             "sent_to": sent_to,
             "visit_sheet_url": f"/visits/{visit_id}/download",
-            "redirect_url": f"/properties/{property_item.id}"
+            # Visita cruzada: la ficha de la propiedad puede no ser accesible
+            "redirect_url": (
+                f"/properties/{property_item.id}"
+                if property_item.company_id in (resolve_company_ids_for_api(request, user, db) or [])
+                else "/visits"
+            )
         }
 
     except Exception as e:

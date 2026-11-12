@@ -169,11 +169,15 @@ def _street_visible(request: Request, property_item) -> bool:
     return property_item.company_id in allowed_ids or property_item.company_id in get_company_ids(request)
 
 
-def _property_back_url(property_item, company_ids) -> str:
-    """Ficha de la propiedad si es de una empresa del usuario; si no, el selector."""
+def _property_back_url(property_item, company_ids, fallback: str = "/visits/select-property") -> str:
+    """Ficha de la propiedad si es de una empresa del usuario; si no, `fallback`.
+
+    Una visita cruzada (PLAN_VISITAS_OTRA_EMPRESA.md) puede ser a una
+    propiedad cuya ficha el usuario no puede abrir.
+    """
     if property_item is not None and property_item.company_id in company_ids:
         return f"/properties/{property_item.id}"
-    return "/visits/select-property"
+    return fallback
 
 
 def _visit_agents_context(request: Request, db: Session, property_item, visit=None, company=None) -> dict:
@@ -589,7 +593,7 @@ async def download_visit_sheet(
     filepath = Path(visit.visit_sheet_filepath)
 
     if not filepath.exists():
-        response = RedirectResponse(url=f"/properties/{visit.property_id}", status_code=302)
+        response = RedirectResponse(url=_property_back_url(visit.property, get_company_ids(request), fallback="/visits"), status_code=302)
         set_flash(response, "error", "Archivo de ficha de visita no existe")
         return response
 
@@ -770,7 +774,7 @@ async def preview_visit(
 
     # Verificar que la visita está en estado draft o preview
     if visit.visit_status not in ['draft', 'preview']:
-        response = RedirectResponse(url=f"/properties/{property_item.id}", status_code=302)
+        response = RedirectResponse(url=_property_back_url(property_item, get_company_ids(request), fallback="/visits"), status_code=302)
         set_flash(response, "warning", "Esta visita ya ha sido procesada")
         return response
 
@@ -915,6 +919,8 @@ async def complete_visit_page(
             "request": request,
             "visit": visit,
             "property": property_item,
+            # "Volver a la propiedad" solo si su ficha es accesible (visita cruzada)
+            "property_url": _property_back_url(property_item, get_company_ids(request), fallback="/visits"),
             "current_user": request.state.user
         }
     )
@@ -940,7 +946,7 @@ async def agent_signatures_page(
         return response
 
     if visit.visit_status == 'completed':
-        response = RedirectResponse(url=f"/properties/{visit.property_id}", status_code=302)
+        response = RedirectResponse(url=_property_back_url(visit.property, company_ids, fallback="/visits"), status_code=302)
         set_flash(response, "info", "Esta visita ya está finalizada")
         return response
 

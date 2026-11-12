@@ -449,3 +449,19 @@ def test_lupa_pinta_el_distintivo_sin_enlace_a_la_ficha(ctx, cross_visit):
     assert 'title="Propiedad de MOES PREMIUM"' in html
     assert f'href="/properties/{ctx.props.moes.id}"' not in html
     assert "a propiedades de cualquier empresa" in html
+
+
+def test_tras_la_firma_vuelve_a_visitas_si_la_ficha_no_se_abre(ctx, cross_visit):
+    from app.web.routes.visits import complete_visit_page
+    from app.web.routes.visits import preview_visit
+    cross_visit.signature_filepath = "/no/existe/firma.png"
+    cross_visit.visit_status = "signed"
+    ctx.db.flush()
+
+    response = asyncio.run(complete_visit_page(cross_visit.id, _request(ctx, ctx.users.mia, "/visits/complete"),
+                                               db=ctx.db))
+    assert response.context["property_url"] == "/visits"
+    assert "← Volver a Visitas" in _html(response)
+    # Visita ya procesada: de la vista previa, a Visitas (no a una ficha que no se abre)
+    response = asyncio.run(preview_visit(cross_visit.id, _request(ctx, ctx.users.mia, "/visits/preview"), db=ctx.db))
+    assert response.headers["location"] == "/visits"
