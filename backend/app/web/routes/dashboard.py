@@ -14,6 +14,12 @@ navegación histórica quedan en Resultados Comerciales.
   semanas, más el aviso de compradores sin atender agrupado por agente.
 - Usuario sin ficha de agente en la empresa activa: vista mínima con aviso.
 
+Vista unificada del agente (PLAN_VISTA_UNIFICADA_AGENTES.md, fase C): el
+Inicio del agente es de todas sus empresas (`get_company_ids`), con métricas
+y objetivos sumados, agenda, compradores y novedades de todas, y distintivo
+de empresa en las filas si tiene más de una. Para el admin y la vista por
+empresa, `company_ids` es [activa] y todo sigue como siempre.
+
 Los parámetros antiguos `period_type` y `period_start` se aceptan y se
 ignoran, para que los enlaces guardados sigan funcionando.
 """
@@ -35,6 +41,7 @@ from app.services.dashboard_service import madrid_now
 from app.web.dependencies.auth import get_agent_from_user
 from app.web.dependencies.auth import is_admin
 from app.web.dependencies.company import get_active_company
+from app.web.dependencies.company import get_company_ids
 from app.web.template_env import templates
 
 router = APIRouter()
@@ -54,9 +61,12 @@ async def dashboard(
 ):
     current_user = request.state.user
     company = get_active_company(request)
-    svc = DashboardService(db, company.id)
-    week, month = svc.current_periods()
     admin = bool(is_admin(current_user))
+    # Admin: siempre la empresa activa. Agente: todas sus empresas (vista
+    # unificada) o la activa (vista por empresa, `company_ids` == [activa])
+    company_ids = [company.id] if admin else get_company_ids(request)
+    svc = DashboardService(db, company_ids)
+    week, month = svc.current_periods()
 
     context = {
         "request": request,
@@ -75,17 +85,18 @@ async def dashboard(
         context.update({"view": "admin", "home": svc.admin_home(week=week, month=month)})
     else:
         agent = get_agent_from_user(current_user, db)
-        # La ficha de agente tiene que pertenecer a la empresa activa
-        if agent is not None and in_company(agent, company.id):
+        # La ficha de agente tiene que pertenecer a alguna de sus empresas
+        if agent is not None and in_company(agent, company_ids):
             home = svc.agent_home(agent, week=week, month=month)
-            # Novedades: notificaciones in-app del usuario en la empresa activa
+            # Novedades: notificaciones in-app del usuario en sus empresas
+            with_company = svc.is_multi
             home.update({
                 "show_news": True,
                 "news": [
-                    notifications.serialize(n)
-                    for n in notifications.recent(db, current_user.id, company.id, DashboardThresholds.NEWS_LIMIT)
+                    notifications.serialize(n, with_company=with_company)
+                    for n in notifications.recent(db, current_user.id, company_ids, DashboardThresholds.NEWS_LIMIT)
                 ],
-                "news_unread": notifications.unread_count(db, current_user.id, company.id),
+                "news_unread": notifications.unread_count(db, current_user.id, company_ids),
             })
             context.update({"view": "agent", "agent": agent, "home": home})
         else:

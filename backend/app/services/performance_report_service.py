@@ -5,6 +5,8 @@ PLAN_RESULTADOS_COMERCIALES.md. Reglas:
 - Todas las métricas se calculan dentro de una empresa (`company_id`): las
   de sus propiedades, alertas, seguimientos y visitas. Un agente que está
   en las dos empresas tiene resultados, objetivos y snapshots separados.
+  La vista unificada del agente (PLAN_VISTA_UNIFICADA_AGENTES.md §5-3) los
+  suma después con `sum_metrics` / `sum_targets`; aquí no se mezclan.
 - Captaciones, bajadas y cierres se desglosan en venta / alquiler. El tipo
   sale de la propiedad; en cierres, del propio registro. Lo que no es venta
   ni alquiler cuenta en el total ("otros") pero en ningún tipo.
@@ -130,6 +132,58 @@ class Period:
 
 def _empty_counts() -> dict:
     return {kind: 0 for kind in KINDS}
+
+
+def sum_metrics(metrics_list) -> dict:
+    """Suma de varios diccionarios de métricas (un agente en varias empresas).
+
+    PLAN_VISTA_UNIFICADA_AGENTES.md §5-3: las métricas del agente en la vista
+    unificada son la suma de sus empresas. Cada empresa conserva su cálculo
+    (vivo o snapshot); aquí solo se suman. Una clave que es None en todas
+    sigue siendo None (p. ej. un desglose anterior a los snapshots con
+    desglose); si solo falta en alguna, cuenta como 0.
+    """
+    metrics_list = [m for m in metrics_list if m is not None]
+    if len(metrics_list) == 1:
+        return dict(metrics_list[0])
+    keys = []
+    for metrics in metrics_list:
+        keys.extend(k for k in metrics if k not in keys)
+    result = {}
+    for key in keys:
+        values = [m.get(key) for m in metrics_list]
+        result[key] = None if all(v is None for v in values) else sum(v or 0 for v in values)
+    return result
+
+
+@dataclass(frozen=True)
+class SummedTarget:
+    """Objetivo de un agente sumado entre empresas (mismos atributos `target_*`
+    que `AgentPerformanceTarget`, para `target_value`)."""
+
+    target_contactos: Optional[int] = None
+    target_bajadas: Optional[int] = None
+    target_captaciones_crm: Optional[int] = None
+    target_cierres: Optional[int] = None
+    target_hojas_visita: Optional[int] = None
+
+
+def sum_targets(targets):
+    """Suma de los objetivos de un agente en varias empresas (§5-3).
+
+    None si no hay objetivo en ninguna; si solo hay en una, sus valores. Un
+    campo sin valor en todas sigue siendo None.
+    """
+    targets = [t for t in targets if t is not None]
+    if not targets:
+        return None
+    if len(targets) == 1:
+        return targets[0]
+    values = {}
+    for field_name in PerformanceObjectives.TARGET_FIELDS.values():
+        parts = [getattr(t, field_name, None) for t in targets]
+        values[field_name] = None if all(v is None for v in parts) else sum(v or 0 for v in parts)
+    return SummedTarget(**values)
 
 
 def business_kind(column):

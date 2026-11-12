@@ -3,7 +3,9 @@
 {% block title %}Notificaciones - {{ brand_name }}{% endblock %}
 
 {#
-  Notificaciones in-app del usuario en la empresa activa (PLAN_DASHBOARD_INICIO.md §4.4).
+  Notificaciones in-app del usuario en la empresa activa (PLAN_DASHBOARD_INICIO.md §4.4)
+  o, en la vista unificada con varias empresas, en todas, con distintivo
+  (PLAN_VISTA_UNIFICADA_AGENTES.md, fase C).
   Clic en una: se marca como leída y lleva a su destino.
 #}
 {% block content %}
@@ -12,7 +14,8 @@
 
 <div class="max-w-3xl mx-auto space-y-6">
 
-    {% call ui.page_header("Notificaciones", "Avisos de " ~ brand_name ~ " dentro de la app · " ~ unread_total ~ " sin leer") %}
+    {% set scope_name = (allowed_companies | map(attribute='name') | join(' y ')) if show_company_badges else brand_name %}
+    {% call ui.page_header("Notificaciones", "Avisos de " ~ scope_name ~ " dentro de la app · " ~ unread_total ~ " sin leer") %}
         {% if unread_total %}
         <form method="POST" action="/notifications/mark-all-read">
             <input type="hidden" name="next" value="/notifications?status={{ status }}">

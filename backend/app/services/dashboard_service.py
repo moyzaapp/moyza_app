@@ -11,7 +11,14 @@ Entradas puras (sin `request`) para que se puedan probar sin la app:
   bloque de semana y de mes, y la tabla de cumplimiento con ambos períodos.
 
 Reglas:
-- Todas las consultas se limitan a la empresa del servicio.
+- Todas las consultas se limitan a la empresa del servicio. El servicio
+  acepta un id o una lista: el Inicio del agente en la vista unificada
+  (PLAN_VISTA_UNIFICADA_AGENTES.md, fase C) recibe todas sus empresas y
+  muestra la **suma** (§5-3): métricas y objetivos se calculan por empresa
+  (vivo o snapshot, cada una con los suyos) y se suman (`sum_metrics`,
+  `sum_targets`); agenda, compradores, cartera y tendencia leen de todas.
+  El Inicio del admin es siempre de una empresa (`admin_home` usa
+  `company_id`, la primera y única de la lista).
 - Las métricas salen de `PerformanceReportService` (misma fórmula que
   Resultados Comerciales); aquí solo se agrupan por lotes para no lanzar
   una consulta por agente.
@@ -40,6 +47,7 @@ from app.models.agent_performance_report import AgentPerformanceReport
 from app.models.agent_performance_target import AgentPerformanceTarget
 from app.models.alert_follow_up import AlertFollowUp
 from app.models.closing import Closing
+from app.models.company import Company
 from app.models.property import Property
 from app.models.property_alert import PropertyAlert
 from app.models.property_visit import PropertyVisit
@@ -51,12 +59,16 @@ from app.core.business_calendar import format_business_duration
 from app.services.buyer_attention_service import RULE_CALLBACK
 from app.services.buyer_attention_service import RULE_NO_ACTION
 from app.services.buyer_reminder_service import get_pending_buyers_by_agent
+from app.services.company_scope import CompanyIds
+from app.services.company_scope import company_match
 from app.services.company_scope import scope_active_agents
 from app.services.performance_report_service import BREAKDOWN_KEYS
 from app.services.performance_report_service import MONTH_ABBR
 from app.services.performance_report_service import Period
 from app.services.performance_report_service import PerformanceReportService
 from app.services.performance_report_service import business_kind
+from app.services.performance_report_service import sum_metrics
+from app.services.performance_report_service import sum_targets
 
 
 MADRID = ZoneInfo("Europe/Madrid")
@@ -205,10 +217,30 @@ OTHERS_COLOR = "#9CA3AF"
 
 class DashboardService:
 
-    def __init__(self, db: Session, company_id: int):
+    def __init__(self, db: Session, company_id: CompanyIds):
         self.db = db
-        self.company_id = company_id
-        self.perf = PerformanceReportService(db, company_id)
+        if isinstance(company_id, (list, tuple, set, frozenset)):
+            # Sin duplicados y en orden estable (MOYZA primero)
+            self.company_ids = sorted(set(company_id))
+        else:
+            self.company_ids = [company_id]
+        # Una empresa: la de siempre. Varias (vista unificada del agente): la
+        # primera, solo para lo que no se suma (no lo usa el Inicio del agente)
+        self.company_id = self.company_ids[0] if self.company_ids else None
+        self.perf = PerformanceReportService(db, self.company_id)
+
+    @property
+    def is_multi(self) -> bool:
+        """True si el servicio suma varias empresas (vista unificada del agente)."""
+        return len(self.company_ids) > 1
+
+    def _per_company(self) -> list:
+        """Un servicio por empresa, para lo que se calcula por empresa y se suma."""
+        return [DashboardService(self.db, company_id) for company_id in self.company_ids]
+
+    def _company_scope(self):
+        """Valor para `company_match` / `get_locked_alert_ids`: un id o la lista."""
+        return self.company_ids if self.is_multi else self.company_id
 
     # ------------------------------------------------------------------
     # Período
@@ -234,7 +266,8 @@ class DashboardService:
 
     def company_agents(self) -> list:
         # Equipo del Inicio: sin los dados de baja (PLAN_BAJA_USUARIOS.md §4.3)
-        return scope_active_agents(self.db.query(Agent), self.company_id).order_by(Agent.name.asc()).all()
+        # Con varias empresas, los agentes de cualquiera de ellas (puesto del agente)
+        return scope_active_agents(self.db.query(Agent), self._company_scope()).order_by(Agent.name.asc()).all()
 
     def _visit_counts(self, agent_ids, start: datetime, end: datetime) -> dict:
         """Hojas de visita por agente participante (principal + acompañante)."""
@@ -246,7 +279,7 @@ class DashboardService:
                 self.db.query(column, func.count(PropertyVisit.id))
                 .join(Property, Property.id == PropertyVisit.property_id)
                 .filter(
-                    Property.company_id == self.company_id,
+                    company_match(Property.company_id, self._company_scope()),
                     column.in_(agent_ids),
                     PropertyVisit.created_at >= start,
                     PropertyVisit.created_at <= end,
@@ -262,12 +295,20 @@ class DashboardService:
         """{agent_id: métricas} del período; snapshot congelado si el período está cerrado.
 
         Mismo criterio que `PerformanceReportService.metrics_for_period`, con
-        una consulta agrupada por indicador en lugar de una por agente.
+        una consulta agrupada por indicador en lugar de una por agente. Con
+        varias empresas, cada una con su criterio (snapshot o vivo) y sumadas.
         """
         agent_ids = list(agent_ids)
         result = {}
         if not agent_ids:
             return result
+
+        if self.is_multi:
+            per_company = [svc.team_metrics(agent_ids, period) for svc in self._per_company()]
+            return {
+                agent_id: sum_metrics([metrics[agent_id] for metrics in per_company])
+                for agent_id in agent_ids
+            }
 
         if not period.is_current:
             for report in self.perf._reports_query(agent_ids).filter(
@@ -292,9 +333,18 @@ class DashboardService:
         return result
 
     def team_targets(self, agent_ids, period: Period) -> dict:
+        """{agent_id: objetivo}; con varias empresas, la suma de los de cada una
+        (si solo hay en una, ese)."""
         agent_ids = list(agent_ids)
         if not agent_ids:
             return {}
+        if self.is_multi:
+            per_company = [svc.team_targets(agent_ids, period) for svc in self._per_company()]
+            summed = {
+                agent_id: sum_targets([targets.get(agent_id) for targets in per_company])
+                for agent_id in agent_ids
+            }
+            return {agent_id: target for agent_id, target in summed.items() if target is not None}
         return {
             target.agent_id: target
             for target in self.db.query(AgentPerformanceTarget).filter(
@@ -369,7 +419,6 @@ class DashboardService:
             for agent_id in agent_ids
         }
 
-        report = self.perf.get_report(agent.id, period.period_type, period.start)
         # Solo las métricas con objetivo en este tipo de período (semana: sin cierres)
         objective_keys = self.perf.objective_keys(period.period_type)
 
@@ -386,8 +435,26 @@ class DashboardService:
             "has_target": target is not None,
             "completion": completions[agent.id],
             "ranking": self.ranking(agent.id, completions),
-            "admin_notes": (report.admin_notes or "").strip() if report else "",
+            "admin_notes": self.admin_notes(agent.id, period),
         }
+
+    def admin_notes(self, agent_id: int, period: Period) -> str:
+        """Observación del admin del período (una por empresa en el snapshot).
+
+        Con varias empresas se unen las que haya; si hay más de una, cada una
+        con el nombre de su empresa delante.
+        """
+        notes = []
+        for company_id in self.company_ids:
+            perf = self.perf if company_id == self.company_id else PerformanceReportService(self.db, company_id)
+            report = perf.get_report(agent_id, period.period_type, period.start)
+            text = (report.admin_notes or "").strip() if report else ""
+            if text:
+                notes.append((company_id, text))
+        if len(notes) <= 1:
+            return notes[0][1] if notes else ""
+        names = {c.id: c.name for c in self.db.query(Company).filter(Company.id.in_([cid for cid, _ in notes]))}
+        return "\n\n".join(f"{names.get(cid, '')}: {text}" for cid, text in notes)
 
     def agent_home(
         self,
@@ -444,7 +511,7 @@ class DashboardService:
         query = (
             self.db.query(PropertyAlert)
             .filter(
-                PropertyAlert.company_id == self.company_id,
+                company_match(PropertyAlert.company_id, self._company_scope()),
                 PropertyAlert.agent_id == agent_id,
                 PropertyAlert.status.in_([AlertStatus.PENDING, AlertStatus.IN_PROGRESS]),
             )
@@ -471,7 +538,8 @@ class DashboardService:
         start_of_today = datetime.combine(local_now.date(), time.min)
         latest = self._latest_follow_up_subquery()
         labels = FollowUpActionType.labels()
-        locked = get_locked_alert_ids(agent.id, self.db, self.company_id)
+        # Con varias empresas, unión de los bloqueos de cada cola (por empresa)
+        locked = get_locked_alert_ids(agent.id, self.db, self._company_scope())
 
         due_query = (
             self._agent_open_alerts(agent.id, exclude_ids=locked)
@@ -496,6 +564,8 @@ class DashboardService:
                 "action_label": labels.get(follow_up.action_type, follow_up.action_type),
                 "when": follow_up.next_action_date,
                 "overdue": follow_up.next_action_date < start_of_today,
+                # Distintivo de empresa en la fila (vista unificada con varias)
+                "company": alert.company if self.is_multi else None,
             }
             for alert, follow_up in due_rows
         ]
@@ -533,11 +603,26 @@ class DashboardService:
         PLAN_RECORDATORIO_SIN_RESPUESTA.md: R3 "volver a llamar" (intento N de
         3) y R1 "sin gestión", en horas hábiles; una fila por alerta. Cada fila
         trae `rule`, `text`, `tone`, `due_label`, `since_label`…
+        Con varias empresas, las filas de todas, cada una con su `company`
+        (distintivo); sin varias, `company` es None.
         """
-        pending = get_pending_buyers_by_agent(
-            self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id, agent_id=agent_id,
-        )
-        buyers = pending.get((agent_id, self.company_id), [])
+        if not self.is_multi:
+            pending = get_pending_buyers_by_agent(
+                self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id, agent_id=agent_id,
+            )
+            buyers = [dict(b, company=None) for b in pending.get((agent_id, self.company_id), [])]
+        else:
+            # Una sola consulta sin empresa, filtrada después por las del servicio
+            pending = get_pending_buyers_by_agent(
+                self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=None, agent_id=agent_id,
+            )
+            companies = {c.id: c for c in self.db.query(Company).filter(Company.id.in_(self.company_ids))}
+            buyers = [
+                dict(b, company=companies[company_id])
+                for (row_agent_id, company_id), rows in pending.items()
+                if row_agent_id == agent_id and company_id in companies
+                for b in rows
+            ]
         return sorted(buyers, key=lambda b: b["hours_elapsed"], reverse=True)
 
     # ------------------------------------------------------------------
@@ -547,7 +632,7 @@ class DashboardService:
     def portfolio(self, agent: Agent, now: Optional[datetime] = None) -> dict:
         rows = (
             self.db.query(Property.status, func.count(Property.id))
-            .filter(Property.company_id == self.company_id, Property.agent_id == agent.id)
+            .filter(company_match(Property.company_id, self._company_scope()), Property.agent_id == agent.id)
             .group_by(Property.status)
             .all()
         )
@@ -573,7 +658,7 @@ class DashboardService:
         stale_query = (
             self.db.query(Property)
             .filter(
-                Property.company_id == self.company_id,
+                company_match(Property.company_id, self._company_scope()),
                 Property.agent_id == agent.id,
                 Property.status == PropertyStatus.ACTIVE,
                 Property.available_clause(),
@@ -613,7 +698,7 @@ class DashboardService:
             self.db.query(PropertyAlert.agent_id, week.label("week"), func.count(PropertyAlert.id))
             .filter(
                 # Por agente: cuentan también las búsquedas sin propiedad
-                PropertyAlert.company_id == self.company_id,
+                company_match(PropertyAlert.company_id, self._company_scope()),
                 PropertyAlert.agent_id.in_(list(agent_ids)),
                 PropertyAlert.created_at >= start,
                 PropertyAlert.created_at <= end,
@@ -632,7 +717,7 @@ class DashboardService:
                 self.db.query(column, week.label("week"), func.count(PropertyVisit.id))
                 .join(Property, Property.id == PropertyVisit.property_id)
                 .filter(
-                    Property.company_id == self.company_id,
+                    company_match(Property.company_id, self._company_scope()),
                     column.in_(list(agent_ids)),
                     PropertyVisit.created_at >= start,
                     PropertyVisit.created_at <= end,

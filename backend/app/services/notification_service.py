@@ -34,6 +34,7 @@ from app.models.notification import Notification
 from app.models.property_alert import PropertyAlert
 from app.models.role import Role
 from app.models.user import User
+from app.services.company_scope import company_match
 
 logger = logging.getLogger(__name__)
 
@@ -618,18 +619,20 @@ def cleanup_read(db: Session, now: Optional[datetime] = None, days: int = RETENT
 # Lectura
 # ---------------------------------------------------------------------------
 
-def _scoped(db: Session, user_id: int, company_id: int):
+def _scoped(db: Session, user_id: int, company_id):
+    """Notificaciones del usuario en la empresa o, con una lista de ids, en
+    cualquiera de ellas (vista unificada, PLAN_VISTA_UNIFICADA_AGENTES.md fase C)."""
     return db.query(Notification).filter(
         Notification.user_id == user_id,
-        Notification.company_id == company_id,
+        company_match(Notification.company_id, company_id),
     )
 
 
-def unread_count(db: Session, user_id: int, company_id: int) -> int:
+def unread_count(db: Session, user_id: int, company_id) -> int:
     return _scoped(db, user_id, company_id).filter(Notification.read_at.is_(None)).count()
 
 
-def recent(db: Session, user_id: int, company_id: int, limit: int = 8) -> list:
+def recent(db: Session, user_id: int, company_id, limit: int = 8) -> list:
     """Las últimas `limit`, con las no leídas primero."""
     return (
         _scoped(db, user_id, company_id)
@@ -639,7 +642,7 @@ def recent(db: Session, user_id: int, company_id: int, limit: int = 8) -> list:
     )
 
 
-def page(db: Session, user_id: int, company_id: int, status: str = "all", page_number: int = 1, per_page: int = 25):
+def page(db: Session, user_id: int, company_id, status: str = "all", page_number: int = 1, per_page: int = 25):
     """(notificaciones, total) de una página; `status`: all | unread | read."""
     query = _scoped(db, user_id, company_id)
     if status == "unread":
@@ -656,13 +659,14 @@ def page(db: Session, user_id: int, company_id: int, status: str = "all", page_n
     return items, total
 
 
-def get_for_user(db: Session, notification_id: int, user_id: int, company_id: int) -> Optional[Notification]:
+def get_for_user(db: Session, notification_id: int, user_id: int, company_id) -> Optional[Notification]:
     return _scoped(db, user_id, company_id).filter(Notification.id == notification_id).first()
 
 
-def mark_read(db: Session, user_id: int, company_id: int, ids=None, all_: bool = False,
+def mark_read(db: Session, user_id: int, company_id, ids=None, all_: bool = False,
               now: Optional[datetime] = None) -> int:
-    """Marca como leídas las indicadas (o todas) del usuario en la empresa. Devuelve cuántas."""
+    """Marca como leídas las indicadas (o todas) del usuario en la empresa (o
+    empresas). Devuelve cuántas."""
     query = _scoped(db, user_id, company_id).filter(Notification.read_at.is_(None))
     if not all_:
         ids = [int(i) for i in (ids or []) if str(i).isdigit()]
@@ -674,8 +678,15 @@ def mark_read(db: Session, user_id: int, company_id: int, ids=None, all_: bool =
     return count
 
 
-def serialize(notification: Notification) -> dict:
+def serialize(notification: Notification, with_company: bool = False) -> dict:
+    """Forma de la campana, el Inicio y /notifications.
+
+    `with_company`: añade `company` ({name, primary_color}) para el distintivo
+    de empresa cuando el usuario ve varias a la vez (vista unificada); si no,
+    `company` es None.
+    """
     icon, tone = NotificationKind.style(notification.kind)
+    company = notification.company if with_company else None
     return {
         "id": notification.id,
         "kind": notification.kind,
@@ -687,6 +698,7 @@ def serialize(notification: Notification) -> dict:
         "created_at": notification.created_at.isoformat() + "Z" if notification.created_at else None,
         "when": _madrid_label(notification.created_at),
         "read": notification.read_at is not None,
+        "company": {"name": company.name, "primary_color": company.primary_color or "#000000"} if company else None,
     }
 
 

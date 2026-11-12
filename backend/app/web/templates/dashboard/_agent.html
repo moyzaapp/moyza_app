@@ -1,6 +1,9 @@
 {#
   Inicio del agente (PLAN_DASHBOARD_INICIO.md §3.2). `home` = DashboardService.agent_home.
   Orden de lectura (charts.md): KPIs, lo que hay que hacer hoy, tendencia, cartera.
+  Vista unificada con varias empresas (PLAN_VISTA_UNIFICADA_AGENTES.md, fase C):
+  cifras y objetivos sumados; filas de agenda, compradores y cartera con
+  distintivo de empresa (`show_company_badges`).
 #}
 {% import "components/ui_macros.html" as ui %}
 {% from "dashboard/components/kpi.html" import delta_tag %}
@@ -114,6 +117,7 @@
                     <span class="min-w-0 flex-1">
                         <span class="block text-sm font-medium text-gray-900 truncate">{{ item.buyer_name }}</span>
                         <span class="block text-xs text-gray-500">Próxima acción tras «{{ item.action_label }}» · {{ item.when.strftime('%d/%m/%Y %H:%M') }}</span>
+                        {% if show_company_badges and item.company %}<span class="block mt-1">{{ ui.company_badge(item.company, title="Alerta de " ~ item.company.name) }}</span>{% endif %}
                     </span>
                     {% if item.overdue %}{{ ui.badge("Vencida", "red", dot=True) }}{% else %}{{ ui.badge("Hoy", "amber", dot=True) }}{% endif %}
                 </a>
@@ -175,7 +179,7 @@
         </header>
         {% set pf = home.portfolio %}
         {% if not pf.total %}
-            {{ ui.empty_state("Aún no tienes propiedades en " ~ brand_name, "Las propiedades que captes aparecerán aquí con su estado.") }}
+            {{ ui.empty_state("Aún no tienes propiedades en " ~ ((allowed_companies | map(attribute='name') | join(' ni en ')) if show_company_badges else brand_name), "Las propiedades que captes aparecerán aquí con su estado.") }}
         {% else %}
         <div class="p-4 sm:p-6 space-y-4">
             <div class="flex flex-wrap gap-2">
@@ -191,7 +195,10 @@
                 <ul class="mt-2 divide-y divide-gray-100">
                     {% for prop in pf.stale %}
                     <li class="py-2 flex items-center justify-between gap-3">
-                        <a href="/properties/{{ prop.id }}" class="text-sm font-medium text-gray-900 hover:text-blue-600 truncate">{{ prop.title }}</a>
+                        <span class="min-w-0 flex items-center gap-2">
+                            <a href="/properties/{{ prop.id }}" class="text-sm font-medium text-gray-900 hover:text-blue-600 truncate">{{ prop.title }}</a>
+                            {% if show_company_badges %}{{ ui.company_badge(prop.company, extra="shrink-0") }}{% endif %}
+                        </span>
                         {% if prop.market_entry_date %}<span class="text-xs text-gray-500 shrink-0">captada {{ prop.market_entry_date | madrid_dt('%d/%m/%Y') }}</span>{% endif %}
                     </li>
                     {% endfor %}
@@ -242,6 +249,7 @@
         <li class="py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
             <div class="min-w-0 flex-1">
                 <p class="text-sm font-medium text-gray-900 truncate">{{ b.buyer_name or 'Comprador sin nombre' }}</p>
+                {% if show_company_badges and b.company %}<p class="mt-0.5">{{ ui.company_badge(b.company, title="Alerta de " ~ b.company.name) }}</p>{% endif %}
                 <p class="text-xs text-gray-500">
                     {% if b.buyer_phone and b.buyer_phone != '—' %}<a href="{{ b.buyer_phone | tel_href }}" class="hover:text-blue-600">{{ b.buyer_phone | phone_display }}</a> · {% endif %}
                     <span class="font-medium {{ 'text-red-700' if b.tone == 'red' else 'text-amber-700' }}">{{ b.text }}</span>

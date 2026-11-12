@@ -65,6 +65,18 @@
     return new Date(iso).toLocaleDateString('es-ES', { timeZone: 'Europe/Madrid', day: '2-digit', month: '2-digit' });
   }
 
+  function companyBadge(company) {
+    var chip = el('span', 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-700');
+    chip.title = 'Aviso de ' + company.name;
+    var dot = el('span', 'w-1.5 h-1.5 rounded-full shrink-0');
+    dot.style.backgroundColor = company.primary_color || '#000000';
+    dot.setAttribute('aria-hidden', 'true');
+    chip.appendChild(dot);
+    chip.appendChild(el('span', 'sr-only', 'Empresa: '));
+    chip.appendChild(document.createTextNode(company.name));
+    return chip;
+  }
+
   function message(text) {
     list.textContent = '';
     var li = el('li', 'px-4 py-6 text-center text-sm text-gray-500', text);
@@ -89,7 +101,14 @@
       var body = el('span', 'min-w-0 flex-1');
       body.appendChild(el('span', 'block text-sm ' + (n.read ? 'text-gray-700' : 'font-semibold text-gray-900'), n.title));
       if (n.body) body.appendChild(el('span', 'block text-xs text-gray-500 mt-0.5 truncate', n.body));
-      body.appendChild(el('span', 'block text-xs text-gray-500 mt-0.5', relative(n.created_at)));
+      if (n.company) {
+        // Vista unificada con varias empresas: distintivo (mismo HTML que ui.company_badge)
+        var meta = el('span', 'flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 mt-0.5', relative(n.created_at));
+        meta.appendChild(companyBadge(n.company));
+        body.appendChild(meta);
+      } else {
+        body.appendChild(el('span', 'block text-xs text-gray-500 mt-0.5', relative(n.created_at)));
+      }
       a.appendChild(box); a.appendChild(body);
       if (!n.read) {
         var dot = el('span', 'w-2 h-2 rounded-full bg-blue-600 shrink-0 mt-2');

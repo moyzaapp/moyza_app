@@ -18,7 +18,8 @@
             </h1>
             <p class="text-sm text-gray-500 mt-1 flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full shrink-0" style="background-color: {{ brand_color }}" aria-hidden="true"></span>
-                <span>{{ brand_name }} · {{ today_label }}</span>
+                {# Vista unificada con varias empresas: el Inicio del agente es de todas #}
+                <span>{% if view == 'agent' and show_company_badges %}{{ allowed_companies | map(attribute='name') | join(' y ') }}{% else %}{{ brand_name }}{% endif %} · {{ today_label }}</span>
             </p>
         </div>
         {% if view != 'no_agent' %}
