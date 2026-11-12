@@ -184,7 +184,7 @@
             {# Propiedad actual (p. ej. la de una alerta con referencia) que no sale entre las sugeridas #}
             {% if alert.property and not current_in_suggestions %}
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {{ property_card(alert.property, show_link=property_link_allowed, current=True, active_company_id=active_company_id,
+                {{ property_card(alert.property, show_link=property_link_allowed, current=True, active_company_id=active_company_id, link_company_ids=link_company_ids, switch_hint=not unified_view,
                                  send_action=send_action, sent_at=sent_dates.get(alert.property.id), buyer_phone=alert.lead_phone) }}
             </div>
             {% endif %}
@@ -195,7 +195,8 @@
             {# Desglose por empresa y filtro "Solo {empresa activa}" (PLAN_SUGERENCIAS_MULTIEMPRESA.md):
                "12 propiedades sugeridas · 8 MOYZA · 4 MOES PREMIUM"; el enlace solo si hay de más de una #}
             {% set proposal_url = "/alerts/" ~ alert.id ~ "?step=proposal" %}
-            {% set active_name = active_company.name if active_company else "" %}
+            {# Filtro "Solo {empresa}": la de la alerta (para el admin, la activa; PLAN_VISTA_UNIFICADA_AGENTES.md) #}
+            {% set active_name = proposal_company.name if proposal_company else (active_company.name if active_company else "") %}
             {% if suggestions %}
             <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                 <p class="text-sm text-gray-500">
@@ -214,7 +215,7 @@
                 {# Sin enlace "Ver" a la ficha de una propiedad de otro agente (datos del propietario)
                    ni de la otra empresa (la tarjeta lo resuelve con active_company_id) #}
                 {# Enviar por WhatsApp (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): independiente de asociar #}
-                {% call property_card(prop, show_link=(is_admin or prop.agent_id == own_agent_id), current=is_current, active_company_id=active_company_id,
+                {% call property_card(prop, show_link=(is_admin or prop.agent_id == own_agent_id), current=is_current, active_company_id=active_company_id, link_company_ids=link_company_ids, switch_hint=not unified_view,
                                       send_action=send_action, sent_at=sent_dates.get(prop.id), buyer_phone=alert.lead_phone) %}
                     {% if not is_current %}
                     <form method="POST" action="/alerts/{{ alert.id }}/link-property" data-once data-loading-text="Asociando…">

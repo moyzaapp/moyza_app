@@ -51,6 +51,7 @@ from app.services.phone_lookup_service import lookup_properties_by_phone
 from app.services.property_metrics import PropertyMetricsService
 from app.services.property_link import build_public_url, clean_public_url
 from app.web.dependencies.company import get_active_company
+from app.web.dependencies.company import get_company_ids
 from app.services.report_generator import generate_property_report
 from app.web.utils.flash import set_flash
 from app.web.utils.property_form import extract_fields
@@ -812,8 +813,10 @@ async def property_detail(
         db: Session = Depends(get_db)
     ):
 
-    # Una propiedad de la otra empresa no existe para esta vista
-    property_item = get_property_in_company(db, property_id, get_active_company(request).id)
+    # Una propiedad de la otra empresa no existe para esta vista. Vista unificada
+    # (PLAN_VISTA_UNIFICADA_AGENTES.md): las de cualquiera de sus empresas, para
+    # que abra el "Ver" de las alertas (el resto de propiedades es la fase D)
+    property_item = get_property_in_company(db, property_id, get_company_ids(request))
 
     if not property_item:
         return RedirectResponse(
@@ -934,7 +937,8 @@ async def create_interaction(
 
     current_user = request.state.user
 
-    if not get_property_in_company(db, property_id, get_active_company(request).id):
+    # Acción de la ficha: mismas empresas que la ficha (vista unificada)
+    if not get_property_in_company(db, property_id, get_company_ids(request)):
         response = RedirectResponse(url="/properties", status_code=302)
         set_flash(response, "error", "Propiedad no encontrada")
         return response
@@ -985,7 +989,8 @@ async def generate_report(
         db: Session = Depends(get_db)
     ):
 
-    property_item = get_property_in_company(db, property_id, get_active_company(request).id)
+    # Acción de la ficha: mismas empresas que la ficha (vista unificada)
+    property_item = get_property_in_company(db, property_id, get_company_ids(request))
 
     if not property_item:
         response = RedirectResponse(url="/properties", status_code=302)

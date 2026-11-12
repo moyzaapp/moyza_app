@@ -31,10 +31,18 @@
   - sent_at: fecha (UTC) del último envío de esta propiedad al comprador, o None.
   - buyer_phone: teléfono del comprador (el de la alerta o el de su ficha).
 #}
+{#
+  PLAN_VISTA_UNIFICADA_AGENTES.md:
+  - link_company_ids: empresas del usuario; "Ver" solo si la propiedad es de alguna
+    (sin él, la regla de siempre: la de `active_company_id`).
+  - switch_hint: False en la vista unificada (no hay selector al que mandar).
+#}
 {% import "components/ui_macros.html" as ui %}
 
-{% macro property_card(prop, show_link=False, current=False, active_company_id=None, send_action=None, sent_at=None, buyer_phone=None) -%}
+{% macro property_card(prop, show_link=False, current=False, active_company_id=None, send_action=None, sent_at=None, buyer_phone=None, link_company_ids=None, switch_hint=True) -%}
 {% set other_company = active_company_id is not none and prop.company_id != active_company_id %}
+{# "Ver": con `link_company_ids` (empresas del usuario), si la propiedad es de alguna #}
+{% set no_link = (prop.company_id not in link_company_ids) if (link_company_ids is defined and link_company_ids is not none) else other_company %}
 <article class="bg-white rounded-2xl border {{ 'border-blue-300 ring-2 ring-blue-500/30' if current else 'border-gray-200' }} flex flex-col overflow-hidden">
     <div class="p-4 flex-1 space-y-3">
         <div class="flex items-start justify-between gap-2">
@@ -66,8 +74,8 @@
 
         <div class="flex items-center justify-between gap-2">
             <span class="text-lg font-bold text-gray-900 tabular-nums">{{ prop.price | eur }}</span>
-            {% if show_link and other_company %}
-            <span class="text-xs text-gray-500 text-right">Cambia de empresa para ver la ficha</span>
+            {% if show_link and no_link %}
+            {% if switch_hint %}<span class="text-xs text-gray-500 text-right">Cambia de empresa para ver la ficha</span>{% endif %}
             {% elif show_link %}
             <a href="/properties/{{ prop.id }}" class="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Ver</a>
             {% endif %}

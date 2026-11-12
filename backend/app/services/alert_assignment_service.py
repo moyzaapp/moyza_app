@@ -304,12 +304,16 @@ def cession_agents(db: Session, company_id: int, exclude_agent_id: Optional[int]
 
 def assignable_agents_for_cession(db: Session, company_id: int,
                                   exclude_agent_id: Optional[int] = None) -> list[dict]:
-    """`cession_agents` en el formato de grupos de `assign_fields` (un solo grupo: la empresa)."""
+    """`cession_agents` en el formato de grupos de `assign_fields` (un solo grupo: la empresa).
+
+    El grupo lleva `company_id`: el listado de la vista unificada junta los
+    grupos de varias empresas y el JS solo deja elegir los de la alerta.
+    """
     agents = cession_agents(db, company_id, exclude_agent_id)
     if not agents:
         return []
     company = db.get(Company, company_id)
-    return [{"label": company.name if company is not None else "", "agents": agents}]
+    return [{"label": company.name if company is not None else "", "agents": agents, "company_id": company_id}]
 
 
 

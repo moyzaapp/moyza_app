@@ -121,3 +121,68 @@ una sola sección sin cambiar de empresa.
 ## 6. Estado
 
 En ejecución con agentes Opus 5.5 high, un commit por fase.
+
+- **Fase A — hecha** (`8eed19f`): migración `f2u3v4i5e6w7` (`users.company_switch_enabled`,
+  `users.primary_company_id`), `request.state.company_ids` / `unified_view`, `scope_*` con
+  lista, sidebar sin selector, Editar usuario y alta con "Puede cambiar de empresa" y
+  "Empresa principal", `get_allowed_companies` con la ficha de agente.
+- **Fase B — hecha** (commit "feat(alertas): listado y detalle unificados para agentes de
+  varias empresas", el siguiente a `8eed19f`): listado, contadores, compradores, detalle,
+  seguimientos, Propuesta, cola, cesión, buscadores, altas con empresa y distintivos; sin
+  el banner "cambia de empresa" en la vista unificada.
+- Pendiente: fases C (Inicio y notificaciones), D (propiedades, clientes, informes), E
+  (visitas) y F (Resultados del agente, docs de MULTIEMPRESA_MOYZA_MOES.md §2 y §16).
+
+### 6.1 Decisiones de implementación (donde el plan no era explícito)
+
+**Fase A**
+
+- `company_ids` en la vista unificada = todas las empresas permitidas (usuario + ficha),
+  también si es una sola. Con una sola no hay distintivos ni select de empresa
+  (`show_company_badges` = vista unificada y más de una empresa).
+- El admin ignora `company_switch_enabled` y la empresa principal: siempre selector.
+- `resolve_company_for_api` sigue el mismo criterio que el middleware (en la vista
+  unificada, la principal): las rutas `/api/*` y las páginas ven la misma empresa activa.
+  `resolve_company_ids_for_api` da los `company_ids`.
+- `/switch-company` en la vista unificada: redirige (303) con un aviso informativo "Ya ves
+  todas tus empresas a la vez" y no toca la cookie.
+- Empresa principal: si no se elige, se guarda la primera marcada (menor id); una que no
+  esté entre las marcadas es un error del formulario. La migración rellena la de los
+  usuarios existentes con la primera de `user_companies` (así un usuario solo de MOES, con
+  ficha en las dos, conserva la marca MOES). Si la guardada deja de estar entre las
+  permitidas, cuenta la primera permitida (MOYZA por defecto).
+- En Editar usuario y en el alta, el bloque se oculta si el rol elegido es admin (sus
+  valores se envían igual y no cuentan para él).
+
+**Fase B**
+
+- Todo lo que lee alertas y compradores usa `get_company_ids(request)` (para el admin es
+  `[activa]`, así que no se distingue rol). Las acciones que derivan la empresa de la
+  alerta (cola, cesión, duplicados al asociar, notificaciones) siguen con
+  `alert.company_id`.
+- Alta de alerta: con propiedad, la empresa de la propiedad (cualquiera de las del
+  usuario); un comprador existente de otra empresa que la propiedad da error ("asóciala
+  desde la Propuesta de su alerta"); comprador nuevo, a la empresa de la alerta. Sin
+  propiedad: con comprador existente, la del comprador; con comprador nuevo, el select
+  "Empresa" (solo visible en esa combinación, principal preseleccionada, validado contra
+  `company_ids`). "Nuevo comprador" lleva el mismo select. El admin no ve el select y no
+  puede crear fuera de la activa.
+- Avisos de duplicado del alta (`check-duplicate`, `check-search-duplicate`): en la empresa
+  del comprador. `check-buyer` busca en todas las empresas del usuario; la red de seguridad
+  del servidor, en la empresa de la alerta.
+- Propuesta: el filtro "Solo {empresa}", el desglose y el distintivo de las tarjetas son
+  respecto a la empresa de la alerta; el "Ver" de una propiedad, si es de alguna empresa
+  del usuario (`link_company_ids`); en la vista unificada no sale "Cambia de empresa para
+  ver la ficha". En el listado, el distintivo de la propiedad sale si no es de la empresa
+  de la alerta (para el admin es lo mismo que "no es de la activa").
+- Ficha del comprador: su empresa hace de "activa" (agente responsable, distintivos,
+  "Crear alerta" solo con propiedades de su empresa); "Ver" con `link_company_ids`.
+- Cesión desde el listado: un grupo de agentes por cada empresa con filas cedibles; el JS
+  (`AlertAssign.setCompany`) deja elegir solo los de la empresa de la fila. En el detalle,
+  `assign_fields(..., company=alert.company)`.
+- Contador del sidebar (`/api/alerts/unread-count`): suma de las empresas del usuario.
+- Mínimo fuera de alertas: `/properties/{id}` y sus acciones de actividad e informe buscan
+  la propiedad en `company_ids`, para que el "Ver" de las alertas abra la ficha de una
+  propiedad de otra empresa del agente. El listado, la edición y el resto de propiedades
+  siguen con la empresa activa (fase D). Inicio, notificaciones, visitas y resultados
+  reciben la empresa principal y funcionan como antes (fases C, E y F).
