@@ -203,8 +203,8 @@ def test_alta_listado_lupa_snapshot_y_borrado(admin, setup):
     status, csv_body, _ = admin.get(
         f"/commercial-results/{setup['agent_id']}/metric/cierres?period_type=MONTHLY&period_start=2025-03-01&format=csv")
     lines = csv_body.lstrip("﻿").strip().splitlines()
-    assert lines[0] == "Fecha de cierre;Operación;Propiedad;Ciudad;Nota;Enlace"
-    assert lines[1] == f"31/03/2025;Venta;PYT-CIE-1 · {TAG} PISO;Jaén;Firma en notaría;/properties/{setup['prop_id']}"
+    assert lines[0] == "Fecha de cierre;Operación;Con;Propiedad;Ciudad;Nota;Enlace"
+    assert lines[1] == f"31/03/2025;Venta;;PYT-CIE-1 · {TAG} PISO;Jaén;Firma en notaría;/properties/{setup['prop_id']}"
 
     # Borrado: el snapshot vuelve a contar uno menos
     status, _, headers = admin.post(f"/commercial-results/closings/{closings[1].id}/delete", {})

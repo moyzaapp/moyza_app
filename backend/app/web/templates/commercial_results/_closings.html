@@ -2,7 +2,11 @@
   Pestaña Cierres (solo admin): cierres registrados a mano en la empresa activa.
   PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1. Un registro por cierre y por
   agente; son el resultado de la métrica "Cierres" (Rendimiento, Evolución e
-  Inicio). Alta en el modal #closingModal y borrado con #deleteClosingModal,
+  Inicio). Un cierre compartido por dos agentes (PLAN_CIERRES_DOS_AGENTES.md)
+  son dos registros enlazados que aquí se pintan como una operación: una fila,
+  un botón de borrar (el servidor borra la pareja) y 1 en los totales.
+  `closings` es la lista de operaciones de `closing_operations()`.
+  Alta en el modal #closingModal y borrado con #deleteClosingModal,
   que reutiliza un único formulario: el botón de cada fila le pasa la URL y el
   texto por data-*.
 #}
@@ -36,6 +40,7 @@
         <p class="text-xs text-gray-500 mt-0.5">
           {% if totals.total %}
           <span class="tabular-nums">{{ totals.total }}</span> {{ 'cierre' if totals.total == 1 else 'cierres' }} · venta <span class="tabular-nums">{{ totals.venta }}</span> · alquiler <span class="tabular-nums">{{ totals.alquiler }}</span>
+          {% if totals.shared %}<span class="block"><span class="tabular-nums">{{ totals.shared }}</span> {{ 'compartido' if totals.shared == 1 else 'compartidos' }} entre dos agentes</span>{% endif %}
           {% else %}
           Firma o venta de una propiedad, un registro por agente
           {% endif %}
@@ -63,14 +68,20 @@
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-100">
-        {% for c in closings %}
+        {% for op in closings %}
+        {% set c = op.closing %}
         {% set date_text = c.closed_on.strftime('%d/%m/%Y') %}
         {% set agent_name = c.agent.name if c.agent else 'Agente eliminado' %}
-        <tr class="hover:bg-gray-50 transition-colors" data-closing-row="{{ c.id }}">
+        {% set partner_agent = op.partner.agent if op.partner else c.shared_with_agent %}
+        {% set agents_text = agent_name ~ ' y ' ~ (op.partner_name or 'otro agente') if op.shared else agent_name %}
+        <tr class="hover:bg-gray-50 transition-colors" data-closing-row="{{ c.id }}"{% if op.shared %} data-closing-shared{% endif %}>
           <td class="{{ td }} whitespace-nowrap tabular-nums text-gray-900">{{ date_text }}</td>
           <td class="{{ td }}">
             <span class="font-medium text-gray-900">{{ agent_name }}</span>
-            {% if c.agent and c.agent.is_active is false %}<span class="block text-xs text-gray-500">De baja</span>{% endif %}
+            {% if c.agent and c.agent.is_active is false %}<span class="text-xs text-gray-500">(de baja)</span>{% endif %}
+            {% if op.shared %}
+            <span class="block text-xs text-gray-500 mt-0.5">con {{ op.partner_name or 'otro agente' }}{% if partner_agent and partner_agent.is_active is false %} (de baja){% endif %}</span>
+            {% endif %}
           </td>
           <td class="{{ td }}">{{ ui.status_badge('business', c.business_type, dot=False) }}</td>
           <td class="{{ td }}">
@@ -89,9 +100,10 @@
           <td class="{{ td }} text-right whitespace-nowrap">
             <button type="button"
                     data-delete-closing="/commercial-results/closings/{{ c.id }}/delete"
-                    data-closing-label="{{ agent_name }} · {{ date_text }} · {{ c.business_type }}"
+                    data-closing-label="{{ agents_text }} · {{ date_text }} · {{ c.business_type }}"
+                    {% if op.shared %}data-closing-shared="1"{% endif %}
                     class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600/40"
-                    title="Eliminar cierre" aria-label="Eliminar el cierre de {{ agent_name }} del {{ date_text }}">
+                    title="Eliminar cierre" aria-label="Eliminar el cierre de {{ agents_text }} del {{ date_text }}">
               <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>
               <span class="hidden sm:inline">Eliminar</span>
             </button>
@@ -108,7 +120,7 @@
 </section>
 
 <p class="text-xs text-gray-500 mt-3">
-  Si un cierre lo comparten dos agentes, regístralo una vez para cada uno. Un cierre con fecha en un mes o año ya congelado actualiza ese período.
+  Si lo cerraron entre dos agentes, elige también el Agente 2: cuenta un cierre para cada uno. Un cierre con fecha en un mes o año ya congelado actualiza ese período.
 </p>
 
 {# ---------------------------------------------------------------- Alta #}
@@ -116,12 +128,22 @@
 <form method="POST" action="/commercial-results/closings" data-once>
   <div class="p-4 sm:p-6 space-y-4">
     {% if closing_agents %}
-    <div>
-      <label for="closing_agent" class="block text-sm font-medium text-gray-700 mb-1">Agente <span class="text-red-500" aria-hidden="true">*</span></label>
-      <select id="closing_agent" name="agent_id" required class="{{ ui.input_class }}">
-        <option value="">Elige un agente</option>
-        {% for a in closing_agents %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
-      </select>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label for="closing_agent" class="block text-sm font-medium text-gray-700 mb-1">Agente 1 <span class="text-red-500" aria-hidden="true">*</span></label>
+        <select id="closing_agent" name="agent_id" required class="{{ ui.input_class }}">
+          <option value="">Elige un agente</option>
+          {% for a in closing_agents %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="closing_agent_2" class="block text-sm font-medium text-gray-700 mb-1">Agente 2 <span class="text-gray-400 font-normal">(opcional, si cerraron entre dos)</span></label>
+        <select id="closing_agent_2" name="agent_id_2" class="{{ ui.input_class }}" aria-describedby="closing_agent_2_help">
+          <option value="">Ninguno</option>
+          {% for a in closing_agents %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
+        </select>
+        <p id="closing_agent_2_help" class="text-xs text-gray-500 mt-1">El cierre cuenta para los dos agentes</p>
+      </div>
     </div>
     {% else %}
     {{ ui.banner('No hay agentes activos en ' ~ brand_name, 'amber', 'Da de alta un agente en la empresa para poder registrarle cierres.') }}
@@ -189,7 +211,8 @@
 <form method="POST" action="" id="deleteClosingForm" data-once>
   <div class="p-4 sm:p-6 space-y-2">
     <p class="text-sm font-medium text-gray-900" id="deleteClosingLabel"></p>
-    <p class="text-sm text-gray-700">Dejará de contar en la métrica Cierres del agente, también en los períodos ya congelados. Esta acción no se puede deshacer.</p>
+    <p class="hidden text-sm font-medium text-gray-900" id="deleteClosingShared">Es un cierre compartido: se quitará a los dos agentes.</p>
+    <p class="text-sm text-gray-700">Dejará de contar en la métrica Cierres, también en los períodos ya congelados. Esta acción no se puede deshacer.</p>
   </div>
   {{ ui.modal_footer(submit_label="Eliminar", submit_variant="danger") }}
 </form>
@@ -202,8 +225,24 @@
     if (!btn) return;
     document.getElementById('deleteClosingForm').setAttribute('action', btn.getAttribute('data-delete-closing'));
     document.getElementById('deleteClosingLabel').textContent = btn.getAttribute('data-closing-label');
+    document.getElementById('deleteClosingShared').classList.toggle('hidden', !btn.hasAttribute('data-closing-shared'));
     UI.openModal('deleteClosingModal', btn);
   });
+
+  // Agente 2: no puede ser el mismo que el Agente 1 (el servidor también lo valida)
+  (function () {
+    var first = document.getElementById('closing_agent');
+    var second = document.getElementById('closing_agent_2');
+    if (!first || !second) return;
+    function sync() {
+      Array.prototype.forEach.call(second.options, function (option) {
+        option.disabled = option.value !== '' && option.value === first.value;
+      });
+      if (second.value && second.value === first.value) second.value = '';
+    }
+    first.addEventListener('change', sync);
+    sync();
+  })();
 
   // Propiedad del cierre: filtrado en el navegador sobre el inventario de la empresa
   (function () {

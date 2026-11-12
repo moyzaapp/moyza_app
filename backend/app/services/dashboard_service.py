@@ -1173,18 +1173,28 @@ class DashboardService:
 
         # Cierres registrados a mano (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1).
         # El evento es el registro (created_at): un cierre metido tarde aparece
-        # al registrarse, con su fecha de firma en el texto.
+        # al registrarse, con su fecha de firma en el texto. Un cierre compartido
+        # (PLAN_CIERRES_DOS_AGENTES.md) son dos registros con el mismo pair_key
+        # y created_at: un solo evento con los dos agentes ("Ana y Bea"), el del
+        # Agente 1 (id menor) primero.
         closings = (
             self.db.query(Closing)
-            .options(joinedload(Closing.agent), joinedload(Closing.property))
+            .options(joinedload(Closing.agent), joinedload(Closing.shared_with_agent),
+                     joinedload(Closing.property))
             .filter(Closing.company_id == self.company_id, Closing.created_at >= since)
-            .order_by(Closing.created_at.desc())
+            .order_by(Closing.created_at.desc(), Closing.id.asc())
             .limit(limit)
             .all()
         )
+        seen_pairs = set()
         for closing in closings:
+            if closing.pair_key:
+                if closing.pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(closing.pair_key)
             subject = closing.property.title if closing.property and closing.property.title else closing.business_type
-            text_parts = [closing.agent.name if closing.agent else None]
+            names = [a.name for a in (closing.agent, closing.shared_with_agent) if a is not None]
+            text_parts = [" y ".join(names) or None]
             if closing.property and closing.property.title:
                 text_parts.append(closing.business_type)
             text_parts.append(f"firmado el {closing.closed_on.strftime('%d/%m/%Y')}")

@@ -49,4 +49,16 @@ el cierre cuente para los dos.
 
 ## 5. Estado
 
-En ejecución con un agente Opus 5.5 high (dos commits, uno por fase).
+Hecho el 2026-11-12: fase A en `f3cde28` y fase B en el commit siguiente. Suite: 3 fallos, los
+mismos del baseline. Comprobado a 375 px por CDP (listado, modal de alta y modal de borrado).
+
+Decisiones de implementación: lógica en `app/services/closing_service.py` (`create_closing`,
+`delete_closing`, `ClosingError` con el mensaje del flash); el formulario envía `agent_id` y
+`agent_id_2`; los dos registros comparten `created_at` y la fila de la pestaña es la del
+Agente 1 (id menor), con "con {Agente 2}" debajo; el modal de borrado añade "se quitará a los
+dos agentes"; el CSV de la lupa tiene la columna "Con" tras "Operación"; el evento del Inicio
+mantiene el título "Cierre · {propiedad o operación}" y pone "Ana y Bea" donde iba el agente.
+La explicación de la regla de la lupa añade que un cierre compartido cuenta entero para cada uno.
+
+Despliegue: `alembic upgrade head` (`b7c8d9e0f1a2`: columnas `shared_with_agent_id` y
+`pair_key`); sin migración de datos (decisión 4). Sin clases Tailwind nuevas.

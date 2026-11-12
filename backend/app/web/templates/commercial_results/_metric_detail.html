@@ -113,7 +113,10 @@
     </td>
     <td class="{{ td }}">{{ r.reason or '–' }}</td>
   {% elif key == 'cierres' %}
-    <td class="{{ td }}">{{ kind_badge(r.kind) }}</td>
+    <td class="{{ td }}">
+      {{ kind_badge(r.kind) }}
+      {% if r.shared_with %}<span class="block text-xs text-gray-500 mt-1">con {{ r.shared_with }}</span>{% endif %}
+    </td>
     {{ property_cell(r, 'Sin propiedad') }}
     <td class="{{ td }} min-w-[12rem]">{{ r.notes or '–' }}</td>
   {% else %}

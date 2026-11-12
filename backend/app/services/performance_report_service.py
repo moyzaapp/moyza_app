@@ -611,7 +611,7 @@ class PerformanceReportService:
             id_col = PropertyPriceHistory.id
         else:  # cierres
             entities = (Closing, kind)
-            options = (joinedload(Closing.property),)
+            options = (joinedload(Closing.property), joinedload(Closing.shared_with_agent))
             id_col = Closing.id
 
         query = self._scoped_indicator_query(
@@ -699,6 +699,8 @@ class PerformanceReportService:
             "date": closing.closed_on,
             "kind": kind,
             "notes": closing.notes,
+            # Cierre compartido (PLAN_CIERRES_DOS_AGENTES.md): nombre del otro agente
+            "shared_with": closing.shared_with_agent.name if closing.shared_with_agent else None,
             **self._property_fields(closing.property),
         }
 
@@ -810,7 +812,8 @@ class PerformanceReportService:
             return (
                 f"{label} = cierres (firma o venta de una propiedad) registrados por el "
                 f"administrador en {brand} a nombre de {name}, con fecha de cierre {dates}. "
-                f"El tipo es el que se indicó al registrarlo."
+                f"El tipo es el que se indicó al registrarlo. Un cierre compartido con otro "
+                f"agente cuenta entero para cada uno."
             )
         if indicator == "hojas_visita":
             return (
