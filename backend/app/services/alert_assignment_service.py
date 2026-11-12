@@ -7,8 +7,10 @@ Reglas (decisiones §4):
   mientras está abierta (pendiente o en proceso).
 - Se puede elegir cualquier agente de cualquier empresa activa (§4-1, opción
   B). Si no pertenece a la empresa de la propiedad, se le añade a esa empresa
-  con `add_to_company`, igual que desde la ficha del agente. Su usuario gana
-  acceso porque `get_allowed_companies` suma las empresas de su ficha.
+  con `add_to_company`, igual que desde la ficha del agente. OJO: desde el
+  2026-11-12 eso ya NO le da acceso a esa empresa (`get_allowed_companies`
+  solo mira las empresas del usuario, medida provisional): no podrá abrir la
+  alerta si su usuario no tiene marcada esa empresa.
 - Propiedad sin captador: se puede crear la alerta si el admin elige agente (§4-7).
 - Alerta sin referencia (búsqueda general, PLAN_ALERTA_SIN_REFERENCIA.md): no
   hay captador; el admin elige el agente (obligatorio) y el agente que la crea

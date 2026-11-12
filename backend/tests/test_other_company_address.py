@@ -127,7 +127,8 @@ def data():
     for key, companies in (("moyza", [moyza]), ("dual", [moyza, moes])):
         email = f"{tag}-{key}@example.com"
         user = User(email=email, full_name=f"{tag} {key}", hashed_password="x", role=agent_role)
-        user.companies.extend([moyza])
+        # El acceso sale de las empresas del usuario (no de la ficha de agente)
+        user.companies.extend(companies)
         agent = Agent(name=f"{tag} {key}", email=email)
         agent.companies.extend(companies)
         created += [user, agent]
