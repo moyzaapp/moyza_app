@@ -137,8 +137,13 @@ En ejecución con agentes Opus 5.5 high, un commit por fase.
   agentes de varias empresas", el siguiente a `f55c8d5`): "Mis propiedades" de todas sus
   empresas, "Resto de {empresa}" por empresa, edición de las de cualquier empresa del
   agente, clientes, informes y logs de informes por lista.
-- Pendiente: fases E (visitas) y F (Resultados del agente, docs de MULTIEMPRESA_MOYZA_MOES.md
-  §2 y §16).
+- **Fase E — hecha** (`b4cdaf2`, `7bea969`, `d7bb384` y el siguiente, "feat(visitas): hojas de
+  visita de cualquier propiedad, docs y tests"): PLAN_VISITAS_OTRA_EMPRESA.md completo
+  (`property_visits.company_id`, migración `g3v4i5s6c7o8`; selector con todas las empresas;
+  ficha con la marca de la visita; solo lectura para la empresa de la propiedad; hojas de
+  visita por la empresa de la visita). Decisiones en su §6. MULTIEMPRESA_MOYZA_MOES.md §1,
+  §2, §6, §16 y §22 actualizados (las visitas ya cruzan).
+- Pendiente: fase F (Resultados del agente; el resto de docs de MULTIEMPRESA_MOYZA_MOES.md).
 
 ### 6.1 Decisiones de implementación (donde el plan no era explícito)
 
@@ -253,3 +258,12 @@ En ejecución con agentes Opus 5.5 high, un commit por fase.
 - Visitas sin tocar (fase E): `/visits` funciona (empresa principal), pero "Registrar
   visita" desde la ficha de una propiedad de la empresa que no es la principal redirige a
   `/properties`.
+  Resuelto en la fase E: el alta acepta propiedades de cualquier empresa.
+
+**Fase E**
+
+- El agente en vista unificada con dos empresas elige la empresa de la visita en el
+  formulario (principal preseleccionada); con una, no se pregunta. `/visits`, la vista
+  previa, la firma, la edición, el borrado y la API del flujo legal cargan la visita por
+  `company_ids` (la empresa de la visita); la empresa de la propiedad la ve en solo
+  lectura (`scope_visible_visits`). Resto en PLAN_VISITAS_OTRA_EMPRESA.md §6.1.

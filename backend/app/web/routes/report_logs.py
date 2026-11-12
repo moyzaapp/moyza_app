@@ -9,6 +9,7 @@ from app.models.alert_reminder_log import AlertReminderLog
 from app.models.report_job_log import ReportJobLog
 from app.models.visit_whatsapp_log import VisitWhatsappLog
 from app.models.property import Property
+from app.models.property_visit import PropertyVisit
 from app.models.report import Report
 from app.services.report_job_service import ReportJobService
 from app.services.company_scope import company_match, scope_properties, scope_agents
@@ -34,7 +35,9 @@ def _scope_reminder_logs(query, company_id):
 
 
 def _scope_visit_whatsapp_logs(query, company_id):
-    return query.filter(VisitWhatsappLog.property.has(company_match(Property.company_id, company_id)))
+    # Envíos de la ficha: de la empresa de la visita, que es la que la emite
+    # (PLAN_VISITAS_OTRA_EMPRESA.md); puede no ser la de la propiedad
+    return query.filter(VisitWhatsappLog.visit.has(company_match(PropertyVisit.company_id, company_id)))
 
 
 def _api_company_ids(request: Request, db: Session):

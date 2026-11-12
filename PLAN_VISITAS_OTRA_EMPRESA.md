@@ -96,6 +96,64 @@ cualquier propiedad, sea de MOYZA o de MOES PREMIUM, independientemente de su em
 
 ## 6. Estado
 
-Pendiente de ejecutar. Se coordina con PLAN_VISTA_UNIFICADA_AGENTES.md (el agente no cambia de
-empresa): el selector de propiedad y el listado de visitas del agente se diseñan ya sobre
-"todas mis empresas".
+**Hecho** (2026-11-12), como fase E de PLAN_VISTA_UNIFICADA_AGENTES.md, sobre la vista
+unificada (el selector y el listado ya son de "todas mis empresas"). Un commit por fase:
+
+- **Fase A — modelo** (`b4cdaf2`): migración `g3v4i5s6c7o8` (`property_visits.company_id`,
+  backfill = empresa de la propiedad, NOT NULL, índice; el downgrade se detiene si hay visitas
+  cruzadas), relación `company`, `is_cross_company`, relleno `before_insert`, `scope_visits` /
+  `get_visit_in_company` por la columna, `scope_visible_visits` / `get_visible_visit`, select
+  "Empresa de la visita" y validación del principal contra la empresa de la visita.
+- **Fase B — alta cruzada** (`7bea969`): selector con una sección por empresa,
+  `get_visitable_property`, aviso en el formulario, calle con la regla de Propiedades y
+  "Registrar visita" en las tablas de solo lectura de Propiedades.
+- **Fase C — documento y visibilidad** (`d7bb384`): marca de la visita en PDF y vista previa
+  con "Inmueble comercializado por …", solo lectura para la empresa de la propiedad (ficha de
+  la propiedad, `/visits`, descarga), avisos e Inicio con distintivo.
+- **Fase D — métrica, docs y tests** (el commit siguiente a `d7bb384`, "feat(visitas): hojas de
+  visita de cualquier propiedad, docs y tests"): Inicio/equipo/tendencia por
+  `PropertyVisit.company_id`, regla y distintivo de la lupa, logs de envío de la ficha por la
+  empresa de la visita, MULTIEMPRESA_MOYZA_MOES.md §1, §2, §6, §16 y §22, tests de ruta.
+
+### 6.1 Decisiones de implementación (donde el plan no era explícito)
+
+- **Empresa preseleccionada** en el select "Empresa de la visita" (agente en dos empresas):
+  la principal, como el resto de altas sin empresa derivable, aunque la propiedad sea de su
+  otra empresa (entonces sale el aviso y la visita sería cruzada si no la cambia). El select
+  solo aparece en la vista unificada con más de una empresa; el admin y la vista por empresa
+  registran en la activa sin preguntar.
+- **Validación del principal**: mensaje "El agente de la visita no pertenece a {empresa de la
+  visita}" (antes "a la empresa activa").
+- **Inventario del selector**: de las empresas del usuario, como antes (no archivada y
+  disponible); de las demás, activa y disponible (criterio de la pestaña "Propiedades de
+  {otra}"). Títulos: "Mis propiedades", "Otras propiedades de {empresa}" (suyas) y
+  "Propiedades de {empresa}" (las demás, con el texto "La visita se registra en {empresa}");
+  el admin ve "Propiedades de {activa}" y "Propiedades de {otra}". `new_visit` / `create_visit`
+  aplican el mismo criterio (una propiedad archivada de su empresa ya no admite visitas).
+- **Calle en el formulario**: el formulario no mostraba la dirección; ahora muestra bajo el
+  título calle · población (o población · zona si no se puede ver la calle). "Volver" y los
+  errores llevan al selector si la ficha de la propiedad no es accesible para el usuario.
+- **Botón en Propiedades**: "Registrar visita" como icono junto al título (al lado de "Abrir en
+  la web") en la tabla de solo lectura, compartida por "Resto de …" y "Propiedades de {otra}":
+  no añade columna (la tabla ya tiene `min-w-[800px]` y scroll) y las filas ya son solo activas
+  y disponibles.
+- **Solo lectura**: se decide por fila con `visit.company_id in company_ids`. Sin editar, borrar,
+  generar ni enviar la ficha; sí descargarla (`get_visible_visit`) y ver las observaciones
+  internas. También el agente ve en `/visits`, en solo lectura, las visitas que otra empresa
+  hizo a sus propiedades (mismo filtro de siempre: participó o es el captador).
+- **Distintivos en `/visits`**: "Visita de {empresa}" en las de solo lectura; el de la empresa
+  de la propiedad cuando no coincide con la de la visita y la propiedad no es de sus empresas
+  (o se ven varias). El título de la propiedad solo enlaza a su ficha si es de sus empresas.
+- **Avisos in-app**: el del captador en la empresa de la propiedad (como hoy, con su ficha); el
+  del acompañante, "ficha firmada" y "envío fallido", en la empresa de la visita, con enlace a
+  la ficha de la propiedad si es de esa empresa y a `/visits` si no.
+- **Inicio del admin**: la actividad reciente incluye las visitas (y fichas firmadas) de su
+  empresa y las que otra empresa registró a sus propiedades, con distintivo ("Propiedad de X"
+  o "Visita registrada en X") y enlace a `/visits` si la ficha no se abre. Contadores (visitas
+  del equipo, última actividad, envíos fallidos de WhatsApp) por la empresa de la visita.
+- **Logs de envío de la ficha** (`/report-logs`): por la empresa de la visita.
+- **Lupa**: la fila lleva `property_company` si la propiedad es de otra empresa (distintivo, sin
+  enlace). El CSV no cambia.
+- Tests existentes cambiados: `test_visit_agent_signatures.py` (la API resuelve `company_ids`
+  con `resolve_company_ids_for_api`) y `test_company_isolation.py` (el alta de visita a una
+  propiedad de la otra empresa ya no redirige; la no disponible sí).

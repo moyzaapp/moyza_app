@@ -483,8 +483,10 @@ class PerformanceReportService:
         )
 
     def _visits_query(self, query, agent_id: int, period_start: datetime, period_end: datetime):
-        """Visitas en las que participó el agente (principal o acompañante) sobre
-        propiedades de la empresa; el captador que no estuvo no suma."""
+        """Visitas en las que participó el agente (principal o acompañante)
+        registradas en la empresa (`PropertyVisit.company_id`), a propiedades
+        de cualquier empresa (PLAN_VISITAS_OTRA_EMPRESA.md §2); el captador
+        que no estuvo no suma."""
         return (
             scope_visits(visits_for_agent(query, agent_id), self._require_company())
             .filter(
@@ -642,7 +644,9 @@ class PerformanceReportService:
         """
         if indicator == "hojas_visita":
             query = self._visits_query(
-                self.db.query(PropertyVisit).options(joinedload(PropertyVisit.property)),
+                self.db.query(PropertyVisit).options(
+                    joinedload(PropertyVisit.property).joinedload(Property.company)
+                ),
                 agent_id, period_start, period_end,
             )
             return query, PropertyVisit.created_at, PropertyVisit.id
@@ -707,6 +711,13 @@ class PerformanceReportService:
                 "status": visit.visit_status,
                 "has_pdf": bool(visit.visit_sheet_filepath),
                 **self._property_fields(visit.property),
+                # Propiedad de otra empresa: distintivo y sin enlace a su ficha
+                # (PLAN_VISITAS_OTRA_EMPRESA.md §2)
+                "property_company": (
+                    visit.property.company
+                    if visit.property is not None and visit.property.company_id != self.company_id
+                    else None
+                ),
             }
 
         if indicator == "contactos":
@@ -871,8 +882,8 @@ class PerformanceReportService:
             )
         if indicator == "hojas_visita":
             return (
-                f"{label} = visitas a propiedades de {brand} en las que {name} fue agente principal "
-                f"o acompañante, creadas {dates}."
+                f"{label} = visitas realizadas por {name} como principal o acompañante, "
+                f"registradas en {brand}, a propiedades de cualquier empresa, creadas {dates}."
             )
         raise ValueError(f"Indicador desconocido: {indicator}")
 

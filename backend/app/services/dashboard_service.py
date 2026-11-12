@@ -278,9 +278,10 @@ class DashboardService:
         for column in (PropertyVisit.agent_id, PropertyVisit.companion_agent_id):
             rows = (
                 self.db.query(column, func.count(PropertyVisit.id))
-                .join(Property, Property.id == PropertyVisit.property_id)
                 .filter(
-                    company_match(Property.company_id, self._company_scope()),
+                    # Empresa de la visita, sea de quien sea la propiedad
+                    # (PLAN_VISITAS_OTRA_EMPRESA.md §2, mismo criterio que `_visits_query`)
+                    company_match(PropertyVisit.company_id, self._company_scope()),
                     column.in_(agent_ids),
                     PropertyVisit.created_at >= start,
                     PropertyVisit.created_at <= end,
@@ -716,9 +717,8 @@ class DashboardService:
         for column in (PropertyVisit.agent_id, PropertyVisit.companion_agent_id):
             rows = (
                 self.db.query(column, week.label("week"), func.count(PropertyVisit.id))
-                .join(Property, Property.id == PropertyVisit.property_id)
                 .filter(
-                    company_match(Property.company_id, self._company_scope()),
+                    company_match(PropertyVisit.company_id, self._company_scope()),
                     column.in_(list(agent_ids)),
                     PropertyVisit.created_at >= start,
                     PropertyVisit.created_at <= end,
@@ -842,12 +842,15 @@ class DashboardService:
     # -- KPIs del equipo ----------------------------------------------------
 
     def _company_visit_count(self, start: datetime, end: datetime) -> int:
-        """Visitas de la empresa (cada visita una vez, aunque fuera con acompañante)."""
+        """Visitas de la empresa (cada visita una vez, aunque fuera con acompañante).
+
+        Las registradas en la empresa, sea de quien sea la propiedad
+        (PLAN_VISITAS_OTRA_EMPRESA.md §2).
+        """
         return (
             self.db.query(func.count(PropertyVisit.id))
-            .join(Property, Property.id == PropertyVisit.property_id)
             .filter(
-                Property.company_id == self.company_id,
+                PropertyVisit.company_id == self.company_id,
                 PropertyVisit.created_at >= start,
                 PropertyVisit.created_at <= end,
             )
@@ -1054,8 +1057,7 @@ class DashboardService:
         for column in (PropertyVisit.agent_id, PropertyVisit.companion_agent_id):
             for agent_id, when in (
                 self.db.query(column, func.max(PropertyVisit.created_at))
-                .join(Property, Property.id == PropertyVisit.property_id)
-                .filter(Property.company_id == self.company_id, column.in_(agent_ids))
+                .filter(PropertyVisit.company_id == self.company_id, column.in_(agent_ids))
                 .group_by(column)
             ):
                 keep(agent_id, when)
@@ -1088,9 +1090,9 @@ class DashboardService:
         return (
             self.db.query(func.count(func.distinct(VisitWhatsappLog.visit_id)))
             .join(PropertyVisit, PropertyVisit.id == VisitWhatsappLog.visit_id)
-            .join(Property, Property.id == PropertyVisit.property_id)
             .filter(
-                Property.company_id == self.company_id,
+                # La ficha es de la empresa de la visita (PLAN_VISITAS_OTRA_EMPRESA.md)
+                PropertyVisit.company_id == self.company_id,
                 VisitWhatsappLog.status == "ERROR",
                 VisitWhatsappLog.attempted_at >= cutoff,
             )

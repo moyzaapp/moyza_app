@@ -400,3 +400,52 @@ def test_aviso_de_ficha_firmada_en_la_empresa_de_la_visita(ctx, cross_visit):
     created = notify_visit_completed(ctx.db, cross_visit, sent=False)
     assert created and all(n.company_id == ctx.moyza.id and n.url == "/visits" for n in created)
     ctx.db.query(Notification).filter(Notification.id.in_([n.id for n in created])).delete(synchronize_session=False)
+
+
+# ---------------------------------------------------------------------------
+# Métrica "Hojas de visita" (fase D)
+# ---------------------------------------------------------------------------
+
+def test_cuenta_en_hojas_de_visita_de_la_empresa_de_la_visita(ctx, cross_visit):
+    from datetime import datetime, timedelta
+    from app.services.dashboard_service import DashboardService
+    from app.services.performance_report_service import PerformanceReportService
+
+    start, end = datetime.utcnow() - timedelta(days=1), datetime.utcnow() + timedelta(days=1)
+
+    def hojas(company):
+        return PerformanceReportService(ctx.db, company.id).calculate_metrics(ctx.mia.id, start, end)["hojas_visita"]
+
+    assert hojas(ctx.moyza) == 1 and hojas(ctx.moes) == 0
+    # El Inicio y el equipo, con el mismo criterio
+    assert DashboardService(ctx.db, ctx.moyza.id)._visit_counts([ctx.mia.id], start, end) == {ctx.mia.id: 1}
+    assert DashboardService(ctx.db, ctx.moes.id)._visit_counts([ctx.mia.id], start, end) == {}
+    assert DashboardService(ctx.db, ctx.moyza.id)._company_visit_count(start, end) >= 1
+    weekly = DashboardService(ctx.db, ctx.moyza.id)._weekly_visits([ctx.mia.id], start, end)
+    assert sum(weekly.values()) == 1
+
+
+def test_lupa_con_la_regla_y_el_distintivo(ctx, cross_visit):
+    from datetime import datetime, timedelta
+    from app.services.performance_report_service import PerformanceReportService
+
+    start, end = datetime.utcnow() - timedelta(days=1), datetime.utcnow() + timedelta(days=1)
+    svc = PerformanceReportService(ctx.db, ctx.moyza.id)
+    rows = svc.indicator_rows("hojas_visita", ctx.mia.id, start, end)
+    assert [r["visit_id"] for r in rows] == [cross_visit.id]
+    assert rows[0]["property_company"].id == ctx.moes.id
+    text = svc.indicator_rule_text("hojas_visita", ctx.mia, start, end, ctx.moyza)
+    assert "visitas realizadas por PYTEST-CRUZ MIA como principal o acompañante, registradas en MOYZA, " \
+           "a propiedades de cualquier empresa" in text
+
+
+def test_lupa_pinta_el_distintivo_sin_enlace_a_la_ficha(ctx, cross_visit):
+    from app.web.routes.commercial_results import metric_detail
+    request = _request(ctx, ctx.admin, f"/commercial-results/{ctx.mia.id}/metric/hojas_visita", cookie_company="MOYZA")
+    response = asyncio.run(metric_detail(ctx.mia.id, "hojas_visita", request, period_type="MONTHLY",
+                                         period_start="", offset=0, output="", db=ctx.db))
+    html = _html(response)
+    assert "PYTEST-CRUZ CLIENTE" in html
+    assert 'title="Propiedad de MOES PREMIUM"' in html
+    assert f'href="/properties/{ctx.props.moes.id}"' not in html
+    assert "a propiedades de cualquier empresa" in html
