@@ -102,10 +102,26 @@
             <tr class="border-b border-gray-100 hover:bg-gray-50">
 
                 <td data-sort-value="{{ property.title or '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
-                    <div class="flex flex-col">
-                        <span class="font-medium">{{ property.title }}</span>
-                        {% if readonly_address_visible %}
-                        <span class="text-xs text-gray-500">{{ (property.address | street) or '-' }}</span>
+                    {# Sin columna de acciones: "Abrir en la web" junto al título, solo con enlace
+                       (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2; `public_url` viene calculado en la fila) #}
+                    <div class="flex items-center gap-2">
+                        <div class="flex flex-col min-w-0">
+                            <span class="font-medium">{{ property.title }}</span>
+                            {% if readonly_address_visible %}
+                            <span class="text-xs text-gray-500">{{ (property.address | street) or '-' }}</span>
+                            {% endif %}
+                        </div>
+                        {% if property.public_url %}
+                        <a
+                            href="{{ property.public_url }}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Abrir en la web"
+                            aria-label="Abrir {{ property.title }} en la web"
+                            class="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+                        >
+                            <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
+                        </a>
                         {% endif %}
                     </div>
                 </td>

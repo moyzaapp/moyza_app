@@ -1,0 +1,204 @@
+"""
+Enlace público de la propiedad, mensaje de WhatsApp y `whatsapp_url` con texto
+(PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.1, §4.3 y §6). Funciones puras: sin base
+de datos ni red (nunca se consulta la web de la inmobiliaria).
+
+    cd backend && python -m pytest tests/test_property_link.py -q
+"""
+from decimal import Decimal
+from types import SimpleNamespace
+from urllib.parse import parse_qs, unquote, urlparse
+
+import pytest
+
+from app.core.phone import whatsapp_url
+from app.services.property_link import (
+    SOURCE_MANUAL,
+    SOURCE_TEMPLATE,
+    build_public_url,
+    clean_public_url,
+    property_public_url,
+    public_url_source,
+    share_message,
+)
+
+MOYZA_TEMPLATE = (
+    "https://www.inmobiliariamoyza.com/recursos/nficham06.php?cod_inmueble=9834998349{referencia}00"
+)
+# Comprobada a mano contra la web real el 2026-11-12 (§3)
+VERIFIED_1933 = "https://www.inmobiliariamoyza.com/recursos/nficham06.php?cod_inmueble=9834998349193300"
+
+MOYZA = SimpleNamespace(name="MOYZA", property_url_template=MOYZA_TEMPLATE)
+MOES = SimpleNamespace(name="MOES PREMIUM", property_url_template=None)
+
+
+def _prop(**fields):
+    data = dict(
+        referencia="1933", public_url=None, company=MOYZA, title="Piso Centro",
+        property_type="Piso", zona="Bulevar", city="Jaén", num_dormitorios=3,
+        price=Decimal("120000"), address="Calle Secreta 7, 2ºB",
+        client=SimpleNamespace(name="Propietario Pérez", phone="34611222333"),
+    )
+    data.update(fields)
+    return SimpleNamespace(**data)
+
+
+# ---------------------------------------------------------------------------
+# property_public_url
+# ---------------------------------------------------------------------------
+
+def test_moyza_con_referencia_da_la_url_verificada():
+    assert property_public_url(_prop()) == VERIFIED_1933
+    assert public_url_source(_prop()) == SOURCE_TEMPLATE
+
+
+def test_la_referencia_se_recorta():
+    assert property_public_url(_prop(referencia="  1933 ")) == VERIFIED_1933
+
+
+def test_el_manual_gana_a_la_plantilla():
+    manual = "https://www.inmobiliariamoyza.com/recursos/nficham06.php?cod_inmueble=9834998349193301"
+    prop = _prop(public_url=manual)
+    assert property_public_url(prop) == manual
+    assert public_url_source(prop) == SOURCE_MANUAL
+
+
+def test_sin_referencia_ni_manual_no_hay_enlace():
+    for referencia in (None, "", "   "):
+        prop = _prop(referencia=referencia)
+        assert property_public_url(prop) is None
+        assert public_url_source(prop) is None
+
+
+def test_moes_sin_plantilla_no_hay_enlace_salvo_el_manual():
+    assert property_public_url(_prop(company=MOES)) is None
+    manual = "https://moes.example/ficha/77"
+    assert property_public_url(_prop(company=MOES, public_url=manual)) == manual
+
+
+def test_se_usa_la_empresa_de_la_propiedad():
+    """La plantilla es la de `prop.company`, no la de la empresa activa."""
+    assert property_public_url(_prop(company=MOES)) is None
+    assert property_public_url(_prop(company=MOYZA)) == VERIFIED_1933
+
+
+def test_referencia_de_texto_libre_se_codifica():
+    assert build_public_url(None, "A 1/2", "https://x.example/f?c={referencia}") == "https://x.example/f?c=A%201%2F2"
+
+
+def test_plantilla_sin_marcador_o_sin_empresa():
+    assert build_public_url(None, "1933", "https://x.example/sin-marcador") is None
+    assert property_public_url(_prop(company=None)) is None
+    assert property_public_url(None) is None
+
+
+# ---------------------------------------------------------------------------
+# clean_public_url
+# ---------------------------------------------------------------------------
+
+def test_clean_public_url_vacio_es_none():
+    for value in (None, "", "   "):
+        assert clean_public_url(value) is None
+
+
+def test_clean_public_url_recorta_y_acepta_http_y_https():
+    assert clean_public_url("  https://a.example/x  ") == "https://a.example/x"
+    assert clean_public_url("http://a.example") == "http://a.example"
+    assert clean_public_url("HTTPS://A.example/x") == "HTTPS://A.example/x"
+
+
+@pytest.mark.parametrize("value", [
+    "javascript:alert(1)",
+    "ftp://a.example/x",
+    "texto suelto",
+    "www.inmobiliariamoyza.com/ficha",
+    "https://",
+    "https://a.example/con espacio",
+])
+def test_clean_public_url_rechaza(value):
+    with pytest.raises(ValueError):
+        clean_public_url(value)
+
+
+def test_clean_public_url_maximo_500():
+    base = "https://a.example/"
+    assert clean_public_url(base + "x" * (500 - len(base)))
+    with pytest.raises(ValueError):
+        clean_public_url(base + "x" * (501 - len(base)))
+
+
+# ---------------------------------------------------------------------------
+# whatsapp_url con texto
+# ---------------------------------------------------------------------------
+
+def test_whatsapp_url_sin_texto_igual_que_hoy():
+    assert whatsapp_url("600112233") == "https://wa.me/34600112233"
+    assert whatsapp_url("600112233", None) == "https://wa.me/34600112233"
+    assert whatsapp_url("600112233", "") == "https://wa.me/34600112233"
+    assert whatsapp_url("123", "Hola") is None
+
+
+def test_whatsapp_url_codifica_el_texto():
+    text = "Hola Ánxela, ¿qué tal?\nPiso & garaje · 120.000 €\nhttps://x.example/f?a=1&b=2"
+    url = whatsapp_url("+34 600 112 233", text)
+    assert url.startswith("https://wa.me/34600112233?text=")
+    encoded = url.split("?text=", 1)[1]
+    # Todo codificado: ni saltos, ni &, ni €, ni tildes, ni espacios en crudo
+    for raw in ("\n", "&", "€", "Á", "¿", " ", "?", "="):
+        assert raw not in encoded
+    assert "%0A" in encoded and "%26" in encoded and "%E2%82%AC" in encoded and "%C3%81" in encoded
+    assert unquote(encoded) == text
+    # Un solo parámetro `text` (el & del enlace no lo parte)
+    assert parse_qs(urlparse(url).query) == {"text": [text]}
+
+
+# ---------------------------------------------------------------------------
+# share_message
+# ---------------------------------------------------------------------------
+
+def test_mensaje_completo():
+    message = share_message(_prop(), "Juan Comprador", "Agente Ana")
+    assert message == (
+        "Hola Juan, soy Agente Ana de MOYZA. Te envío este inmueble que puede encajar con lo que buscas:\n"
+        "\n"
+        "Piso en Bulevar, Jaén · 3 dorm. · 120.000 €\n"
+        + VERIFIED_1933
+    )
+
+
+def test_mensaje_sin_direccion_ni_propietario():
+    message = share_message(_prop(), "Juan", "Ana")
+    for secret in ("Calle Secreta", "2ºB", "Propietario", "611222333"):
+        assert secret not in message
+
+
+def test_mensaje_sin_nombre_dice_hola_coma():
+    for name in (None, "", "   "):
+        assert share_message(_prop(), name, "Ana").startswith("Hola, soy Ana de MOYZA. ")
+
+
+def test_mensaje_omite_datos_vacios():
+    prop = _prop(property_type=None, zona=None, num_dormitorios=None, price=None)
+    message = share_message(prop, "Juan", "Ana")
+    lines = message.split("\n")
+    assert lines[2] == "Inmueble en Jaén"
+    assert "dorm." not in message and "€" not in message and "None" not in message
+
+    prop = _prop(property_type="Local", zona=None, city=None, num_dormitorios=0)
+    lines = share_message(prop, "Juan", "Ana").split("\n")
+    assert lines[2] == "Local · 120.000 €"
+
+
+def test_mensaje_con_la_empresa_de_la_propiedad_y_enlace_manual():
+    prop = _prop(company=MOES, public_url="https://moes.example/ficha/77", zona="Centro", city="Centro")
+    message = share_message(prop, "Juan", "Ana")
+    assert "soy Ana de MOES PREMIUM." in message
+    assert "Piso en Centro · " in message
+    assert message.endswith("https://moes.example/ficha/77")
+
+
+def test_filtro_jinja_registrado():
+    from app.web.template_env import templates
+    assert templates.env.filters["public_url"] is property_public_url
+    rendered = templates.env.from_string("{{ prop | public_url }}").render(prop=_prop())
+    assert rendered == VERIFIED_1933

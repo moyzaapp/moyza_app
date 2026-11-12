@@ -81,6 +81,13 @@ class Company(Base):
     email_sender_name = Column(String, nullable=True)  # "Sistema Moyza"
     whatsapp_phone = Column(String, nullable=True)
 
+    # Enlace público de las propiedades en la web de la empresa
+    # (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.1): plantilla con el marcador
+    # `{referencia}`. NULL si no se conoce el patrón (MOES por ahora): sus
+    # propiedades solo tienen enlace si se pega a mano (`Property.public_url`).
+    # Se lee siempre con app/services/property_link.py.
+    property_url_template = Column(String(500), nullable=True)
+
     is_active = Column(Boolean, default=True, nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)

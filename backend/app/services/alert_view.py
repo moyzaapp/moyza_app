@@ -122,11 +122,21 @@ def visible_follow_ups(follow_ups: Iterable, alert, is_admin: bool) -> list:
     """Seguimientos que ve cada rol, conservando el orden de la lista.
 
     El admin, todos (incluidas las notas de reasignación y los del agente
-    anterior). El agente, solo los reales desde `assignment_start`.
+    anterior). El agente, los reales desde `assignment_start` y, de las notas
+    del sistema, solo las que registra él (`AGENT_VISIBLE_SYSTEM_ACTIONS`:
+    «Propiedad enviada», PLAN_ENVIO_PROPIEDAD_COMPRADOR.md), también desde
+    `assignment_start`. Esas notas siguen sin contar como gestión: quien use
+    esta lista para la cola, el cierre o la etapa debe pasarla por
+    `real_follow_ups_since` / `has_follow_up_since_assignment`.
     """
     if is_admin:
         return list(follow_ups)
-    return real_follow_ups_since(follow_ups, assignment_start(alert))
+    since = assignment_start(alert)
+    return [
+        f for f in follow_ups
+        if (is_real_follow_up(f) or f.action_type in FollowUpActionType.AGENT_VISIBLE_SYSTEM_ACTIONS)
+        and (since is None or (f.created_at is not None and f.created_at >= since))
+    ]
 
 
 def has_follow_up_since_assignment(follow_ups: Iterable, alert) -> bool:

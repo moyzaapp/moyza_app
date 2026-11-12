@@ -49,6 +49,7 @@ from app.services.company_scope import (
 )
 from app.services.phone_lookup_service import lookup_properties_by_phone
 from app.services.property_metrics import PropertyMetricsService
+from app.services.property_link import build_public_url, clean_public_url
 from app.web.dependencies.company import get_active_company
 from app.services.report_generator import generate_property_report
 from app.web.utils.flash import set_flash
@@ -72,6 +73,7 @@ _FIELD_LABELS = {
     "referencia": "Referencia",
     "codigo": "Código",
     "ref_catastral": "Ref. catastral",
+    "public_url": "Enlace en la web",
     "property_type": "Tipo de inmueble",
     "business_type": "Operación",
     "estado_inmueble": "Estado del inmueble",
@@ -148,6 +150,21 @@ def _build_change_logs(property_obj, new_values: dict, user_id: int, db) -> list
     return logs
 
 
+def _public_url_field(form) -> tuple[dict, str | None]:
+    """({"public_url": valor limpio}, None), o ({}, mensaje) si no es válido.
+
+    PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2: campo opcional "Enlace en la web"
+    (`clean_public_url`: vacío → None, solo http(s), 500 caracteres). Si el
+    formulario no trae el campo, ({}, None): no se toca lo guardado.
+    """
+    if "public_url" not in form:
+        return {}, None
+    try:
+        return {"public_url": clean_public_url(form.get("public_url"))}, None
+    except ValueError as exc:
+        return {}, str(exc)
+
+
 def _readonly_property_rows(query, search: str, include_address: bool = True) -> list[dict]:
     """Filas de solo lectura para "Resto de propiedades" y "Propiedades de {otra empresa}".
 
@@ -161,7 +178,11 @@ def _readonly_property_rows(query, search: str, include_address: bool = True) ->
     texto no mira la dirección, para que no se pueda adivinar buscándola
     (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.2).
     """
-    query = query.outerjoin(Agent, Agent.id == Property.agent_id)
+    query = (
+        query
+        .outerjoin(Agent, Agent.id == Property.agent_id)
+        .outerjoin(Company, Company.id == Property.company_id)
+    )
 
     if search:
         pattern = f"%{search}%"
@@ -194,21 +215,37 @@ def _readonly_property_rows(query, search: str, include_address: bool = True) ->
             Property.num_dormitorios,
             Property.num_banos_aseos,
             Agent.name.label("agent_name"),
+            # Enlace a la web (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2): el manual
+            # o la plantilla de la empresa de la propiedad con su referencia
+            Property.public_url.label("manual_public_url"),
+            Property.referencia,
+            Company.property_url_template,
         )
         .order_by(Property.price.desc().nullslast(), Property.title.asc())
         .all()
     )
-    return [dict(row._mapping) for row in rows]
+    result = []
+    for row in rows:
+        data = dict(row._mapping)
+        data["public_url"] = build_public_url(
+            data.pop("manual_public_url"), data.get("referencia"), data.pop("property_url_template"),
+        )
+        result.append(data)
+    return result
 
 
-def _phone_check(db, country_code, number, other_code) -> dict:
+def _phone_check(db, country_code, number, other_code, companies=()) -> dict:
     """Contexto `phone_check` de la pestaña "Consultar teléfono".
 
     Compone el número con los campos del macro `phone_field("phone_")` y
-    consulta las propiedades en cartera de ese propietario en las dos empresas
-    (`lookup_properties_by_phone`). Forma, siempre la misma:
+    consulta las propiedades en cartera de ese propietario en `companies`, las
+    empresas del usuario (`lookup_properties_by_phone`). Forma, siempre la misma:
 
-        {"searched", "error", "phone", "country_code", "local_number", "results"}
+        {"searched", "error", "phone", "country_code", "local_number", "results",
+         "company_names"}
+
+    - `company_names`: nombres de las empresas en las que se busca, para el
+      texto de alcance de la pestaña.
 
     - `searched`: True solo si hubo consulta válida (sin error).
     - `phone`: el número consultado en el formato guardado ("34600112233";
@@ -232,6 +269,7 @@ def _phone_check(db, country_code, number, other_code) -> dict:
         "country_code": shown_code,
         "local_number": number,
         "results": [],
+        "company_names": [c.name for c in companies],
     }
     if not number:
         return check
@@ -250,7 +288,7 @@ def _phone_check(db, country_code, number, other_code) -> dict:
     check["searched"] = True
     check["phone"] = phone
     check["country_code"], check["local_number"] = split_phone(phone)
-    check["results"] = lookup_properties_by_phone(db, phone)
+    check["results"] = lookup_properties_by_phone(db, phone, [c.id for c in companies])
     return check
 
 
@@ -307,14 +345,18 @@ async def properties_page(
         tab = "others" if (tab == "others" and show_others_tab) else "mine"
 
     # "Consultar teléfono": propiedades en cartera del propietario con ese
-    # teléfono, en las dos empresas (excepción deliberada al aislamiento por
-    # empresa; sin datos del cliente, ver phone_lookup_service). Cada consulta
+    # teléfono, solo en las empresas del usuario (`allowed_companies`: las de
+    # su usuario y su ficha de agente; el admin, todas), no solo en la activa.
+    # Sin datos del cliente, ver phone_lookup_service. Cada consulta
     # válida queda en el registro de actividad: ActivityMiddleware guarda
     # `request.state.activity_path` en lugar de la ruta.
+    phone_companies = list(getattr(request.state, "allowed_companies", None) or [company])
     if tab == "phone_check":
-        phone_check = _phone_check(db, phone_country_code, phone_number, phone_country_code_other)
+        phone_check = _phone_check(
+            db, phone_country_code, phone_number, phone_country_code_other, phone_companies
+        )
     else:
-        phone_check = _phone_check(db, None, None, None)
+        phone_check = _phone_check(db, None, None, None, phone_companies)
 
     if phone_check["searched"]:
         request.state.activity_path = (
@@ -520,10 +562,11 @@ async def create_property(
     # Campos replicados de la tabla externa de propiedades
     form = await request.form()
     external_fields, field_errors = extract_fields(form)
+    public_url_fields, public_url_error = _public_url_field(form)
 
-    if field_errors:
+    if field_errors or public_url_error:
         response = RedirectResponse(url="/properties", status_code=302)
-        set_flash(response, "error", field_errors[0])
+        set_flash(response, "error", field_errors[0] if field_errors else public_url_error)
         return response
 
     # El cliente y el agente deben pertenecer a la empresa activa
@@ -558,7 +601,8 @@ async def create_property(
             agent_id=agent_id,
             status=PropertyStatus.ACTIVE,
             company_id=company.id,
-            **external_fields
+            **external_fields,
+            **public_url_fields
         )
 
         db.add(property_item)
@@ -607,10 +651,11 @@ async def update_property(
     # Campos replicados de la tabla externa de propiedades
     form = await request.form()
     external_fields, field_errors = extract_fields(form)
+    public_url_fields, public_url_error = _public_url_field(form)
 
-    if field_errors:
+    if field_errors or public_url_error:
         response = RedirectResponse(url="/properties", status_code=302)
-        set_flash(response, "error", field_errors[0])
+        set_flash(response, "error", field_errors[0] if field_errors else public_url_error)
         return response
 
     company = get_active_company(request)
@@ -663,7 +708,7 @@ async def update_property(
             "report_day": report_day,
             "report_hour": report_hour,
         }
-        all_new = {**new_core, **external_fields}
+        all_new = {**new_core, **external_fields, **public_url_fields}
 
         change_logs = _build_change_logs(property, all_new, user_id, db)
 

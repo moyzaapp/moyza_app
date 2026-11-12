@@ -57,6 +57,15 @@ class AlertFollowUp(Base):
         nullable=False
     )
 
+    # Propiedad enviada al comprador (solo en PROPIEDAD_ENVIADA,
+    # PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): pinta "Enviada el …" en su tarjeta.
+    property_id = Column(
+        Integer,
+        ForeignKey("properties.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
     # Relaciones
     alert = relationship(
         "PropertyAlert",

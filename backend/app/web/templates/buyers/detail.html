@@ -221,7 +221,10 @@
                 {# El detalle incluye datos del propietario: el agente solo enlaza a sus propias propiedades.
                    De las dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md): distintivo en cada tarjeta y,
                    si es de la otra, sin "Ver" (la tarjeta lo resuelve con active_company_id) #}
-                {% call property_card(prop, show_link=own_property, active_company_id=active_company_id) %}
+                {# Enviar por WhatsApp (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): solo con una alerta
+                   del comprador donde registrarlo (send_action); independiente de "Crear alerta" #}
+                {% call property_card(prop, show_link=own_property, active_company_id=active_company_id,
+                                      send_action=send_action, sent_at=sent_dates.get(prop.id), buyer_phone=buyer.phone) %}
                     {# Crear alerta: admin sobre cualquier propiedad; el agente solo sobre las suyas
                        (el backend lo exige también). Una de la otra empresa no: el alta con
                        referencia sigue limitada a la empresa activa; se asocia desde la alerta #}

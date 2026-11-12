@@ -176,6 +176,24 @@ window.UI = (function () {
         }, 8000);
     });
 
+    // ---- Enviar propiedad por WhatsApp -------------------------------------
+    //
+    // <form data-property-send target="_blank"> de components/property_card.html
+    // (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): el envío se abre en otra pestaña y
+    // esta no se recarga, así que la línea "Enviada el …" de la tarjeta pasa
+    // a "Enviada hoy" al pulsar. Sin data-once: se puede reenviar.
+
+    document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (!form.matches || !form.matches('form[data-property-send]')) return;
+        if (e.defaultPrevented) return;
+        var block = form.closest('[data-send-block]');
+        var label = block && block.querySelector('[data-sent-label]');
+        if (!label) return;
+        label.textContent = 'Enviada hoy';
+        label.classList.remove('hidden');
+    });
+
     // ---- Tablas ordenables por columna ------------------------------------
     //
     // <table class="js-sortable" data-table-id="teamTable">

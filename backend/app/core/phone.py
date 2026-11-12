@@ -30,6 +30,8 @@ La regla del prefijo es la misma que la del selector de país de visitas
 (`PhoneCountryCodes.split`): no se duplica aquí.
 """
 
+from urllib.parse import quote
+
 from app.core.constants import PhoneCountryCodes
 
 # Dígitos mínimos de la parte local (sin indicativo) para considerar el número completo
@@ -149,14 +151,22 @@ def canonical_phone(phone) -> str | None:
     return number
 
 
-def whatsapp_url(phone) -> str | None:
+def whatsapp_url(phone, text=None) -> str | None:
     """Enlace https://wa.me/<prefijo><número> para abrir el chat, o None si
     el teléfono no es utilizable (reglas de `canonical_phone`).
 
-    Sin `?text=`: solo abre el chat.
+    Sin `text` (o vacío): solo abre el chat. Con `text`, el mensaje prellenado
+    en `?text=`, codificado entero con `urllib.parse.quote` (saltos de línea,
+    `&`, `€`, tildes y el propio enlace que lleve dentro;
+    PLAN_ENVIO_PROPIEDAD_COMPRADOR.md).
     """
     number = canonical_phone(phone)
-    return f"https://wa.me/{number}" if number else None
+    if not number:
+        return None
+    url = f"https://wa.me/{number}"
+    if text:
+        url += "?text=" + quote(str(text), safe="")
+    return url
 
 
 def tel_href(phone) -> str:

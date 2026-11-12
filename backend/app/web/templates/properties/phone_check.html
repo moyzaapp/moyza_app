@@ -2,8 +2,8 @@
   Pestaña "Consultar teléfono" de Propiedades (GET /properties?tab=phone_check).
 
   Antes de llamar a un propietario, el agente escribe el teléfono completo y ve
-  qué propiedades en cartera (Activa, Reservada o Pausada) tiene ya con MOYZA o
-  MOES PREMIUM. Del propietario solo sale el nombre enmascarado: sin enlace a
+  qué propiedades en cartera (Activa, Reservada o Pausada) tiene ya en las
+  empresas del usuario (phone_check.company_names). Del propietario solo sale el nombre enmascarado: sin enlace a
   la ficha, sin teléfono y sin email.
 
   Variable: phone_check = {searched, error, phone, country_code, local_number,
@@ -22,7 +22,8 @@
 {% set pc_searched = pc.get("searched") and not pc.get("error") %}
 {# Espacios duros: el número no se parte en dos líneas dentro del aviso #}
 {% set pc_shown_phone = (pc.get("phone") | phone_display | replace(" ", "\u00a0")) if pc.get("phone") else "" %}
-{% set pc_scope = "Se comprueban las propiedades activas, reservadas y pausadas de MOYZA y MOES PREMIUM." %}
+{% set pc_companies = (pc.get("company_names") or []) | join(" y ") %}
+{% set pc_scope = "Se comprueban las propiedades activas, reservadas y pausadas" ~ ((" de " ~ pc_companies) if pc_companies else "") ~ "." %}
 {% set pc_status_tones = {"Activa": "green", "Reservada": "blue", "Pausada": "amber"} %}
 
 <section id="consultar-telefono" class="max-w-2xl space-y-4 scroll-mt-20" aria-labelledby="phoneCheckTitle">

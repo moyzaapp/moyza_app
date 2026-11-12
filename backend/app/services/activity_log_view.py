@@ -118,10 +118,12 @@ _RULES = [
     ("POST", r"/alerts/(\d+)/follow-up", "Compradores", "Añadió un seguimiento"),
     ("POST", r"/alerts/(\d+)/register-contact", "Compradores", "Registró un contacto"),
     ("POST", r"/alerts/(\d+)/link-property", "Compradores", "Asoció una propiedad a la alerta"),
+    ("POST", r"/alerts/(\d+)/send-property", "Compradores", "Envió propiedad al comprador"),
     ("POST", r"/alerts/(\d+)/search-profile", "Compradores", "Guardó el perfil de búsqueda"),
     ("GET", r"/buyers/(\d+)", "Compradores", "Abrió la ficha de un comprador"),
     ("POST", r"/buyers/create", "Compradores", "Registró un comprador"),
     ("POST", r"/buyers/(\d+)/update-contact", "Compradores", "Actualizó el contacto de un comprador"),
+    ("POST", r"/buyers/(\d+)/send-property", "Compradores", "Envió propiedad al comprador"),
     ("POST", r"/buyers/(\d+)/search-criteria", "Compradores", "Guardó el perfil de búsqueda de un comprador"),
     ("POST", r"/buyers/(\d+)/delete", "Compradores", "Eliminó un comprador"),
 
