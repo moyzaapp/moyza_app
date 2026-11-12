@@ -49,7 +49,7 @@ el cierre cuente para los dos.
 
 ## 5. Estado
 
-Hecho el 2026-11-12: fase A en `f3cde28` y fase B en el commit siguiente. Suite: 3 fallos, los
+Hecho el 2026-11-12: fase A en `f3cde28` y fase B en `fb475b5`. Suite: 3 fallos, los
 mismos del baseline. Comprobado a 375 px por CDP (listado, modal de alta y modal de borrado).
 
 Decisiones de implementación: lógica en `app/services/closing_service.py` (`create_closing`,
