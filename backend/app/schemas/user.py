@@ -31,6 +31,13 @@ class UserCreate(BaseModel):
     # Vacío = empresa por defecto (MOYZA).
     company_ids: list[int] = []
 
+    # Vista por empresa (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1): False = vista
+    # unificada sin selector (por defecto). Solo cuenta para no admin.
+    company_switch_enabled: bool = False
+
+    # Empresa principal: una de `company_ids`; vacía = la primera marcada.
+    primary_company_id: Optional[int] = None
+
     @field_validator("phone", "company")
     @classmethod
     def empty_to_none(cls, value: Optional[str]) -> Optional[str]:
@@ -70,6 +77,13 @@ class UserUpdate(BaseModel):
 
     # Empresas asignadas (ids de `companies`). Vacío = empresa por defecto.
     company_ids: list[int] = []
+
+    # Vista por empresa (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1): False = vista
+    # unificada sin selector (por defecto). Solo cuenta para no admin.
+    company_switch_enabled: bool = False
+
+    # Empresa principal: una de `company_ids`; vacía = la primera marcada.
+    primary_company_id: Optional[int] = None
 
     @field_validator("full_name")
     @classmethod

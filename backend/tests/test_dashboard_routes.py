@@ -112,8 +112,9 @@ def setup():
     ]
     for user in users:
         user.companies.append(moyza)
-    # El captador trabaja en las dos empresas: el acceso sale del usuario, no de la ficha
-    users[0].companies.append(moes)
+        # Estos tests miran el Inicio por empresa (cookie): vista por empresa,
+        # no la unificada de PLAN_VISTA_UNIFICADA_AGENTES.md (fase C)
+        user.company_switch_enabled = True
     db.add_all([owner, visitor, *users])
     db.flush()
     moyza_prop = Property(title=f"{TAG} PROP MOYZA", company_id=moyza.id, agent_id=owner.id,

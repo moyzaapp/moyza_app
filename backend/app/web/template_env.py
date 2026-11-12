@@ -88,13 +88,24 @@ def company_context(request) -> dict:
     company = getattr(request.state, "company", None)
     user = getattr(request.state, "user", None)
     role_name = (user.role.name if user is not None and user.role else "") or ""
+    # Vista unificada (PLAN_VISTA_UNIFICADA_AGENTES.md): sin selector; la marca
+    # es la de la empresa principal (que ya es `request.state.company`)
+    unified_view = bool(getattr(request.state, "unified_view", False))
+    company_ids = getattr(request.state, "company_ids", None)
+    if company_ids is None:
+        company_ids = [company.id] if getattr(company, "id", None) is not None else []
+    company_ids = list(company_ids)
     return {
         # Rol del usuario para sidebar y navbar (las plantillas no leen request.state.user.role)
         "user_is_admin": role_name.lower() == "admin",
         "user_role_label": {"admin": "Administrador", "agent": "Agente"}.get(role_name.lower(), role_name.capitalize()),
         "active_company": company,
         "allowed_companies": allowed,
-        "can_switch_company": len(allowed) > 1,
+        "can_switch_company": not unified_view and len(allowed) > 1,
+        "unified_view": unified_view,
+        "company_ids": company_ids,
+        # Distintivo de empresa en filas y detalles: solo si se ven varias a la vez
+        "show_company_badges": unified_view and len(company_ids) > 1,
         # Atajos con fallback para páginas sin empresa (login)
         "brand_name": company.name if company else "MOYZA",
         "brand_color": (company.primary_color if company and company.primary_color else "#000000"),

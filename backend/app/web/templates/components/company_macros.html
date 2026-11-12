@@ -3,7 +3,11 @@
 
   company_badges(items)      -> chips con el punto de color de cada empresa
   company_checkboxes(...)    -> grupo de checkboxes `company_ids` para asignar empresas
+  company_view_fields(...)   -> "Puede cambiar de empresa" y "Empresa principal" del
+                                formulario de usuario (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1);
+                                JS: initCompanyView(prefix, roleSelect) en auth/user_modals.html
 #}
+{% import "components/ui_macros.html" as ui %}
 
 {% macro company_badges(items) %}
     {% if items %}
@@ -36,5 +40,31 @@
             <span>{{ c.name }}</span>
         </label>
         {% endfor %}
+    </div>
+{% endmacro %}
+
+{# Solo cuenta para usuarios no admin: el JS oculta el bloque si el rol elegido es admin
+   (las opciones del rol llevan data-admin="1"). Las opciones de la principal se limitan
+   a las empresas marcadas en el grupo `id_prefix` de company_checkboxes. #}
+{% macro company_view_fields(all_companies, id_prefix, switch_enabled=False, primary_id=None) %}
+    <div id="{{ id_prefix }}_company_view" class="space-y-4">
+        <label for="{{ id_prefix }}_company_switch_enabled" class="flex items-start gap-3 cursor-pointer select-none">
+            <input
+                type="checkbox"
+                name="company_switch_enabled"
+                value="1"
+                id="{{ id_prefix }}_company_switch_enabled"
+                class="mt-0.5 w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-2 focus:ring-blue-500/40"
+                aria-describedby="{{ id_prefix }}_company_switch_enabled_help"
+                {% if switch_enabled %}checked{% endif %}
+            >
+            <span>
+                <span class="block text-sm font-medium text-gray-700">Puede cambiar de empresa (vista por empresa)</span>
+                <span id="{{ id_prefix }}_company_switch_enabled_help" class="block text-xs text-gray-500 mt-1">Desmarcado, el agente ve sus empresas juntas sin selector.</span>
+            </span>
+        </label>
+        {% set options = [] %}
+        {% for c in all_companies %}{% set _ = options.append((c.id, c.name)) %}{% endfor %}
+        {{ ui.select("primary_company_id", "Empresa principal", options, value=primary_id, empty=None, id=id_prefix ~ "_primary_company_id", help="Marca del menú y empresa de lo que crea. Solo entre las empresas marcadas.") }}
     </div>
 {% endmacro %}

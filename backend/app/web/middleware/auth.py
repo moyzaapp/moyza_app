@@ -8,9 +8,7 @@ from sqlalchemy.orm import joinedload
 from app.core.security import decode_token
 from app.db.session import SessionLocal
 from app.models.user import User
-from app.web.dependencies.company import ACTIVE_COMPANY_COOKIE
-from app.web.dependencies.company import get_allowed_companies
-from app.web.dependencies.company import resolve_active_company
+from app.web.dependencies.company import resolve_user_company_scope
 
 
 PUBLIC_PATHS = [
@@ -108,16 +106,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Usuario disponible globalmente
             request.state.user = user
 
-            # Contexto de empresa (MOYZA / MOES): qué empresas puede ver
-            # el usuario y cuál está activa según la cookie.
-            allowed = get_allowed_companies(user, db)
+            # Contexto de empresa (MOYZA / MOES): qué empresas puede ver el
+            # usuario, cuál está activa (cookie, o su principal en la vista
+            # unificada) y con cuáles trabaja (PLAN_VISTA_UNIFICADA_AGENTES.md)
+            scope = resolve_user_company_scope(request, user, db)
 
-            request.state.allowed_companies = allowed
+            request.state.allowed_companies = scope.allowed
 
-            request.state.company = resolve_active_company(
-                allowed,
-                request.cookies.get(ACTIVE_COMPANY_COOKIE)
-            )
+            request.state.company = scope.company
+
+            request.state.company_ids = scope.company_ids
+
+            request.state.unified_view = scope.unified_view
 
         finally:
 
