@@ -260,3 +260,143 @@ def test_pestana_de_otra_empresa_con_registrar_visita(ctx):
     assert any(r["id"] == ctx.props.moes.id for r in response.context["other_properties"])
     assert f'href="/visits/new/{ctx.props.moes.id}"' in html
     assert f'aria-label="Registrar visita en {ctx.props.moes.title}"' in html
+
+
+# ---------------------------------------------------------------------------
+# Ficha y vista previa (fase C)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def cross_visit(ctx):
+    """Visita de Mia (MOYZA) a la propiedad de Teo (MOES), sin firmar."""
+    from app.models.property_visit import PropertyVisit
+    visit = PropertyVisit(property_id=ctx.props.moes.id, company_id=ctx.moyza.id, visitor_name="PYTEST-CRUZ CLIENTE",
+                          phone="34600000002", purchase_fees="2500", notes="nota", agent_id=ctx.mia.id,
+                          visit_status="draft")
+    ctx.db.add(visit)
+    ctx.db.flush()
+    ctx.db.refresh(visit)
+    return visit
+
+
+def test_preview_con_marca_de_la_visita_y_comercializado_por(ctx, cross_visit):
+    from app.web.routes.visits import preview_visit
+    response = asyncio.run(preview_visit(cross_visit.id, _request(ctx, ctx.users.mia, "/visits/preview"), db=ctx.db))
+    assert response.status_code == 200
+    html = _html(response)
+    assert "FICHA DE VISITA INMOBILIARIA MOYZA" in html
+    assert "en calidad de representante de la agencia inmobiliaria MOYZA" in html
+    assert "Inmueble comercializado por MOES PREMIUM" in html
+    # El documento lleva la dirección completa aunque Mia no vea la calle en la app
+    assert "Calle Secreta Moes 7" in html
+
+
+def test_pdf_con_marca_de_la_visita_y_comercializado_por(ctx, cross_visit, tmp_path):
+    pypdf = pytest.importorskip("pypdf")
+    from app.services.visit_sheet_generator import generate_visit_sheet
+
+    output = tmp_path / "ficha.pdf"
+    generate_visit_sheet(property_item=cross_visit.property, visit=cross_visit, agent=cross_visit.signing_agent,
+                         output_path=str(output))
+    text = " ".join(page.extract_text() for page in pypdf.PdfReader(str(output)).pages)
+    text = " ".join(text.split())
+    assert "FICHA DE VISITA INMOBILIARIA MOYZA" in text
+    assert "agencia inmobiliaria MOYZA" in text
+    assert "Inmueble comercializado por MOES PREMIUM" in text
+    assert "Calle Secreta Moes 7" in text
+
+
+def test_ficha_de_visita_propia_sin_linea_de_comercializacion(ctx):
+    from app.models.property_visit import PropertyVisit
+    from app.web.routes.visits import preview_visit
+    visit = PropertyVisit(property_id=ctx.props.moes.id, company_id=ctx.moes.id, visitor_name="PYTEST-CRUZ PROPIA",
+                          phone="34600000003", purchase_fees="2500", notes="n", agent_id=ctx.teo.id,
+                          visit_status="draft")
+    ctx.db.add(visit)
+    ctx.db.flush()
+    response = asyncio.run(preview_visit(visit.id, _request(ctx, ctx.users.teo, "/visits/preview"), db=ctx.db))
+    html = _html(response)
+    assert "FICHA DE VISITA INMOBILIARIA MOES PREMIUM" in html
+    assert "comercializado por" not in html
+
+
+# ---------------------------------------------------------------------------
+# Visibilidad para la empresa de la propiedad (fase C)
+# ---------------------------------------------------------------------------
+
+def test_admin_de_moes_ve_la_visita_en_la_ficha_de_la_propiedad(ctx, cross_visit):
+    from app.web.routes.properties import property_detail
+    request = _request(ctx, ctx.admin, f"/properties/{ctx.props.moes.id}", cookie_company="MOES")
+    response = asyncio.run(property_detail(ctx.props.moes.id, request, db=ctx.db))
+    html = _html(response)
+    assert cross_visit in response.context["visits_registered"]
+    assert "PYTEST-CRUZ CLIENTE" in html
+    assert 'title="Visita registrada en MOYZA (solo lectura)"' in html
+    # Sin generar ni enviar la ficha de una visita ajena
+    assert f"/visits/{cross_visit.id}/generate-pdf" not in html
+
+
+def test_admin_de_moes_la_ve_en_visitas_en_solo_lectura(ctx, cross_visit):
+    from app.web.routes.visits import edit_visit
+    from app.web.routes.visits import visits_page
+    request = _request(ctx, ctx.admin, "/visits", cookie_company="MOES")
+    response = asyncio.run(visits_page(request, db=ctx.db))
+    html = _html(response)
+    assert cross_visit in response.context["visits"]
+    assert 'title="Visita registrada en MOYZA (solo lectura)"' in html
+    assert f'href="/visits/edit/{cross_visit.id}"' not in html
+    assert f'value="{cross_visit.id}"' not in html                        # sin borrar
+    assert f"/visits/{cross_visit.id}/generate-pdf" not in html
+    # Editar por URL tampoco
+    response = asyncio.run(edit_visit(cross_visit.id, _request(ctx, ctx.admin, "/visits/edit", cookie_company="MOES"),
+                                      db=ctx.db))
+    assert _flash(response)["message"] == "Visita no encontrada"
+
+
+def test_descarga_de_la_ficha_para_la_empresa_de_la_propiedad(ctx, cross_visit):
+    from app.web.routes.visits import download_visit_sheet
+    cross_visit.visit_sheet_filepath = "/no/existe/ficha.pdf"
+    ctx.db.flush()
+
+    def download(user, cookie_company=None):
+        request = _request(ctx, user, "/visits/download", cookie_company=cookie_company)
+        return _flash(asyncio.run(download_visit_sheet(cross_visit.id, request, db=ctx.db)))["message"]
+
+    # La visita existe para las dos empresas (falta el archivo, no la visita)
+    assert download(ctx.admin, "MOES") == "Archivo de ficha de visita no existe"
+    assert download(ctx.users.mia) == "Archivo de ficha de visita no existe"
+
+
+def test_agente_de_moyza_ve_su_visita_con_el_distintivo_de_la_propiedad(ctx, cross_visit):
+    from app.web.routes.visits import visits_page
+    response = asyncio.run(visits_page(_request(ctx, ctx.users.mia, "/visits"), db=ctx.db))
+    html = _html(response)
+    assert cross_visit in response.context["visits"]
+    assert 'title="Propiedad de MOES PREMIUM"' in html
+    assert f'href="/visits/edit/{cross_visit.id}"' in html        # es suya: la gestiona
+    assert f'href="/properties/{ctx.props.moes.id}"' not in html  # la ficha de MOES no se abre
+    assert "(solo lectura)" not in html
+
+
+def test_feed_del_inicio_con_distintivo(ctx, cross_visit):
+    from app.services.dashboard_service import DashboardService
+
+    def event(company):
+        feed = DashboardService(ctx.db, company.id).activity_feed()
+        return next(e for e in feed if e["kind"] == "visit" and "PYTEST-CRUZ CLIENTE" in e["text"])
+
+    moyza_event = event(ctx.moyza)
+    assert moyza_event["company"].id == ctx.moes.id and moyza_event["href"] == "/visits"
+    assert moyza_event["company_title"] == "Propiedad de MOES PREMIUM"
+    moes_event = event(ctx.moes)
+    assert moes_event["company"].id == ctx.moyza.id and moes_event["cross"] is True
+    assert moes_event["href"] == f"/properties/{ctx.props.moes.id}"
+
+
+def test_aviso_de_ficha_firmada_en_la_empresa_de_la_visita(ctx, cross_visit):
+    from app.models.notification import Notification
+    from app.services.notification_service import notify_visit_completed
+
+    created = notify_visit_completed(ctx.db, cross_visit, sent=False)
+    assert created and all(n.company_id == ctx.moyza.id and n.url == "/visits" for n in created)
+    ctx.db.query(Notification).filter(Notification.id.in_([n.id for n in created])).delete(synchronize_session=False)

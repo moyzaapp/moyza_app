@@ -62,6 +62,7 @@ from app.services.buyer_reminder_service import get_pending_buyers_by_agent
 from app.services.company_scope import CompanyIds
 from app.services.company_scope import company_match
 from app.services.company_scope import scope_active_agents
+from app.services.company_scope import visible_visit_clause
 from app.services.performance_report_service import BREAKDOWN_KEYS
 from app.services.performance_report_service import MONTH_ABBR
 from app.services.performance_report_service import Period
@@ -1170,6 +1171,26 @@ class DashboardService:
 
     # -- Actividad reciente ------------------------------------------------
 
+    def _visit_event_company(self, visit) -> dict:
+        """Distintivo de un evento de visita en el feed (PLAN_VISITAS_OTRA_EMPRESA.md §5).
+
+        Propiedad de otra empresa: la de la propiedad ("Propiedad de X").
+        Visita registrada por otra empresa a una propiedad suya: la de la
+        visita ("Visita de X"). Nada si las dos son la de la empresa.
+        """
+        prop = visit.property
+        if prop is not None and prop.company_id != self.company_id:
+            return {"company": prop.company, "company_title": f"Propiedad de {prop.company.name}"}
+        if visit.company_id is not None and visit.company_id != self.company_id:
+            return {"company": visit.company, "company_title": f"Visita registrada en {visit.company.name}"}
+        return {}
+
+    def _visit_event_href(self, visit) -> str:
+        """Ficha de la propiedad si es de la empresa; si no (no se abre), Visitas."""
+        if visit.property is not None and visit.property.company_id == self.company_id:
+            return f"/properties/{visit.property_id}"
+        return "/visits"
+
     def activity_feed(self, now: Optional[datetime] = None, days: int = 30) -> list:
         """Últimos eventos de la empresa, de 5 consultas acotadas por fecha y límite."""
         from sqlalchemy.orm import joinedload
@@ -1180,15 +1201,19 @@ class DashboardService:
         limit = DashboardThresholds.FEED_LIMIT
         events = []
 
+        # Visitas de la empresa y las que otra empresa registró a sus
+        # propiedades (PLAN_VISITAS_OTRA_EMPRESA.md §5), con distintivo
+        # (`_visit_event_company`)
         visits = (
             self.db.query(PropertyVisit)
             .options(
                 joinedload(PropertyVisit.property).joinedload(Property.agent),
+                joinedload(PropertyVisit.property).joinedload(Property.company),
+                joinedload(PropertyVisit.company),
                 joinedload(PropertyVisit.agent),
                 joinedload(PropertyVisit.companion_agent),
             )
-            .join(Property, Property.id == PropertyVisit.property_id)
-            .filter(Property.company_id == self.company_id, PropertyVisit.created_at >= since)
+            .filter(visible_visit_clause(self.company_id), PropertyVisit.created_at >= since)
             .order_by(PropertyVisit.created_at.desc())
             .limit(limit)
             .all()
@@ -1209,15 +1234,19 @@ class DashboardService:
                 "kind": "visit", "icon": "calendar", "tone": "blue", "cross": cross,
                 "title": title,
                 "text": f"{prop.title if prop else 'Propiedad'} · visitante: {visit.visitor_name}{extra}",
-                "when": visit.created_at, "href": f"/properties/{visit.property_id}",
+                "when": visit.created_at, "href": self._visit_event_href(visit),
+                **self._visit_event_company(visit),
             })
 
         signed = (
             self.db.query(PropertyVisit)
-            .options(joinedload(PropertyVisit.property), joinedload(PropertyVisit.agent))
-            .join(Property, Property.id == PropertyVisit.property_id)
+            .options(
+                joinedload(PropertyVisit.property).joinedload(Property.company),
+                joinedload(PropertyVisit.company),
+                joinedload(PropertyVisit.agent),
+            )
             .filter(
-                Property.company_id == self.company_id,
+                visible_visit_clause(self.company_id),
                 PropertyVisit.visit_status == "completed",
                 PropertyVisit.signature_captured_at.isnot(None),
                 PropertyVisit.signature_captured_at >= since,
@@ -1233,7 +1262,8 @@ class DashboardService:
                 "title": "Ficha de visita firmada",
                 "text": f"{visit.property.title if visit.property else 'Propiedad'} · {visit.visitor_name}"
                         + (f" · {agent.name}" if agent else ""),
-                "when": visit.signature_captured_at, "href": f"/properties/{visit.property_id}",
+                "when": visit.signature_captured_at, "href": self._visit_event_href(visit),
+                **self._visit_event_company(visit),
             })
 
         drops = (

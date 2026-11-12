@@ -140,6 +140,31 @@ def _joint_signature_table(visit, agent, agent_name, companion_agent, body_style
     return signature_table
 
 
+def visit_brand_company(visit, property_item=None):
+    """Empresa cuya marca lleva la ficha: la de la visita.
+
+    Si la visita no la tiene cargada (objetos sin guardar), la de la propiedad.
+    """
+    company = getattr(visit, "company", None)
+    if company is not None:
+        return company
+    return getattr(property_item if property_item is not None else getattr(visit, "property", None), "company", None)
+
+
+def marketed_by_name(brand_company, property_item):
+    """Nombre de la empresa que comercializa el inmueble si no es la de la ficha.
+
+    Para la línea "Inmueble comercializado por {empresa}" del PDF y de la
+    vista previa; None si es la misma empresa (o no se sabe).
+    """
+    property_company = getattr(property_item, "company", None)
+    if brand_company is None or property_company is None:
+        return None
+    if getattr(property_company, "id", None) == getattr(brand_company, "id", None):
+        return None
+    return property_company.name
+
+
 def generate_visit_sheet(
     property_item,
     visit,
@@ -150,16 +175,22 @@ def generate_visit_sheet(
 ):
     """
     Genera la Ficha de Visita Inmobiliaria en PDF con la identidad de la
-    empresa propietaria del inmueble (MOYZA o MOES PREMIUM).
+    empresa de la visita (MOYZA o MOES PREMIUM): la agencia del agente que
+    acompaña y firma, que puede no ser la de la propiedad
+    (PLAN_VISITAS_OTRA_EMPRESA.md §5, decisión 1). Si la propiedad es de otra
+    empresa, los datos del inmueble llevan "Inmueble comercializado por
+    {empresa de la propiedad}".
 
     `agent` es el agente que realizó la visita: figura como emisor y firma.
     `companion_agent` (opcional) aparece en el texto legal y firma en una
     tercera columna con su firma registrada (PLAN_FIRMA_AGENTES_VISITA.md §3.4).
     Sin acompañante, la tabla de firmas es la de siempre (dos columnas).
-    `company` es opcional: por defecto se usa la empresa de la propiedad.
+    `company` es opcional: por defecto la de la visita (`visit_brand_company`).
     """
 
-    brand = branding_for(company or getattr(property_item, "company", None))
+    company = company or visit_brand_company(visit, property_item)
+    brand = branding_for(company)
+    marketed_by = marketed_by_name(company, property_item)
 
     doc = SimpleDocTemplate(
         output_path,
@@ -321,6 +352,10 @@ def generate_visit_sheet(
         ["Precio de venta:", f"€{property_item.price:,.2f}" if property_item.price else "No especificado"],
         ["Honorarios en caso de compra:", _safe_text(visit.purchase_fees_display, "Según condiciones establecidas")],
     ]
+    # Propiedad de otra empresa (PLAN_VISITAS_OTRA_EMPRESA.md §5): debe
+    # coincidir con templates/visits/preview.html
+    if marketed_by:
+        property_data.append(["Comercialización:", f"Inmueble comercializado por {_safe_text(marketed_by)}"])
 
     property_table = Table(
         property_data,

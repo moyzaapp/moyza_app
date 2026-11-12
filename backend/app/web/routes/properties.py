@@ -936,8 +936,11 @@ async def property_detail(
         .all()
     )
 
+    # Todas las visitas a la propiedad, también las registradas por otra
+    # empresa (solo lectura, PLAN_VISITAS_OTRA_EMPRESA.md §5)
     visits_registered = (
         db.query(PropertyVisit)
+        .options(_jl(PropertyVisit.company))
         .filter(
             PropertyVisit.property_id == property_id
         )

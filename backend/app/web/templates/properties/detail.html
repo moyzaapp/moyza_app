@@ -681,6 +681,9 @@ Detalle Propiedad
                 </thead>
                 <tbody>
                     {% for visit in visits_registered %}
+                    {# Visita registrada por otra empresa (PLAN_VISITAS_OTRA_EMPRESA.md §5): distintivo
+                       "Visita de {empresa}" y, si no es de una empresa del usuario, solo lectura (descargar) #}
+                    {% set visit_editable = visit.company_id in company_ids %}
                     <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                         <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                             {{ visit.created_at | madrid_dt('%d/%m/%Y %H:%M') if visit.created_at else '-' }}
@@ -698,6 +701,12 @@ Detalle Propiedad
                                 {{ visit.creator.full_name }}
                             {% else %}
                                 -
+                            {% endif %}
+                            {% if visit.is_cross_company %}
+                            <div class="mt-1 flex flex-wrap items-center gap-1">
+                                <span class="text-xs text-gray-500">Visita de</span>
+                                {{ ui.company_badge(visit.company, extra="whitespace-nowrap", title="Visita registrada en " ~ visit.company.name ~ ("" if visit_editable else " (solo lectura)")) }}
+                            </div>
                             {% endif %}
                         </td>
                         <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
@@ -733,7 +742,7 @@ Detalle Propiedad
                         <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
                             <div class="flex items-center justify-center gap-2 whitespace-nowrap">
                                 {% if visit.visit_sheet_filepath %}
-                                    {% if visit_sheet_whatsapp_enabled %}
+                                    {% if visit_sheet_whatsapp_enabled and visit_editable %}
                                     <form action="/visits/{{ visit.id }}/send-whatsapp" method="POST" class="inline-block">
                                         <button
                                             type="submit"
@@ -757,6 +766,8 @@ Detalle Propiedad
                                         </svg>
                                         Descargar
                                     </a>
+                                {% elif not visit_editable %}
+                                    <span class="text-xs text-gray-500">Solo lectura</span>
                                 {% else %}
                                     <form action="/visits/{{ visit.id }}/generate-pdf" method="POST" class="inline-block">
                                         <button

@@ -210,11 +210,32 @@ def _visit_place(visit) -> str:
     return f"{title} · visitante: {visit.visitor_name}" if visit.visitor_name else title
 
 
+def _visit_company_id(visit) -> int:
+    """Empresa de la visita (PLAN_VISITAS_OTRA_EMPRESA.md); la de la propiedad si falta."""
+    if getattr(visit, "company_id", None) is not None:
+        return visit.company_id
+    return visit.property.company_id
+
+
+def _visit_url(visit) -> str:
+    """Ficha de la propiedad si es de la empresa de la visita; si no, Visitas.
+
+    Una visita cruzada (propiedad de otra empresa) se avisa en la empresa de
+    la visita, donde la ficha de la propiedad puede no abrirse.
+    """
+    prop = visit.property
+    if prop.company_id == _visit_company_id(visit):
+        return f"/properties/{prop.id}"
+    return "/visits"
+
+
 def notify_visit_created(db: Session, visit, actor=None) -> list:
     """Alta de visita: al captador si no participó y al acompañante.
 
     `visit_on_my_property`: el captador no es ni el principal ni el acompañante.
-    `visit_as_companion`: hay acompañante.
+    Va a la empresa de la propiedad (la del captador), con la ficha de su
+    propiedad, también si la visita la registró otra empresa.
+    `visit_as_companion`: hay acompañante; va a la empresa de la visita.
     """
     try:
         prop = visit.property
@@ -243,11 +264,11 @@ def notify_visit_created(db: Session, visit, actor=None) -> list:
             created += notify(
                 db,
                 users=users_for_agent(db, visit.companion_agent),
-                company_id=company_id,
+                company_id=_visit_company_id(visit),
                 kind=NotificationKind.VISIT_AS_COMPANION,
                 title=f"{visitor_name} registró una visita contigo como acompañante",
                 body=_visit_place(visit),
-                url=f"/properties/{prop.id}",
+                url=_visit_url(visit),
                 actor=actor,
                 entity=("visit", visit.id),
             )
@@ -261,7 +282,7 @@ def notify_visit_created(db: Session, visit, actor=None) -> list:
 
 
 def notify_visit_completed(db: Session, visit, actor=None, sent: bool = True) -> list:
-    """Ficha firmada (y enviada si `sent`): al agente principal y al acompañante."""
+    """Ficha firmada (y enviada si `sent`): al agente principal y al acompañante, en la empresa de la visita."""
     try:
         prop = visit.property
         if prop is None:
@@ -270,11 +291,11 @@ def notify_visit_completed(db: Session, visit, actor=None, sent: bool = True) ->
         created = notify(
             db,
             users=users,
-            company_id=prop.company_id,
+            company_id=_visit_company_id(visit),
             kind=NotificationKind.VISIT_COMPLETED,
             title="Ficha de visita firmada y enviada" if sent else "Ficha de visita firmada",
             body=_visit_place(visit),
-            url=f"/properties/{prop.id}",
+            url=_visit_url(visit),
             actor=actor,
             entity=("visit", visit.id),
         )
@@ -295,7 +316,7 @@ def notify_visit_sheet_failed(db: Session, visit, actor=None) -> list:
         created = notify(
             db,
             users=users_for_agent(db, visit.signing_agent),
-            company_id=prop.company_id,
+            company_id=_visit_company_id(visit),
             kind=NotificationKind.VISIT_SHEET_SEND_FAILED,
             title="No se pudo enviar la ficha de visita por WhatsApp",
             body=_visit_place(visit) + (f" · {visit.phone}" if visit.phone else ""),

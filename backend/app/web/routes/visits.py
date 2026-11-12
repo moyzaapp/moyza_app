@@ -36,9 +36,10 @@ from app.services.notification_service import notify_visit_created
 from app.services.notification_service import notify_visit_sheet_failed
 from app.services.company_scope import (
     scope_active_agents,
-    scope_visits,
+    scope_visible_visits,
     visit_agent_clause,
     visitable_property_clause,
+    get_visible_visit,
     get_visit_in_company,
     get_visitable_property,
 )
@@ -246,12 +247,18 @@ async def visits_page(
     # Si es admin, mostrar todas las visitas de la empresa activa.
     # Si es agente: las visitas en las que participó (principal o
     # acompañante) y las que otros hicieron a sus propiedades.
-    visits_query = scope_visits(
+    # Además de las registradas en sus empresas, las que otra empresa
+    # registró a propiedades suyas, en solo lectura (PLAN_VISITAS_OTRA_EMPRESA.md
+    # §5, decisión 2): la plantilla no ofrece editar, generar ni borrar si
+    # la empresa de la visita no está en `company_ids`.
+    visits_query = scope_visible_visits(
         db.query(PropertyVisit).options(
             joinedload(PropertyVisit.agent),
             joinedload(PropertyVisit.companion_agent),
             joinedload(PropertyVisit.creator),
+            joinedload(PropertyVisit.company),
             joinedload(PropertyVisit.property).joinedload(Property.agent),
+            joinedload(PropertyVisit.property).joinedload(Property.company),
         ),
         get_company_ids(request)
     )
@@ -570,7 +577,9 @@ async def download_visit_sheet(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    visit = get_visit_in_company(db, visit_id, get_company_ids(request))
+    # Lectura: también la empresa de la propiedad descarga la ficha de una
+    # visita que otra empresa registró a su propiedad (PLAN_VISITAS_OTRA_EMPRESA.md §5)
+    visit = get_visible_visit(db, visit_id, get_company_ids(request))
 
     if not visit or not visit.visit_sheet_filepath:
         response = RedirectResponse(url="/properties", status_code=302)
@@ -779,10 +788,16 @@ async def preview_visit(
             event_data={'viewed_at': datetime.utcnow().isoformat()}
         )
 
-    # Identidad de la empresa propietaria del inmueble: el preview debe
-    # coincidir exactamente con el PDF que se firmará.
+    # Identidad de la empresa de la visita (la agencia del agente), con
+    # "Inmueble comercializado por {empresa}" si la propiedad es de otra
+    # (PLAN_VISITAS_OTRA_EMPRESA.md §5): el preview debe coincidir
+    # exactamente con el PDF que se firmará.
     from app.services.company_service import branding_for
-    brand = branding_for(property_item.company)
+    from app.services.visit_sheet_generator import marketed_by_name
+    from app.services.visit_sheet_generator import visit_brand_company
+    brand_company = visit_brand_company(visit, property_item)
+    brand = branding_for(brand_company)
+    marketed_by = marketed_by_name(brand_company, property_item)
 
     # Preparar datos para el template
     # Hora de España, igual que la ficha en PDF (PLAN_CEDER_COMPRADORES.md §4)
@@ -809,6 +824,7 @@ async def preview_visit(
             "companion_agent_name": companion_agent_name,
             "logo_exists": logo_exists,
             "brand": brand,
+            "marketed_by": marketed_by,
             "current_user": request.state.user
         }
     )
