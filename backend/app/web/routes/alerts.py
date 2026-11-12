@@ -67,6 +67,9 @@ from app.services.company_service import branding_for
 from app.services import alert_assignment_service as assignment
 from app.services import alert_view
 from app.services import buyer_attention_service
+from app.services.buyer_rename import BuyerNameError
+from app.services.buyer_rename import NAME_MAX_LENGTH
+from app.services.buyer_rename import rename_buyer
 from app.services import notification_service
 from app.services.alert_assignment_service import AlertAssignmentError
 # Cola secuencial y ventana de asignación (PLAN_ALERTA_COMO_NUEVA.md): viven en
@@ -1686,6 +1689,7 @@ async def alert_detail(
             "attention": attention,
             "upcoming_clocks": upcoming_clocks,
             "RULE_CALLBACK": buyer_attention_service.RULE_CALLBACK,
+            "buyer_name_max_length": NAME_MAX_LENGTH,
             "assignable_groups": (
                 assignment.assignable_agents(db, get_active_company(request).id) if can_reassign else []
             ),
@@ -3250,12 +3254,65 @@ async def update_buyer_contact(
             return response
         buyer.phone = new_phone
 
-    buyer.name = name.strip()
+    # El nombre se propaga a todas sus alertas (PLAN_RENOMBRAR_COMPRADOR.md)
+    try:
+        rename_buyer(db, buyer, name)
+    except BuyerNameError as error:
+        db.rollback()
+        response = RedirectResponse(url=f"/buyers/{buyer_id}", status_code=303)
+        set_flash(response, "error", str(error))
+        return response
     buyer.email = email.strip() if email and email.strip() else None
     db.commit()
 
     response = RedirectResponse(url=f"/buyers/{buyer_id}", status_code=303)
     set_flash(response, "success", "Datos del comprador actualizados correctamente")
+    return response
+
+
+@router.post("/alerts/{alert_id}/rename-buyer")
+async def rename_buyer_from_alert(
+    alert_id: int,
+    request: Request,
+    name: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Corrige el nombre del comprador desde el detalle de la alerta.
+
+    PLAN_RENOMBRAR_COMPRADOR.md: muchos compradores se registran con un nombre
+    provisional ("SN") y se completa al contactarlos. Mismo permiso que ver la
+    alerta (admin o su agente). Actualiza la ficha y todas las alertas del
+    comprador; si la alerta no tiene ficha (`buyer_id` nulo), solo la alerta.
+    """
+    current_user = request.state.user
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
+    if not alert:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Alerta no encontrada")
+        return response
+
+    if not is_admin(current_user):
+        agent = get_agent_from_user(current_user, db)
+        if not agent or alert.agent_id != agent.id:
+            response = RedirectResponse(url="/alerts", status_code=302)
+            set_flash(response, "error", "No tienes permisos para editar esta alerta")
+            return response
+
+    response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=303)
+    try:
+        rename_buyer(db, alert.buyer, name, alert=alert)
+        db.commit()
+    except BuyerNameError as error:
+        db.rollback()
+        set_flash(response, "error", str(error))
+        return response
+    except Exception:
+        db.rollback()
+        logger.exception("Error renombrando comprador: alert_id=%s", alert_id)
+        set_flash(response, "error", "Ocurrió un error al cambiar el nombre")
+        return response
+
+    set_flash(response, "success", f"Nombre actualizado: {alert.lead_name}")
     return response
 
 

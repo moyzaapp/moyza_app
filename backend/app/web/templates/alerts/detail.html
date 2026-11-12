@@ -189,7 +189,21 @@
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                             <label class="text-sm text-gray-600">Nombre</label>
-                            <p class="text-gray-800 font-medium">{{ alert.lead_name }}</p>
+                            {# Nombre provisional ("SN") que se corrige al contactar: lápiz para
+                               cambiarlo en la ficha y en todas sus alertas (PLAN_RENOMBRAR_COMPRADOR.md) #}
+                            <div class="flex items-center gap-2">
+                                <p class="text-gray-800 font-medium">{{ alert.lead_name }}</p>
+                                <button type="button" data-modal-open="renameBuyerModal"
+                                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
+                                        title="Editar nombre" aria-label="Editar el nombre del comprador">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            {% if alert.buyer_id %}
+                            <a href="/buyers/{{ alert.buyer_id }}" class="text-xs text-blue-600 hover:underline">Ver ficha del comprador</a>
+                            {% endif %}
                         </div>
 
                         {% if alert.lead_phone %}
@@ -627,5 +641,17 @@ function closeFollowUpModal() {
     updateProfileState();
 })();
 </script>
+
+{# Modal: editar el nombre del comprador (PLAN_RENOMBRAR_COMPRADOR.md) #}
+{% call ui.modal("renameBuyerModal", "Editar nombre del comprador", size="md",
+                 subtitle="Se actualiza en la ficha del comprador y en todas sus alertas") %}
+<form method="POST" action="/alerts/{{ alert.id }}/rename-buyer" data-once>
+    <div class="p-4 sm:p-6">
+        {{ ui.field("name", "Nombre", value=alert.lead_name, required=True, id="renameBuyerName",
+                    placeholder="Nombre y apellidos", attrs='maxlength="' ~ buyer_name_max_length ~ '" autocomplete="off"') }}
+    </div>
+    {{ ui.modal_footer(submit_label="Guardar nombre") }}
+</form>
+{% endcall %}
 
 {% endblock %}
