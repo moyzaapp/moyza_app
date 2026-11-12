@@ -358,10 +358,10 @@ def test_ruta_agente_consulta_un_numero_valido(env):
     assert OWNER_NAME not in html and "Navarro" not in html and OWNER_EMAIL not in html
 
 
-def test_ruta_solo_las_empresas_permitidas_del_usuario(env):
+def test_ruta_solo_la_empresa_activa(env):
     _owner(env, props=("bea", "moes"))
 
-    def titles(user, company, allowed):
+    def check(user, company, allowed):
         from app.web.routes.properties import properties_page
         request = test_alert_search._request(env, user, "/properties", company=company)
         request.state.allowed_companies = allowed
@@ -370,16 +370,17 @@ def test_ruta_solo_las_empresas_permitidas_del_usuario(env):
             phone_country_code="34", phone_number="600112233",
             phone_country_code_other=None, db=env.db,
         ))
-        return _titles(response.context["phone_check"]["results"])
+        return response.context["phone_check"]
 
-    ana = env.users["ana"]
-    # Agente solo de MOYZA / solo de MOES: lo de su empresa
-    assert titles(ana, env.moyza, [env.moyza]) == ["Piso Bea"]
-    assert titles(ana, env.moes, [env.moes]) == ["Piso MOES"]
-    # Quien puede usar las dos (admin, agente en ambas) ve las dos, sea cual sea la activa
     both = [env.moyza, env.moes]
-    assert titles(env.admin, env.moyza, both) == ["Piso Bea", "Piso MOES"]
-    assert titles(env.admin, env.moes, both) == ["Piso Bea", "Piso MOES"]
+    ana = env.users["ana"]
+    # Manda la empresa activa, aunque el usuario pueda usar las dos (admin incluido)
+    for user, allowed in ((ana, [env.moyza]), (ana, both), (env.admin, both)):
+        assert _titles(check(user, env.moyza, allowed)["results"]) == ["Piso Bea"]
+    for user, allowed in ((ana, [env.moes]), (ana, both), (env.admin, both)):
+        result = check(user, env.moes, allowed)
+        assert _titles(result["results"]) == ["Piso MOES"]
+        assert result["company_names"] == ["MOES PREMIUM"]
 
 
 def test_ruta_numero_sin_propiedades_tambien_se_registra(env):
@@ -643,12 +644,12 @@ def test_http_la_consulta_queda_en_el_registro_de_actividad(data):
         f"/properties?tab=phone_check · tel {data['phone']} · 0 propiedades"
     )
 
-    # El admin (todas las empresas) sí la ve, con MOYZA activa
-    status, html = _Client(ADMIN_EMAIL).get("/properties", {
-        "tab": "phone_check", "phone_country_code": "34", "phone_number": data["local"],
-    })
-    assert status == 200
-    assert f"{data['tag']} PROP" in html
+    # Manda la empresa activa también para el admin: con MOYZA no la ve, con MOES sí
+    params = {"tab": "phone_check", "phone_country_code": "34", "phone_number": data["local"]}
+    status, html = _Client(ADMIN_EMAIL, "MOYZA").get("/properties", params)
+    assert status == 200 and f"{data['tag']} PROP" not in html
+    status, html = _Client(ADMIN_EMAIL, "MOES").get("/properties", params)
+    assert status == 200 and f"{data['tag']} PROP" in html
     assert data["owner_name"] not in html
 
 
