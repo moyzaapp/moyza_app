@@ -47,11 +47,16 @@ def test_csv_de_cierres():
     without = {"date": date(2025, 3, 1), "kind": "alquiler", "notes": None,
                "property_id": None, "property_ref": None, "property_title": None, "property_city": None}
 
-    assert [header for header, _ in columns] == ["Fecha de cierre", "Operación", "Propiedad", "Ciudad", "Nota", "Enlace"]
-    assert [value(with_prop) for _, value in columns] == [
-        "31/03/2025", "Venta", "REF-7 · Piso Centro", "Jaén", "Notaría", "/properties/7",
+    assert [header for header, _ in columns] == [
+        "Fecha de cierre", "Operación", "Con", "Propiedad", "Ciudad", "Nota", "Enlace",
     ]
-    assert [value(without) for _, value in columns] == ["01/03/2025", "Alquiler", "", "", "", ""]
+    assert [value(with_prop) for _, value in columns] == [
+        "31/03/2025", "Venta", "", "REF-7 · Piso Centro", "Jaén", "Notaría", "/properties/7",
+    ]
+    # Cierre compartido (PLAN_CIERRES_DOS_AGENTES.md): "Con" lleva el otro agente
+    assert [value({**without, "shared_with": "Bea"}) for _, value in columns] == [
+        "01/03/2025", "Alquiler", "Bea", "", "", "", "",
+    ]
 
 
 # ---------------------------------------------------------------------------

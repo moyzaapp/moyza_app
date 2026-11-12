@@ -8,6 +8,7 @@ from starlette.background import BackgroundTask
 from app.core.security import decode_token
 from app.db.session import SessionLocal
 from app.models.user_activity_log import UserActivityLog
+from app.services.activity_log_view import SKIP_LOG_PATHS
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,9 @@ class ActivityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        if any(path.startswith(p) for p in SKIP_PREFIXES):
+        # Estáticos y sondeos automáticos del navegador (contadores de avisos,
+        # favicon): no son actividad de nadie y llenaban un tercio del registro.
+        if any(path.startswith(p) for p in SKIP_PREFIXES) or path in SKIP_LOG_PATHS:
             return await call_next(request)
 
         start = time.monotonic()

@@ -326,6 +326,15 @@ class FollowUpActionType:
     # alerta ni marca actividad.
     REASIGNADA = "REASIGNADA"
 
+    # Envío de una propiedad al comprador por WhatsApp (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md).
+    # Lo escriben /alerts/{id}/send-property y /buyers/{id}/send-property al
+    # pulsar "Enviar por WhatsApp" (no se sabe si el agente llegó a enviar el
+    # mensaje), nunca el formulario de seguimiento (no está en STAGE_ORDER).
+    # Solo informativo, como REASIGNADA: no avanza etapa y no cuenta como
+    # gestión (no desbloquea la cola, no permite cerrar, no marca actividad ni
+    # saca al comprador de "sin gestionar"). `property_id` guarda qué se envió.
+    PROPIEDAD_ENVIADA = "PROPIEDAD_ENVIADA"
+
     # Asociar o cambiar la propiedad de una búsqueda (PLAN_ALERTA_SIN_REFERENCIA.md).
     # Lo escribe la ruta /alerts/{id}/link-property, nunca el formulario de
     # seguimiento (no está en STAGE_ORDER). Es una gestión real: desbloquea la
@@ -351,7 +360,14 @@ class FollowUpActionType:
     REPEATABLE_ACTIONS = {"SIN_RESPUESTA", "PROPIEDAD_ASOCIADA", "PERFIL_GUARDADO"}
 
     # Acciones del sistema: se muestran en el historial pero no son seguimientos
-    SYSTEM_ACTIONS = {"REASIGNADA"}
+    # (no cuentan como gestión en ningún indicador: cola, cierre, etapa,
+    # actividad, "sin gestionar", agenda, avisos, duplicados)
+    SYSTEM_ACTIONS = {"REASIGNADA", "PROPIEDAD_ENVIADA"}
+
+    # Acciones del sistema que el agente sí ve en su historial (desde su
+    # asignación): las registra él mismo. La nota de reasignación la sigue
+    # viendo solo el admin (alert_view.visible_follow_ups).
+    AGENT_VISIBLE_SYSTEM_ACTIONS = {"PROPIEDAD_ENVIADA"}
 
     # Orden numérico de las etapas de progresión. Las heredadas conservan un
     # orden coherente para los historiales antiguos: Primera llamada por debajo
@@ -383,6 +399,7 @@ class FollowUpActionType:
             cls.SIN_SOLVENCIA_ECONOMICA: "Sin Solvencia Económica",
             cls.NO_APTO_PROPIETARIO: "No apto para el propietario",
             cls.REASIGNADA: "Reasignada",
+            cls.PROPIEDAD_ENVIADA: "Propiedad enviada",
             cls.PROPIEDAD_ASOCIADA: "Propiedad asociada",
             cls.PERFIL_GUARDADO: "Perfil guardado",
             # Etiquetas heredadas para registros antiguos
@@ -433,6 +450,7 @@ class FollowUpActionType:
             "NO_APTO_PROPIETARIO": "bg-red-100 text-red-700",
             # Nota del sistema: neutro, no es una etapa
             "REASIGNADA": "bg-gray-100 text-gray-700",
+            "PROPIEDAD_ENVIADA": "bg-gray-100 text-gray-700",
             # Gestión que no es etapa: informativo
             "PROPIEDAD_ASOCIADA": "bg-blue-100 text-blue-700",
             "PERFIL_GUARDADO": "bg-blue-100 text-blue-700",

@@ -388,6 +388,34 @@ Detalle Propiedad
 
     </div>
 
+    {# Enlace a la ficha en la web de la empresa (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2):
+       el pegado a mano o el automático de la referencia (app/services/property_link.py) #}
+    {% set web_url = property | public_url %}
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 mb-4 border-b border-gray-100">
+        <div class="min-w-0">
+            <p class="text-xs text-gray-500">Enlace en la web</p>
+            {% if web_url %}
+            <p class="text-sm text-gray-700 truncate" title="{{ web_url }}">{{ web_url }}</p>
+            <p class="text-xs text-gray-400">{{ "Manual" if (property | public_url_source) == "manual" else "Automático por referencia" }}</p>
+            {% else %}
+            <p class="text-sm text-gray-400">Sin enlace — añádelo al editar la propiedad</p>
+            {% endif %}
+        </div>
+        {% if web_url %}
+        <div class="flex gap-2 shrink-0">
+            {% set open_attrs %}target="_blank" rel="noopener noreferrer"{% endset %}
+            {% call ui.button("Abrir", "secondary", href=web_url, attrs=open_attrs, extra="whitespace-nowrap") %}
+            <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
+            {% endcall %}
+            {% set copy_attrs %}id="copyPublicUrl" data-url="{{ web_url }}"{% endset %}
+            {% call ui.button("Copiar enlace", "secondary", attrs=copy_attrs, extra="flex-1 sm:flex-none whitespace-nowrap") %}
+            <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184"/></svg>
+            {% endcall %}
+            <span id="copyPublicUrlStatus" class="sr-only" aria-live="polite"></span>
+        </div>
+        {% endif %}
+    </div>
+
     {% if features %}
     <div class="flex flex-wrap gap-2 pb-4 mb-4 border-b border-gray-100">
         {% for feature in features %}
@@ -849,5 +877,51 @@ Detalle Propiedad
     {{ ui.modal_footer(submit_label="Registrar") }}
 </form>
 {% endcall %}
+
+<script>
+// "Copiar enlace" de la ficha en la web (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2):
+// portapapeles con aviso "Copiado"; sin API de portapapeles (contexto no
+// seguro), copia con un campo temporal.
+(function () {
+    const button = document.getElementById("copyPublicUrl");
+    if (!button) return;
+    const status = document.getElementById("copyPublicUrlStatus");
+    const original = button.innerHTML;
+
+    function fallbackCopy(text) {
+        const field = document.createElement("textarea");
+        field.value = text;
+        field.setAttribute("readonly", "");
+        field.className = "fixed opacity-0";
+        document.body.appendChild(field);
+        field.select();
+        let ok = false;
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        field.remove();
+        return ok;
+    }
+
+    function show(text) {
+        button.textContent = text;
+        if (status) status.textContent = text;
+        setTimeout(() => {
+            button.innerHTML = original;
+            if (status) status.textContent = "";
+        }, 2000);
+    }
+
+    button.addEventListener("click", () => {
+        const url = button.dataset.url || "";
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(url).then(
+                () => show("Copiado"),
+                () => show(fallbackCopy(url) ? "Copiado" : "No se pudo copiar")
+            );
+        } else {
+            show(fallbackCopy(url) ? "Copiado" : "No se pudo copiar");
+        }
+    });
+})();
+</script>
 
 {% endblock %}

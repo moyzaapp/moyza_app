@@ -2,150 +2,270 @@
 
 {% block title %}Actividad de Usuarios - {{ brand_name }}{% endblock %}
 
+{#
+  Actividad de usuarios (solo admin). El registro guarda una fila por petición;
+  aquí llega traducido a acciones (app/services/activity_log_view.py):
+  rows = [{log, module, label, detail, href, kind_badge, outcome}], paginado.
+  Indicadores y resumen por usuario: del período elegido, sin ruido técnico.
+  `base_qs` son los filtros activos; los enlaces los conservan con dict(base_qs, ...).
+#}
+{% import "components/ui_macros.html" as ui %}
+
+{% set th = "px-3 sm:px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap" %}
+{% set th_num = "px-3 sm:px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap" %}
+{% set label_class = "block text-sm font-medium text-gray-700 mb-1" %}
+
+{# Enlace a esta pantalla conservando los filtros y volviendo a la primera página #}
+{% macro href(overrides, anchor="") -%}
+{% set qs = dict(base_qs, **overrides) %}
+/activity-logs{% if qs %}?{{ qs | urlencode }}{% endif %}{{ anchor }}
+{%- endmacro %}
+
 {% block content %}
 
-<div class="flex-1 p-4 sm:p-6 lg:p-8">
-    <div class="max-w-7xl mx-auto">
+<div class="max-w-7xl mx-auto space-y-6">
 
-        <!-- Header -->
-        <div class="mb-6">
-            <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">Actividad de Usuarios</h1>
-            <p class="text-gray-600 mt-1">Registro de accesos y navegación en la plataforma</p>
-        </div>
-
-        <!-- Stats por usuario -->
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm mb-6">
-            <div class="px-6 py-4 border-b border-gray-100">
-                <h2 class="text-base font-semibold text-gray-700 flex items-center gap-2">
-                    <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                    </svg>
-                    Resumen por usuario
-                </h2>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="w-full">
-                    <thead class="bg-gray-50 border-b border-gray-100">
-                        <tr>
-                            <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Usuario</th>
-                            <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</th>
-                            <th class="text-center px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Total requests</th>
-                            <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Última actividad</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-50">
-                        {% for stat in user_stats %}
-                        <tr class="hover:bg-gray-50 transition-colors">
-                            <td class="px-6 py-3">
-                                <div class="flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-semibold text-sm">
-                                        {{ (stat.full_name or "?")[0].upper() }}
-                                    </div>
-                                    <span class="font-medium text-gray-800 text-sm">{{ stat.full_name or "—" }}</span>
-                                </div>
-                            </td>
-                            <td class="px-6 py-3 text-sm text-gray-600">{{ stat.email or "—" }}</td>
-                            <td class="px-6 py-3 text-center">
-                                <span class="inline-flex items-center justify-center bg-blue-50 text-blue-700 text-sm font-semibold px-3 py-1 rounded-full">
-                                    {{ stat.total_requests }}
-                                </span>
-                            </td>
-                            <td class="px-6 py-3 text-sm text-gray-600">
-                                {% if stat.last_seen %}
-                                    {{ stat.last_seen | madrid_dt('%d/%m/%Y %H:%M') }}
-                                {% else %}—{% endif %}
-                            </td>
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="4" class="px-6 py-8 text-center text-gray-400 text-sm">Sin datos todavía</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Log detallado -->
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm">
-            <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-                <h2 class="text-base font-semibold text-gray-700 flex items-center gap-2">
-                    <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-                    </svg>
-                    Registro detallado
-                </h2>
-                <span class="text-xs text-gray-400">Últimos 200 registros</span>
-            </div>
-            <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
-                <table class="w-full">
-                    <thead class="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
-                        <tr>
-                            <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Fecha</th>
-                            <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Usuario</th>
-                            <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">IP</th>
-                            <th class="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Ruta</th>
-                            <th class="text-center px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Método</th>
-                            <th class="text-center px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Estado</th>
-                            <th class="text-right px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tiempo</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-50">
-                        {% for log in logs %}
-                        <tr class="hover:bg-gray-50 transition-colors text-sm">
-                            <td class="px-6 py-3 text-gray-500 whitespace-nowrap">
-                                {{ log.created_at | madrid_dt('%d/%m %H:%M:%S') }}
-                            </td>
-                            <td class="px-6 py-3">
-                                {% if log.user %}
-                                    <span class="font-medium text-gray-800">{{ log.user.full_name }}</span>
-                                {% else %}
-                                    <span class="text-gray-400 italic">Anónimo</span>
-                                {% endif %}
-                            </td>
-                            <td class="px-6 py-3 text-gray-500 font-mono text-xs">{{ log.ip_address or "—" }}</td>
-                            <td class="px-6 py-3 text-gray-700 font-mono text-xs max-w-xs truncate" title="{{ log.path }}">
-                                {{ log.path }}
-                            </td>
-                            <td class="px-6 py-3 text-center">
-                                <span class="inline-block text-xs font-semibold px-2 py-0.5 rounded
-                                    {% if log.method == 'GET' %}bg-gray-100 text-gray-600
-                                    {% elif log.method == 'POST' %}bg-blue-100 text-blue-700
-                                    {% elif log.method == 'DELETE' %}bg-red-100 text-red-700
-                                    {% else %}bg-yellow-100 text-yellow-700{% endif %}">
-                                    {{ log.method }}
-                                </span>
-                            </td>
-                            <td class="px-6 py-3 text-center">
-                                {% if log.status_code %}
-                                <span class="inline-block text-xs font-semibold px-2 py-0.5 rounded
-                                    {% if log.status_code < 300 %}bg-green-100 text-green-700
-                                    {% elif log.status_code < 400 %}bg-blue-100 text-blue-700
-                                    {% elif log.status_code < 500 %}bg-yellow-100 text-yellow-700
-                                    {% else %}bg-red-100 text-red-700{% endif %}">
-                                    {{ log.status_code }}
-                                </span>
-                                {% else %}—{% endif %}
-                            </td>
-                            <td class="px-6 py-3 text-right text-gray-500 text-xs">
-                                {% if log.duration_ms is not none %}
-                                    <span class="{% if log.duration_ms > 1000 %}text-red-500{% elif log.duration_ms > 500 %}text-yellow-600{% else %}text-green-600{% endif %}">
-                                        {{ log.duration_ms }} ms
-                                    </span>
-                                {% else %}—{% endif %}
-                            </td>
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="7" class="px-6 py-8 text-center text-gray-400 text-sm">Sin registros todavía</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
+    <div>
+        <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Actividad de Usuarios</h1>
+        <p class="text-sm text-gray-500 mt-1">
+            Qué ha hecho cada persona en la app: accesos, cambios y consultas de teléfono.
+        </p>
     </div>
+
+    {# ------------------------------------------------------------ Filtros #}
+    <form method="GET" action="/activity-logs" class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 space-y-4" aria-label="Filtros de actividad">
+
+        <div class="flex flex-wrap items-center gap-2">
+            <span class="text-sm font-medium text-gray-700 mr-1">Período</span>
+            {% for key, text in periods %}
+            {% set qs = dict(base_qs, period=key) %}
+            {% set _ = qs.pop("date_from", none) %}{% set _ = qs.pop("date_to", none) %}
+            <a href="/activity-logs?{{ qs | urlencode }}"
+               {% if span.period == key %}aria-current="true"{% endif %}
+               class="inline-flex items-center justify-center h-10 px-4 rounded-xl border text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20 {% if span.period == key %}bg-gray-900 border-gray-900 text-white{% else %}bg-white border-gray-300 text-gray-700 hover:bg-gray-50{% endif %}">
+                {{ text }}
+            </a>
+            {% endfor %}
+            {% if span.period == 'custom' %}
+            {{ ui.badge("Fechas personalizadas", "blue") }}
+            {% endif %}
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+
+            <div>
+                <label for="alFrom" class="{{ label_class }}">Desde</label>
+                <input type="date" id="alFrom" name="date_from" value="{{ filters.date_from }}" class="{{ ui.input_class }}">
+            </div>
+
+            <div>
+                <label for="alTo" class="{{ label_class }}">Hasta</label>
+                <input type="date" id="alTo" name="date_to" value="{{ filters.date_to }}" class="{{ ui.input_class }}">
+            </div>
+
+            <div>
+                <label for="alUser" class="{{ label_class }}">Usuario</label>
+                <select id="alUser" name="user_id" class="{{ ui.input_class }} bg-white">
+                    <option value="">Todos</option>
+                    {% for u in users %}
+                    <option value="{{ u.id }}" {% if filters.user_id == u.id %}selected{% endif %}>{{ u.full_name or u.email }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label for="alKind" class="{{ label_class }}">Mostrar</label>
+                <select id="alKind" name="kind" class="{{ ui.input_class }} bg-white">
+                    {% for key, text in kinds %}
+                    <option value="{{ key }}" {% if filters.kind == key %}selected{% endif %}>{{ text }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label for="alModule" class="{{ label_class }}">Módulo</label>
+                <select id="alModule" name="module" class="{{ ui.input_class }} bg-white">
+                    <option value="">Todos</option>
+                    {% for key, text in modules %}
+                    <option value="{{ key }}" {% if filters.module == key %}selected{% endif %}>{{ text }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label for="alSearch" class="{{ label_class }}">Buscar</label>
+                <input type="search" id="alSearch" name="q" value="{{ filters.q }}" placeholder="Teléfono, nombre, IP…" class="{{ ui.input_class }}">
+            </div>
+
+        </div>
+
+        <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
+            {% if has_filters %}
+            {{ ui.button("Quitar filtros", "secondary", href="/activity-logs", full_mobile=True) }}
+            {% endif %}
+            {{ ui.button("Aplicar filtros", "primary", type="submit", full_mobile=True) }}
+        </div>
+
+    </form>
+
+    {# ------------------------------------------------------------ Indicadores del período #}
+    <section aria-labelledby="alKpisTitle" class="space-y-3">
+        <h2 id="alKpisTitle" class="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Del {{ span.date_from.strftime('%d/%m/%Y') }} al {{ span.date_to.strftime('%d/%m/%Y') }}
+        </h2>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {{ ui.kpi_card("Usuarios activos", kpis.active_users, "gray",
+                           hint=kpis.logins ~ (" inicio de sesión" if kpis.logins == 1 else " inicios de sesión"),
+                           href=href({"kind": "session"}, "#registro"), active=filters.kind == "session") }}
+            {{ ui.kpi_card("Cambios realizados", kpis.changes, "blue",
+                           hint="Altas, ediciones y bajas",
+                           href=href({"kind": "changes"}, "#registro"), active=filters.kind == "changes") }}
+            {{ ui.kpi_card("Consultas de teléfono", kpis.phone_checks, "gray",
+                           hint="Propietarios comprobados",
+                           href=href({"kind": "phone"}, "#registro"), active=filters.kind == "phone") }}
+            {{ ui.kpi_card("Errores", kpis.errors, "red" if kpis.errors else "gray",
+                           hint="Acciones rechazadas o fallidas",
+                           href=href({"kind": "errors"}, "#registro"), active=filters.kind == "errors") }}
+        </div>
+    </section>
+
+    {# ------------------------------------------------------------ Resumen por usuario #}
+    <section class="bg-white rounded-2xl border border-gray-200 overflow-hidden" aria-labelledby="alUsersTitle">
+
+        <div class="px-4 sm:px-6 py-4 border-b border-gray-200">
+            <h2 id="alUsersTitle" class="text-lg font-bold text-gray-900">Resumen por usuario</h2>
+            <p class="text-sm text-gray-500 mt-0.5">Actividad de cada persona en el período. Pulsa un nombre para ver solo lo suyo.</p>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="js-sortable w-full min-w-[720px]">
+                <thead class="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                        <th scope="col" data-sort-type="text" class="{{ th }} cursor-pointer select-none hover:text-gray-900">Usuario <span class="sort-indicator text-gray-400">↕</span></th>
+                        <th scope="col" class="{{ th }}">Última actividad</th>
+                        <th scope="col" data-sort-type="number" class="{{ th_num }} cursor-pointer select-none hover:text-gray-900">Páginas vistas <span class="sort-indicator text-gray-400">↕</span></th>
+                        <th scope="col" data-sort-type="number" class="{{ th_num }} cursor-pointer select-none hover:text-gray-900">Cambios <span class="sort-indicator text-gray-400">↕</span></th>
+                        <th scope="col" data-sort-type="number" class="{{ th_num }} cursor-pointer select-none hover:text-gray-900">Consultas tel. <span class="sort-indicator text-gray-400">↕</span></th>
+                        <th scope="col" data-sort-type="number" class="{{ th_num }} cursor-pointer select-none hover:text-gray-900">Errores <span class="sort-indicator text-gray-400">↕</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stat in user_stats %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50 {% if filters.user_id == stat.user_id %}bg-gray-50{% endif %}">
+                        <td data-sort-value="{{ stat.full_name or stat.email or '' }}" class="px-3 sm:px-6 py-3">
+                            <a href="{{ href({'user_id': stat.user_id}, '#registro') }}" class="flex items-center gap-3 group">
+                                <span class="w-9 h-9 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center text-sm font-semibold shrink-0" aria-hidden="true">{{ (stat.full_name or stat.email or "?")[0] | upper }}</span>
+                                <span class="min-w-0">
+                                    <span class="block text-sm font-medium text-gray-900 group-hover:text-blue-600 truncate">{{ stat.full_name or "Sin nombre" }}</span>
+                                    <span class="block text-xs text-gray-500 truncate">{{ stat.email or "" }}</span>
+                                </span>
+                            </a>
+                        </td>
+                        <td class="px-3 sm:px-4 py-3 text-sm text-gray-700 whitespace-nowrap tabular-nums">{{ stat.last_seen | madrid_dt('%d/%m/%Y %H:%M') }}</td>
+                        <td data-sort-value="{{ stat.views }}" class="px-3 sm:px-4 py-3 text-sm text-gray-700 text-right tabular-nums">{{ stat.views }}</td>
+                        <td data-sort-value="{{ stat.changes }}" class="px-3 sm:px-4 py-3 text-sm text-right tabular-nums {% if stat.changes %}font-medium text-gray-900{% else %}text-gray-500{% endif %}">{{ stat.changes }}</td>
+                        <td data-sort-value="{{ stat.phone_checks }}" class="px-3 sm:px-4 py-3 text-sm text-right tabular-nums {% if stat.phone_checks %}font-medium text-gray-900{% else %}text-gray-500{% endif %}">{{ stat.phone_checks }}</td>
+                        <td data-sort-value="{{ stat.errors }}" class="px-3 sm:px-4 py-3 text-sm text-right tabular-nums {% if stat.errors %}font-medium text-red-600{% else %}text-gray-500{% endif %}">{{ stat.errors }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not user_stats %}
+                    {{ ui.empty_state("Nadie ha usado la app en este período", hint="Prueba con un período más amplio.", colspan=6) }}
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+    </section>
+
+    {# ------------------------------------------------------------ Registro #}
+    <section id="registro" class="bg-white rounded-2xl border border-gray-200 overflow-hidden scroll-mt-20" aria-labelledby="alLogTitle">
+
+        <div class="px-4 sm:px-6 py-4 border-b border-gray-200 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+            <div>
+                <h2 id="alLogTitle" class="text-lg font-bold text-gray-900">Registro de actividad</h2>
+                <p class="text-sm text-gray-500 mt-0.5">
+                    {{ dict(kinds).get(filters.kind) }}{% if filters.kind == 'relevant' %}: sin las peticiones automáticas del navegador{% endif %}.
+                </p>
+            </div>
+            <p class="text-sm text-gray-500">{{ ui.pagination_summary(pagination, "acciones") }}</p>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[900px]">
+                <thead class="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                        <th scope="col" class="{{ th }}">Fecha y hora</th>
+                        <th scope="col" class="{{ th }}">Usuario</th>
+                        <th scope="col" class="{{ th }}">Módulo</th>
+                        <th scope="col" class="{{ th }}">Acción</th>
+                        <th scope="col" class="{{ th }}">Tipo</th>
+                        <th scope="col" class="{{ th }}">Resultado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    {% set log = row.log %}
+                    <tr class="border-b border-gray-100 hover:bg-gray-50 align-top">
+
+                        <td class="px-3 sm:px-4 py-3 whitespace-nowrap tabular-nums">
+                            <span class="block text-sm text-gray-900">{{ log.created_at | madrid_dt('%d/%m/%Y') }}</span>
+                            <span class="block text-xs text-gray-500">{{ log.created_at | madrid_dt('%H:%M:%S') }}</span>
+                        </td>
+
+                        <td class="px-3 sm:px-4 py-3 text-sm whitespace-nowrap">
+                            {% if log.user %}
+                            <a href="{{ href({'user_id': log.user.id}, '#registro') }}" class="font-medium text-gray-900 hover:text-blue-600">{{ log.user.full_name or log.user.email }}</a>
+                            {% else %}
+                            <span class="text-gray-500">Sin sesión</span>
+                            {% endif %}
+                        </td>
+
+                        <td class="px-3 sm:px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{{ row.module }}</td>
+
+                        <td class="px-3 sm:px-4 py-3 w-full min-w-[20rem]">
+                            <p class="text-sm text-gray-900">
+                                {{ row.label }}
+                                {% if row.detail and row.href %}
+                                <a href="{{ row.href }}" class="font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 tabular-nums">{{ row.detail }}</a>
+                                {% elif row.detail %}
+                                <span class="font-medium tabular-nums">{{ row.detail }}</span>
+                                {% endif %}
+                            </p>
+                            {# Dato técnico, por si hay que investigar: método, ruta, IP y tiempo de respuesta #}
+                            <p class="mt-0.5 text-xs text-gray-500 font-mono break-all">
+                                {{ log.method }} {{ log.path.split(' · ')[0] }}{% if log.ip_address %} · {{ log.ip_address }}{% endif %}{% if log.duration_ms is not none %} · {{ log.duration_ms }} ms{% endif %}
+                            </p>
+                        </td>
+
+                        <td class="px-3 sm:px-4 py-3 whitespace-nowrap">{{ ui.badge(row.kind_badge[0], row.kind_badge[1]) }}</td>
+
+                        <td class="px-3 sm:px-4 py-3 whitespace-nowrap">
+                            {% if row.outcome %}
+                            {{ ui.badge(row.outcome[0], row.outcome[1], dot=True) }}
+                            <span class="block mt-0.5 text-xs text-gray-500 tabular-nums">Código {{ log.status_code }}</span>
+                            {% else %}
+                            <span class="text-sm text-gray-500">Correcto</span>
+                            {% endif %}
+                        </td>
+
+                    </tr>
+                    {% endfor %}
+
+                    {% if not rows %}
+                    {% if has_filters %}
+                    {{ ui.empty_state("No hay actividad con estos filtros", hint="Amplía el período o quita algún filtro.", colspan=6) }}
+                    {% else %}
+                    {{ ui.empty_state("Sin actividad en los últimos 7 días", colspan=6) }}
+                    {% endif %}
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        {{ ui.pagination(pagination, request.query_params, param="page", label="acciones", anchor="registro") }}
+
+    </section>
+
 </div>
 
 {% endblock %}

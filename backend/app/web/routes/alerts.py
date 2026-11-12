@@ -28,6 +28,7 @@ from app.core.constants import AlertPriority
 from app.core.constants import AlertStatus
 from app.core.constants import FollowUpActionType
 from app.core.phone import PhoneValidationError, form_matches_stored, phone_display, phone_from_form
+from app.core.phone import whatsapp_url
 from app.db.deps import get_db
 
 from app.models.property_alert import PropertyAlert
@@ -67,6 +68,11 @@ from app.services.company_service import branding_for
 from app.services import alert_assignment_service as assignment
 from app.services import alert_view
 from app.services import buyer_attention_service
+from app.services.buyer_rename import BuyerNameError
+from app.services.property_link import property_public_url
+from app.services.property_link import share_message
+from app.services.buyer_rename import NAME_MAX_LENGTH
+from app.services.buyer_rename import rename_buyer
 from app.services import notification_service
 from app.services.alert_assignment_service import AlertAssignmentError
 # Cola secuencial y ventana de asignación (PLAN_ALERTA_COMO_NUEVA.md): viven en
@@ -1368,6 +1374,10 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
         "property_other_company": False,
         "suggestions_by_company": [],
         "only_active_company": False,
+        # Enviar por WhatsApp desde las tarjetas de la Propuesta
+        # (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): solo si se puede trabajar la alerta
+        "send_action": None,
+        "sent_dates": {},
     }
 
     own_agent = None if admin_view else get_agent_from_user(current_user, db)
@@ -1414,6 +1424,11 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
     ctx["can_manage_search"] = can_manage
     if not can_manage:
         return ctx
+
+    # Último envío de cada propiedad entre los seguimientos que ve el usuario
+    # (el agente, desde su asignación)
+    ctx["send_action"] = f"/alerts/{alert.id}/send-property"
+    ctx["sent_dates"] = sent_dates(follow_ups)
 
     # Pasos en todas las alertas; una con referencia y sin gestión abre en
     # Contactar con su propiedad visible encima. Perfil por defecto solo si
@@ -1686,6 +1701,7 @@ async def alert_detail(
             "attention": attention,
             "upcoming_clocks": upcoming_clocks,
             "RULE_CALLBACK": buyer_attention_service.RULE_CALLBACK,
+            "buyer_name_max_length": NAME_MAX_LENGTH,
             "assignable_groups": (
                 assignment.assignable_agents(db, get_active_company(request).id) if can_reassign else []
             ),
@@ -2296,6 +2312,116 @@ async def link_property_to_alert(
     else:
         set_flash(response, "success", f"{label} asociada a la búsqueda de {alert.lead_name}")
     return response
+
+
+# ---------------------------------------------------------------------------
+# Enviar una propiedad al comprador por WhatsApp (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md)
+# ---------------------------------------------------------------------------
+
+SEND_NO_LINK_MESSAGE = "no tiene enlace en la web: añádelo al editar la propiedad"
+SEND_NO_PHONE_MESSAGE = "El comprador no tiene un teléfono válido para WhatsApp"
+SEND_NO_ALERT_MESSAGE = ("No tienes ninguna alerta con este comprador: el envío se registra en una alerta suya")
+
+
+def sent_dates(follow_ups) -> dict:
+    """{property_id: fecha del último envío} de los «Propiedad enviada» de la lista.
+
+    Pinta "Enviada el dd/mm" en la tarjeta de cada propiedad sugerida.
+    """
+    dates = {}
+    for f in follow_ups:
+        if f.action_type != FollowUpActionType.PROPIEDAD_ENVIADA or not f.property_id or f.created_at is None:
+            continue
+        if f.property_id not in dates or f.created_at > dates[f.property_id]:
+            dates[f.property_id] = f.created_at
+    return dates
+
+
+def _sender_name(current_user, db: Session) -> str:
+    """Nombre con el que se presenta quien envía: el de su ficha de agente o el del usuario."""
+    agent = get_agent_from_user(current_user, db)
+    if agent is not None and (agent.name or "").strip():
+        return agent.name.strip()
+    return (getattr(current_user, "full_name", None) or "").strip()
+
+
+def _send_error(url: str, message: str) -> RedirectResponse:
+    response = RedirectResponse(url=url, status_code=302)
+    set_flash(response, "error", message)
+    return response
+
+
+def _send_property(db: Session, alert: PropertyAlert, property_id: Optional[int], phone, buyer_name,
+                   current_user, back_url: str) -> RedirectResponse:
+    """Lo común de las dos rutas de envío (el permiso sobre `alert` ya está comprobado).
+
+    Misma regla de qué propiedad se puede proponer que /link-property: de
+    cualquier empresa (`_linkable_property`), no archivada y disponible.
+    Además debe tener enlace en la web (`property_public_url`) y el teléfono
+    del comprador debe servir para WhatsApp. Si todo cuadra registra un
+    seguimiento informativo PROPIEDAD_ENVIADA (no es gestión: no toca estado,
+    ni avisos, ni la cola) y responde 303 a wa.me con el mensaje prellenado.
+    Cualquier error: flash y `back_url`, nunca WhatsApp.
+    """
+    prop = _linkable_property(db, property_id) if property_id else None
+    if prop is None:
+        return _send_error(back_url, "Propiedad no encontrada")
+
+    label = property_label(prop, alert.company_id)
+    if not prop.is_available or prop.status == PropertyStatus.ARCHIVED:
+        return _send_error(back_url, f"{label} no está disponible")
+
+    link = property_public_url(prop)
+    if not link:
+        return _send_error(back_url, f"{label} {SEND_NO_LINK_MESSAGE}")
+
+    target = whatsapp_url(phone, share_message(prop, buyer_name, _sender_name(current_user, db)))
+    if not target:
+        return _send_error(back_url, SEND_NO_PHONE_MESSAGE)
+
+    try:
+        db.add(AlertFollowUp(
+            alert_id=alert.id,
+            action_type=FollowUpActionType.PROPIEDAD_ENVIADA,
+            notes=f"Enviada por WhatsApp: {prop.title} — {link}",
+            created_at=datetime.utcnow(),
+            created_by=current_user.id,
+            property_id=prop.id,
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error registrando el envío: alert_id=%s property_id=%s", alert.id, property_id)
+        return _send_error(back_url, "Ocurrió un error al registrar el envío")
+
+    return RedirectResponse(url=target, status_code=303)
+
+
+@router.post("/alerts/{alert_id}/send-property")
+async def send_property_from_alert(
+    alert_id: int,
+    request: Request,
+    property_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db)
+):
+    """Envía una propiedad sugerida al comprador de la alerta por WhatsApp.
+
+    PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.3. Mismo permiso que /link-property
+    (alerta abierta, admin o su agente, no bloqueada por la cola), sin exigir
+    el perfil. Teléfono: `alert.lead_phone`. Ver `_send_property`.
+    """
+    current_user = request.state.user
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
+    if not alert:
+        return _send_error("/alerts", "Alerta no encontrada")
+
+    denied = _search_link_denied(alert, current_user, db)
+    if denied:
+        return _search_denied_response(alert_id, denied)
+
+    buyer_name = alert.lead_name or (alert.buyer.name if alert.buyer is not None else None)
+    return _send_property(db, alert, property_id, alert.lead_phone, buyer_name, current_user,
+                          back_url=f"/alerts/{alert_id}?step=proposal#propuesta")
 
 
 def _safe_back_url(next_url: Optional[str], default: str) -> str:
@@ -3066,6 +3192,27 @@ async def delete_alert(
 # Detalle del comprador y perfil de búsqueda
 # ---------------------------------------------------------------------------
 
+def _buyer_send_alert(db: Session, buyer: Buyer, current_user) -> Optional[PropertyAlert]:
+    """Alerta donde se registra un envío hecho desde la ficha del comprador, o None.
+
+    PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.3: la alerta **abierta** más reciente
+    del comprador que el usuario puede gestionar (admin: cualquiera; agente:
+    las suyas); si no hay abierta, la más reciente cerrada. "Más reciente" por
+    la última asignación, el mismo orden que la pestaña Alertas. None si el
+    usuario no tiene ninguna alerta con ese comprador: la ficha no ofrece el
+    botón y la ruta lo rechaza.
+    """
+    query = db.query(PropertyAlert).filter(PropertyAlert.buyer_id == buyer.id)
+    if not is_admin(current_user):
+        agent = get_agent_from_user(current_user, db)
+        if agent is None:
+            return None
+        query = query.filter(PropertyAlert.agent_id == agent.id)
+    order = (alert_view.assignment_start_expr().desc(), PropertyAlert.id.desc())
+    latest_open = query.filter(PropertyAlert.status.in_(OPEN_ALERT_STATUSES)).order_by(*order).first()
+    return latest_open or query.order_by(*order).first()
+
+
 @router.get("/buyers/{buyer_id}", response_class=HTMLResponse)
 async def buyer_detail(
     buyer_id: int,
@@ -3165,6 +3312,20 @@ async def buyer_detail(
         .all()
     )
 
+    # Enviar por WhatsApp desde "Propiedades compatibles"
+    # (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): solo si el usuario tiene una alerta
+    # del comprador donde registrarlo. "Enviada el …" con los envíos de las
+    # alertas que ve en la pestaña Alertas.
+    send_alert = _buyer_send_alert(db, buyer, current_user) if matching_properties else None
+    buyer_sent_dates = {}
+    if send_alert is not None and buyer_alerts:
+        buyer_sent_dates = sent_dates(
+            db.query(AlertFollowUp).filter(
+                AlertFollowUp.alert_id.in_([a.id for a in buyer_alerts]),
+                AlertFollowUp.action_type == FollowUpActionType.PROPIEDAD_ENVIADA,
+            )
+        )
+
     return templates.TemplateResponse(
         request=request,
         name="buyers/detail.html",
@@ -3198,11 +3359,41 @@ async def buyer_detail(
             # Alquiler sin perfil de comprador: pestañas y resúmenes del perfil ocultos
             "profile_shown": profile_shown,
             "profile_applies": buyer_matching.profile_applies,
+            "send_action": f"/buyers/{buyer.id}/send-property" if send_alert is not None else None,
+            "sent_dates": buyer_sent_dates,
             "tab": tab,
             "AlertStatus": AlertStatus,
             "AlertPriority": AlertPriority,
         }
     )
+
+
+@router.post("/buyers/{buyer_id}/send-property")
+async def send_property_from_buyer(
+    buyer_id: int,
+    request: Request,
+    property_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db)
+):
+    """Envía una propiedad compatible al comprador por WhatsApp desde su ficha.
+
+    PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.3. Teléfono: `buyer.phone`. El
+    registro informativo va a `_buyer_send_alert`; sin alerta del usuario con
+    ese comprador se rechaza. Ver `_send_property`.
+    """
+    current_user = request.state.user
+    buyer = get_buyer_in_company(db, buyer_id, get_active_company(request).id)
+    if not buyer:
+        return _send_error("/alerts", "Comprador no encontrado")
+    if not can_access_buyer(buyer, current_user, db):
+        return _send_error("/alerts", "No tienes acceso a este comprador")
+
+    back_url = f"/buyers/{buyer_id}?tab=matches"
+    alert = _buyer_send_alert(db, buyer, current_user)
+    if alert is None:
+        return _send_error(back_url, SEND_NO_ALERT_MESSAGE)
+
+    return _send_property(db, alert, property_id, buyer.phone, buyer.name, current_user, back_url=back_url)
 
 
 @router.post("/buyers/{buyer_id}/update-contact")
@@ -3250,12 +3441,65 @@ async def update_buyer_contact(
             return response
         buyer.phone = new_phone
 
-    buyer.name = name.strip()
+    # El nombre se propaga a todas sus alertas (PLAN_RENOMBRAR_COMPRADOR.md)
+    try:
+        rename_buyer(db, buyer, name)
+    except BuyerNameError as error:
+        db.rollback()
+        response = RedirectResponse(url=f"/buyers/{buyer_id}", status_code=303)
+        set_flash(response, "error", str(error))
+        return response
     buyer.email = email.strip() if email and email.strip() else None
     db.commit()
 
     response = RedirectResponse(url=f"/buyers/{buyer_id}", status_code=303)
     set_flash(response, "success", "Datos del comprador actualizados correctamente")
+    return response
+
+
+@router.post("/alerts/{alert_id}/rename-buyer")
+async def rename_buyer_from_alert(
+    alert_id: int,
+    request: Request,
+    name: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Corrige el nombre del comprador desde el detalle de la alerta.
+
+    PLAN_RENOMBRAR_COMPRADOR.md: muchos compradores se registran con un nombre
+    provisional ("SN") y se completa al contactarlos. Mismo permiso que ver la
+    alerta (admin o su agente). Actualiza la ficha y todas las alertas del
+    comprador; si la alerta no tiene ficha (`buyer_id` nulo), solo la alerta.
+    """
+    current_user = request.state.user
+    alert = get_alert_in_company(db, alert_id, get_active_company(request).id)
+    if not alert:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Alerta no encontrada")
+        return response
+
+    if not is_admin(current_user):
+        agent = get_agent_from_user(current_user, db)
+        if not agent or alert.agent_id != agent.id:
+            response = RedirectResponse(url="/alerts", status_code=302)
+            set_flash(response, "error", "No tienes permisos para editar esta alerta")
+            return response
+
+    response = RedirectResponse(url=f"/alerts/{alert_id}", status_code=303)
+    try:
+        rename_buyer(db, alert.buyer, name, alert=alert)
+        db.commit()
+    except BuyerNameError as error:
+        db.rollback()
+        set_flash(response, "error", str(error))
+        return response
+    except Exception:
+        db.rollback()
+        logger.exception("Error renombrando comprador: alert_id=%s", alert_id)
+        set_flash(response, "error", "Ocurrió un error al cambiar el nombre")
+        return response
+
+    set_flash(response, "success", f"Nombre actualizado: {alert.lead_name}")
     return response
 
 

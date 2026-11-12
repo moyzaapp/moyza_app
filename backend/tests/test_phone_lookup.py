@@ -4,7 +4,7 @@ Propiedades (app/services/phone_lookup_service.py y GET /properties con
 tab=phone_check).
 
 Reglas: solo coincide el número completo; cuentan las propiedades Activa,
-Reservada y Pausada de las dos empresas; del propietario solo sale el nombre
+Reservada y Pausada de las empresas del usuario; del propietario solo sale el nombre
 enmascarado (ni nombre real, ni email, ni teléfono, ni id); cada consulta
 válida deja `request.state.activity_path` para el registro de actividad.
 
@@ -37,6 +37,7 @@ from app.core.phone import PHONE_ERROR_MESSAGE
 from tests import test_alert_search
 
 BASE_URL = os.getenv("MOYZA_TEST_BASE_URL", "http://localhost:8000")
+ADMIN_EMAIL = os.getenv("MOYZA_TEST_ADMIN_EMAIL", "admin@moyza.com")
 
 
 def _server_up() -> bool:
@@ -78,9 +79,11 @@ def _owner(env, phone=OWNER_PHONE, name=OWNER_NAME, email=OWNER_EMAIL, props=("a
     return client
 
 
-def _lookup(env, phone):
+def _lookup(env, phone, companies=None):
+    """Consulta en las empresas dadas (por defecto las dos, como un admin)."""
     from app.services.phone_lookup_service import lookup_properties_by_phone
-    return lookup_properties_by_phone(env.db, phone)
+    companies = companies if companies is not None else [env.moyza, env.moes]
+    return lookup_properties_by_phone(env.db, phone, [c.id for c in companies])
 
 
 def _titles(rows):
@@ -230,6 +233,22 @@ def test_salen_las_propiedades_de_las_dos_empresas(env):
     ]
 
 
+def test_solo_salen_las_empresas_del_usuario(env):
+    _owner(env, props=("cara", "ana", "moes"))
+
+    assert _titles(_lookup(env, OWNER_PHONE, [env.moyza])) == ["Casa Cara", "Piso Centro"]
+    assert _titles(_lookup(env, OWNER_PHONE, [env.moes])) == ["Piso MOES"]
+    # Sin empresas no hay resultados
+    assert _lookup(env, OWNER_PHONE, []) == []
+
+
+def test_propietario_solo_de_la_otra_empresa_no_se_encuentra(env):
+    _owner(env, props=("moes",))
+
+    assert _lookup(env, OWNER_PHONE, [env.moyza]) == []
+    assert _titles(_lookup(env, OWNER_PHONE, [env.moes])) == ["Piso MOES"]
+
+
 def test_dos_propietarios_con_el_mismo_telefono(env):
     _owner(env, props=("ana",))
     _owner(env, name="Pedro Ruiz", email="pedro@example.com", phone="600 11 22 33", props=("moes",))
@@ -314,34 +333,53 @@ def _activity_path(request):
 def test_ruta_agente_consulta_un_numero_valido(env):
     _owner(env, phone="600 11 22 33", props=("bea", "moes"))
 
-    # Ana (agente de MOYZA) consulta: ve la propiedad de Bea y la de MOES
+    # Ana (agente de MOYZA) consulta: ve la propiedad de Bea, no la de MOES
     request, response = _page(env, env.users["ana"], country_code="34", number="600 11 22 33")
 
     assert response.status_code == 200
     assert response.context["tab"] == "phone_check"
     check = response.context["phone_check"]
-    assert set(check) == {"searched", "error", "phone", "country_code", "local_number", "results"}
+    assert set(check) == {"searched", "error", "phone", "country_code", "local_number", "results",
+                          "company_names"}
+    assert check["company_names"] == ["MOYZA"]
     assert check["searched"] is True
     assert check["error"] is None
     assert check["phone"] == "34600112233"
     assert (check["country_code"], check["local_number"]) == ("34", "600112233")
-    assert _titles(check["results"]) == ["Piso Bea", "Piso MOES"]
+    assert _titles(check["results"]) == ["Piso Bea"]
     assert all(set(row) == RESULT_KEYS for row in check["results"])
     assert check["results"][0]["owner_masked"] == "Mar*** Na*** Ló***"
 
-    assert _activity_path(request) == "/properties?tab=phone_check · tel 34600112233 · 2 propiedades"
+    assert _activity_path(request) == "/properties?tab=phone_check · tel 34600112233 · 1 propiedades"
+    assert "Piso MOES" not in response.body.decode()
 
     # El nombre real y el email del propietario no llegan a la página
     html = response.body.decode()
     assert OWNER_NAME not in html and "Navarro" not in html and OWNER_EMAIL not in html
 
 
-def test_ruta_la_empresa_activa_no_cambia_el_resultado(env):
+def test_ruta_solo_las_empresas_permitidas_del_usuario(env):
     _owner(env, props=("bea", "moes"))
 
-    for user, company in ((env.users["ana"], env.moyza), (env.admin, env.moyza), (env.admin, env.moes)):
-        _request, response = _page(env, user, country_code="34", number="600112233", company=company)
-        assert _titles(response.context["phone_check"]["results"]) == ["Piso Bea", "Piso MOES"]
+    def titles(user, company, allowed):
+        from app.web.routes.properties import properties_page
+        request = test_alert_search._request(env, user, "/properties", company=company)
+        request.state.allowed_companies = allowed
+        response = asyncio.run(properties_page(
+            request, tab="phone_check", filtro="activas", company_id=None,
+            phone_country_code="34", phone_number="600112233",
+            phone_country_code_other=None, db=env.db,
+        ))
+        return _titles(response.context["phone_check"]["results"])
+
+    ana = env.users["ana"]
+    # Agente solo de MOYZA / solo de MOES: lo de su empresa
+    assert titles(ana, env.moyza, [env.moyza]) == ["Piso Bea"]
+    assert titles(ana, env.moes, [env.moes]) == ["Piso MOES"]
+    # Quien puede usar las dos (admin, agente en ambas) ve las dos, sea cual sea la activa
+    both = [env.moyza, env.moes]
+    assert titles(env.admin, env.moyza, both) == ["Piso Bea", "Piso MOES"]
+    assert titles(env.admin, env.moes, both) == ["Piso Bea", "Piso MOES"]
 
 
 def test_ruta_numero_sin_propiedades_tambien_se_registra(env):
@@ -418,6 +456,7 @@ def test_ruta_pestana_sin_numero_no_consulta(env):
         assert response.context["phone_check"] == {
             "searched": False, "error": None, "phone": None,
             "country_code": "34", "local_number": "", "results": [],
+            "company_names": ["MOYZA"],
         }
         assert _activity_path(request) is None
 
@@ -597,10 +636,20 @@ def test_http_la_consulta_queda_en_el_registro_de_actividad(data):
     assert data["owner_name"] not in html
     assert "Propietariosecreto" not in html
     assert f"{data['tag']}-owner@example.com" not in html
+    # La propiedad es de MOES y el agente solo de MOYZA: no la ve
+    assert f"{data['tag']} PROP" not in html
 
     assert _logged_path(data, data["phone"]) == (
-        f"/properties?tab=phone_check · tel {data['phone']} · 1 propiedades"
+        f"/properties?tab=phone_check · tel {data['phone']} · 0 propiedades"
     )
+
+    # El admin (todas las empresas) sí la ve, con MOYZA activa
+    status, html = _Client(ADMIN_EMAIL).get("/properties", {
+        "tab": "phone_check", "phone_country_code": "34", "phone_number": data["local"],
+    })
+    assert status == 200
+    assert f"{data['tag']} PROP" in html
+    assert data["owner_name"] not in html
 
 
 @integration

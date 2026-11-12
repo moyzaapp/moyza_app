@@ -20,10 +20,20 @@
     si la propiedad es de la empresa activa; si es de la otra y el rol la podría ver,
     en su lugar "Cambia de empresa para ver la ficha" (fuera de su empresa la ficha
     da "no encontrada"). Sin él, como antes (sin distintivo).
+  - send_action (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): URL del POST que envía la propiedad
+    al comprador por WhatsApp (/alerts/{id}/send-property o /buyers/{id}/send-property).
+    Con él, debajo de la acción de la tarjeta: botón secundario "Enviar por WhatsApp"
+    (formulario con target="_blank": la pestaña nueva acaba en wa.me; sin data-once, se
+    puede reenviar), enlace "Ver en la web" y, si `sent_at`, "Enviada el dd/mm". El botón
+    no se pinta si la propiedad no tiene enlace (`prop | public_url`, "Sin enlace web") o
+    si `buyer_phone` no sirve para WhatsApp ("Comprador sin teléfono válido"). Al pulsar,
+    ui.js cambia la línea a "Enviada hoy" (la pestaña original no se recarga).
+  - sent_at: fecha (UTC) del último envío de esta propiedad al comprador, o None.
+  - buyer_phone: teléfono del comprador (el de la alerta o el de su ficha).
 #}
 {% import "components/ui_macros.html" as ui %}
 
-{% macro property_card(prop, show_link=False, current=False, active_company_id=None) -%}
+{% macro property_card(prop, show_link=False, current=False, active_company_id=None, send_action=None, sent_at=None, buyer_phone=None) -%}
 {% set other_company = active_company_id is not none and prop.company_id != active_company_id %}
 <article class="bg-white rounded-2xl border {{ 'border-blue-300 ring-2 ring-blue-500/30' if current else 'border-gray-200' }} flex flex-col overflow-hidden">
     <div class="p-4 flex-1 space-y-3">
@@ -64,6 +74,34 @@
         </div>
 
         {% if caller %}<div>{{ caller() }}</div>{% endif %}
+
+        {% if send_action %}
+        {% set web_url = prop | public_url %}
+        {% set phone_ok = (buyer_phone | whatsapp_url) is not none %}
+        <div class="space-y-1" data-send-block>
+            {% if web_url and phone_ok %}
+            <form method="POST" action="{{ send_action }}" target="_blank" data-property-send>
+                <input type="hidden" name="property_id" value="{{ prop.id }}">
+                {% set send_attrs %}aria-label="Enviar por WhatsApp: {{ prop.title }}"{% endset %}
+                {% call ui.button("Enviar por WhatsApp", "secondary", type="submit", extra="w-full", attrs=send_attrs) %}
+                <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z"/></svg>
+                {% endcall %}
+            </form>
+            {% endif %}
+            <div class="flex flex-wrap items-center justify-between gap-x-3 text-xs text-gray-500">
+                {% if web_url %}
+                <a href="{{ web_url }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 min-h-10 font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">
+                    Ver en la web
+                    <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
+                </a>
+                {% else %}
+                <span class="py-1">Sin enlace web</span>
+                {% endif %}
+                {% if not phone_ok %}<span class="py-1">Comprador sin teléfono válido</span>{% endif %}
+                <span class="py-1{{ '' if sent_at else ' hidden' }}" data-sent-label>{% if sent_at %}Enviada el {{ sent_at | madrid_dt('%d/%m') }}{% endif %}</span>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     {% if prop.agent %}

@@ -10,16 +10,17 @@ ya captado. Reglas:
   (`app.core.phone.canonical_phone`), nunca fragmentos.
 - En cartera = status Activa, Reservada o Pausada (PORTFOLIO_STATUSES). No se
   mira `estado_inmueble`: una "No disponible" con status Activa sigue captada.
-- Cruza SIEMPRE las dos empresas, sea cual sea la activa. Es una excepción
-  deliberada al aislamiento por empresa (como "Propiedades de {otra empresa}"):
-  el propietario puede tener el inmueble en la otra marca y eso es justo lo
-  que hay que saber antes de llamarle.
+- Solo responde con propiedades de las empresas del usuario (`company_ids`:
+  las de `request.state.allowed_companies`; el admin, todas). Un agente de
+  MOYZA no ve si el propietario tiene inmuebles con MOES PREMIUM, y al revés.
+  No depende de la empresa activa: quien trabaja en las dos ve las dos.
 - Del propietario solo sale el nombre enmascarado ("Mar*** Na***"). El nombre
   real, el email, el teléfono guardado y el id del cliente no salen del
   servicio: no están en los dicts devueltos.
 """
 import re
 
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from app.core.address import street_only
@@ -85,8 +86,8 @@ def phone_candidates(raw) -> set[str]:
     return {candidate for candidate in candidates if candidate}
 
 
-def lookup_properties_by_phone(db: Session, phone) -> list[dict]:
-    """Propiedades en cartera del propietario con ese teléfono, de las dos empresas.
+def lookup_properties_by_phone(db: Session, phone, company_ids) -> list[dict]:
+    """Propiedades en cartera del propietario con ese teléfono, en las empresas `company_ids`.
 
     `phone` es cualquier valor que `canonical_phone` acepte; si no es
     canónico (incompleto, vacío) devuelve []. Solo coincide el número completo.
@@ -95,7 +96,8 @@ def lookup_properties_by_phone(db: Session, phone) -> list[dict]:
     compara en SQL: se cargan (id, teléfono) de los clientes con alguna
     propiedad en cartera y se comparan en Python con `phone_candidates`.
 
-    No se filtra por empresa a propósito (ver la cabecera del módulo). Las
+    `company_ids` (ids de empresa que el usuario puede usar) es obligatorio:
+    sin empresas no hay resultados. Las
     filas se construyen con `with_entities` sobre columnas explícitas y el
     nombre del propietario se enmascara aquí: el dict no lleva nombre real,
     email, teléfono ni id del cliente.
@@ -106,10 +108,16 @@ def lookup_properties_by_phone(db: Session, phone) -> list[dict]:
     Orden: empresa, título.
     """
     target = canonical_phone(phone)
-    if not target:
+    company_ids = [company_id for company_id in (company_ids or []) if company_id is not None]
+    if not target or not company_ids:
         return []
 
-    in_portfolio = Property.status.in_(PORTFOLIO_STATUSES)
+    # En cartera y de una empresa del usuario: vale para buscar al propietario
+    # y para listar sus propiedades (las de otra empresa no cuentan ni salen)
+    in_portfolio = and_(
+        Property.status.in_(PORTFOLIO_STATUSES),
+        Property.company_id.in_(company_ids),
+    )
 
     owners = (
         db.query(Client.id, Client.phone)

@@ -184,7 +184,8 @@
             {# Propiedad actual (p. ej. la de una alerta con referencia) que no sale entre las sugeridas #}
             {% if alert.property and not current_in_suggestions %}
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {{ property_card(alert.property, show_link=property_link_allowed, current=True, active_company_id=active_company_id) }}
+                {{ property_card(alert.property, show_link=property_link_allowed, current=True, active_company_id=active_company_id,
+                                 send_action=send_action, sent_at=sent_dates.get(alert.property.id), buyer_phone=alert.lead_phone) }}
             </div>
             {% endif %}
 
@@ -212,7 +213,9 @@
                 {% set is_current = alert.property_id == prop.id %}
                 {# Sin enlace "Ver" a la ficha de una propiedad de otro agente (datos del propietario)
                    ni de la otra empresa (la tarjeta lo resuelve con active_company_id) #}
-                {% call property_card(prop, show_link=(is_admin or prop.agent_id == own_agent_id), current=is_current, active_company_id=active_company_id) %}
+                {# Enviar por WhatsApp (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): independiente de asociar #}
+                {% call property_card(prop, show_link=(is_admin or prop.agent_id == own_agent_id), current=is_current, active_company_id=active_company_id,
+                                      send_action=send_action, sent_at=sent_dates.get(prop.id), buyer_phone=alert.lead_phone) %}
                     {% if not is_current %}
                     <form method="POST" action="/alerts/{{ alert.id }}/link-property" data-once data-loading-text="Asociando…">
                         <input type="hidden" name="property_id" value="{{ prop.id }}">

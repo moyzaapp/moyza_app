@@ -43,6 +43,8 @@ from app.models.agent import Agent
 from app.models.closing import Closing
 from app.models.property import Property
 from app.models.property_alert import PropertyAlert
+from app.services import closing_service
+from app.services.closing_service import ClosingError
 from app.services.company_scope import get_agent_in_company
 from app.services.company_scope import scope_active_agents
 from app.services.company_scope import scope_agents
@@ -176,11 +178,49 @@ def _closings_year(year: str, today: date) -> int:
     return today.year
 
 
+def closing_operations(closings) -> list:
+    """Agrupa los registros en operaciones: un cierre compartido (mismo `pair_key`) es una sola.
+
+    Conserva el orden de `closings`. Cada operación es un dict con `closing`
+    (el registro del Agente 1, el de id menor), `partner` (el del Agente 2 o
+    None) y `partner_name` (nombre del otro agente; PLAN_CIERRES_DOS_AGENTES.md).
+    """
+    operations = []
+    by_pair = {}
+    for closing in closings:
+        if closing.pair_key and closing.pair_key in by_pair:
+            operation = by_pair[closing.pair_key]
+            if closing.id < operation["closing"].id:
+                operation["closing"], operation["partner"] = closing, operation["closing"]
+            else:
+                operation["partner"] = closing
+            continue
+        operation = {"closing": closing, "partner": None}
+        operations.append(operation)
+        if closing.pair_key:
+            by_pair[closing.pair_key] = operation
+    for operation in operations:
+        main, partner = operation["closing"], operation["partner"]
+        if partner is not None and partner.agent is not None:
+            operation["partner_name"] = partner.agent.name
+        elif main.shared_with_agent is not None:
+            operation["partner_name"] = main.shared_with_agent.name
+        else:
+            operation["partner_name"] = None
+        operation["shared"] = bool(main.pair_key)
+    return operations
+
+
 def closings_context(db: Session, company_id: int, year: int, today: date) -> dict:
-    """Cierres del año en la empresa (más reciente primero) y opciones del modal de alta."""
+    """Cierres del año en la empresa (más reciente primero) y opciones del modal de alta.
+
+    El listado y los totales de cabecera son por operación: un cierre
+    compartido por dos agentes es una fila y cuenta 1 (en la métrica cuenta 1
+    a cada agente)."""
     closings = (
         db.query(Closing)
-        .options(joinedload(Closing.agent), joinedload(Closing.property), joinedload(Closing.creator))
+        .options(joinedload(Closing.agent), joinedload(Closing.shared_with_agent),
+                 joinedload(Closing.property), joinedload(Closing.creator))
         .filter(
             Closing.company_id == company_id,
             Closing.closed_on >= date(year, 1, 1),
@@ -206,15 +246,17 @@ def closings_context(db: Session, company_id: int, year: int, today: date) -> di
         .order_by(Property.title.asc(), Property.id.asc())
         .all()
     ]
+    operations = closing_operations(closings)
     return {
-        "closings": closings,
+        "closings": operations,
         "closings_year": year,
         "closings_prev_year": year - 1 if year > MIN_PERIOD_YEAR else None,
         "closings_next_year": year + 1 if year < today.year else None,
         "closings_totals": {
-            "total": len(closings),
-            "venta": sum(1 for c in closings if c.business_type == BusinessType.VENTA),
-            "alquiler": sum(1 for c in closings if c.business_type == BusinessType.ALQUILER),
+            "total": len(operations),
+            "venta": sum(1 for op in operations if op["closing"].business_type == BusinessType.VENTA),
+            "alquiler": sum(1 for op in operations if op["closing"].business_type == BusinessType.ALQUILER),
+            "shared": sum(1 for op in operations if op["shared"]),
         },
         "closing_agents": scope_active_agents(db.query(Agent), company_id).order_by(Agent.name.asc()).all(),
         "closing_properties": properties,
@@ -369,10 +411,12 @@ METRIC_CSV_COLUMNS = {
         ("Enlace", lambda r: f"/properties/{r['property_id']}"),
     ),
     # Cierres registrados a mano (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1):
-    # fecha sin hora y propiedad opcional
+    # fecha sin hora y propiedad opcional; "Con" es el otro agente si es compartido
     "cierres": (
         ("Fecha de cierre", lambda r: _csv_day(r["date"])),
         ("Operación", lambda r: KIND_LABELS[r["kind"]]),
+        # Cierre compartido (PLAN_CIERRES_DOS_AGENTES.md): el otro agente
+        ("Con", lambda r: r.get("shared_with") or ""),
         ("Propiedad", lambda r: _csv_property(r, empty="")),
         ("Ciudad", lambda r: r["property_city"] or ""),
         ("Nota", lambda r: r["notes"] or ""),
@@ -643,14 +687,17 @@ def _parse_int(raw) -> int:
 async def create_closing(
     request: Request,
     agent_id: str = Form(""),
+    agent_id_2: str = Form(""),
     closed_on: str = Form(""),
     business_type: str = Form(""),
     property_id: str = Form(""),
     notes: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    """Registra un cierre: agente activo de la empresa, fecha no futura, Venta / Alquiler,
-    propiedad opcional de la empresa y nota. Refresca los snapshots congelados."""
+    """Registra un cierre: agente activo de la empresa (y un Agente 2 opcional si
+    cerraron entre dos), fecha no futura, Venta / Alquiler, propiedad opcional
+    de la empresa y nota. Refresca los snapshots congelados
+    (`closing_service.create_closing`)."""
     current_user = request.state.user
     if not is_admin(current_user):
         return _forbidden_redirect("Solo administradores pueden registrar cierres")
@@ -659,12 +706,14 @@ async def create_closing(
     today = madrid_today()
 
     agent_pk = _parse_int(agent_id)
-    agent = (
-        scope_active_agents(db.query(Agent), company_id).filter(Agent.id == agent_pk).first()
-        if agent_pk else None
-    )
-    if agent is None:
+    if agent_pk is None:
         return _closing_redirect("error", "Elige un agente activo de la empresa")
+    agent_ids = [agent_pk]
+    if (agent_id_2 or "").strip():
+        second_pk = _parse_int(agent_id_2)
+        if second_pk is None:
+            return _closing_redirect("error", "Elige un agente activo de la empresa como Agente 2")
+        agent_ids.append(second_pk)
 
     try:
         closed_day = datetime.strptime((closed_on or "").strip(), "%Y-%m-%d").date()
@@ -675,39 +724,28 @@ async def create_closing(
     if closed_day.year < MIN_PERIOD_YEAR:
         return _closing_redirect("error", "La fecha del cierre no es válida")
 
-    if not BusinessType.is_valid(business_type):
-        return _closing_redirect("error", "Indica si el cierre es de Venta o de Alquiler")
-
-    prop = None
+    prop_pk = None
     if (property_id or "").strip():
         prop_pk = _parse_int(property_id)
-        prop = (
-            scope_properties(db.query(Property), company_id).filter(Property.id == prop_pk).first()
-            if prop_pk else None
-        )
-        if prop is None:
+        if prop_pk is None:
             return _closing_redirect("error", "La propiedad no pertenece a la empresa activa")
 
-    closing = Closing(
-        company_id=company_id,
-        agent_id=agent.id,
-        business_type=business_type,
-        closed_on=closed_day,
-        property_id=prop.id if prop else None,
-        notes=(notes or "").strip() or None,
-        created_by=current_user.id,
-    )
     try:
-        db.add(closing)
-        db.commit()
-        PerformanceReportService(db, company_id).refresh_closings_snapshot(agent.id, closed_day)
+        closings = closing_service.create_closing(
+            db, company_id, agent_ids, business_type, closed_day,
+            property_id=prop_pk, notes=notes, created_by=current_user.id,
+        )
+    except ClosingError as e:
+        db.rollback()
+        return _closing_redirect("error", str(e))
     except Exception:
         db.rollback()
-        logger.exception("Error registrando cierre: agent_id=%s", agent.id)
+        logger.exception("Error registrando cierre: agent_ids=%s", agent_ids)
         return _closing_redirect("error", "Error al registrar el cierre", closed_day.year)
 
+    names = " y ".join(c.agent.name for c in closings)
     return _closing_redirect(
-        "success", f"Cierre de {agent.name} registrado ({closed_day.strftime('%d/%m/%Y')})", closed_day.year,
+        "success", f"Cierre de {names} registrado ({closed_day.strftime('%d/%m/%Y')})", closed_day.year,
     )
 
 
@@ -717,30 +755,24 @@ async def delete_closing(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    """Borra un cierre; si es compartido, también el registro del otro agente."""
     current_user = request.state.user
     if not is_admin(current_user):
         return _forbidden_redirect("Solo administradores pueden borrar cierres")
 
     company_id = get_active_company(request).id
-    closing = (
-        db.query(Closing)
-        .filter(Closing.id == closing_id, Closing.company_id == company_id)
-        .first()
-    )
-    if closing is None:
-        return _closing_redirect("error", "Cierre no encontrado en la empresa activa")
-
-    agent_id, closed_day = closing.agent_id, closing.closed_on
     try:
-        db.delete(closing)
-        db.commit()
-        PerformanceReportService(db, company_id).refresh_closings_snapshot(agent_id, closed_day)
+        deleted = closing_service.delete_closing(db, company_id, closing_id)
+    except ClosingError as e:
+        db.rollback()
+        return _closing_redirect("error", str(e))
     except Exception:
         db.rollback()
         logger.exception("Error borrando cierre: closing_id=%s", closing_id)
-        return _closing_redirect("error", "Error al borrar el cierre", closed_day.year)
+        return _closing_redirect("error", "Error al borrar el cierre")
 
-    return _closing_redirect("success", "Cierre eliminado", closed_day.year)
+    message = "Cierre eliminado a los dos agentes" if deleted.shared else "Cierre eliminado"
+    return _closing_redirect("success", message, deleted.closed_on.year)
 
 
 # ---------------------------------------------------------------------------
