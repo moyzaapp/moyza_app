@@ -85,6 +85,17 @@ cualquier propiedad, sea de MOYZA o de MOES PREMIUM, independientemente de su em
 - **Fase D — métrica, docs y tests**: explicación de la lupa, MULTIEMPRESA_MOYZA_MOES.md §16,
   tests de ruta y móvil.
 
-## 5. Estado
+## 5. Decisiones (respuestas del usuario, 2026-11-12)
 
-Pendiente de respuestas.
+1. Marca de la ficha: la agencia del agente, con "Inmueble comercializado por {otra empresa}".
+2. Visibilidad para la empresa de la propiedad: lo recomendado (ficha de la propiedad y
+   `/visits` del admin, solo lectura, marcada como "de {empresa}").
+3. Calle: lo recomendado (regla de Propiedades en selector y formulario; siempre en el PDF).
+4. Selector: todo el inventario activo y disponible **de todas las empresas**, no solo la activa
+   y "la otra": una sección por empresa.
+
+## 6. Estado
+
+Pendiente de ejecutar. Se coordina con PLAN_VISTA_UNIFICADA_AGENTES.md (el agente no cambia de
+empresa): el selector de propiedad y el listado de visitas del agente se diseñan ya sobre
+"todas mis empresas".
