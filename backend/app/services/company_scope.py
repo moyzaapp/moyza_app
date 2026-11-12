@@ -12,7 +12,12 @@ Punto único para restringir consultas a la empresa activa. Reglas:
   alertas desde PLAN_ALERTA_SIN_REFERENCIA.md: una búsqueda general puede no
   tener propiedad todavía).
 - `agents` y `clients` pertenecen a N empresas (tablas de pertenencia).
-- Visitas, informes y logs heredan la empresa de su propiedad.
+- `property_visits` tiene `company_id` propio (PLAN_VISITAS_OTRA_EMPRESA.md):
+  la empresa desde la que se registra, que puede no ser la de la propiedad.
+  `scope_visits` filtra por esa columna (lo que la empresa gestiona y cuenta
+  en "Hojas de visita"); `scope_visible_visits` añade las visitas que otras
+  empresas registraron a sus propiedades (solo lectura).
+- Informes y logs heredan la empresa de su propiedad.
 
 Se usan EXISTS (`.has()` / `.any()`) en lugar de JOIN para que el filtro
 se pueda añadir a cualquier consulta sin chocar con joins ya existentes.
@@ -107,7 +112,25 @@ def scope_alerts(query, company_id: CompanyIds):
 
 
 def scope_visits(query, company_id: CompanyIds):
-    return query.filter(PropertyVisit.property.has(company_match(Property.company_id, company_id)))
+    """Visitas registradas en la empresa (columna propia de la visita)."""
+    return query.filter(company_match(PropertyVisit.company_id, company_id))
+
+
+def visible_visit_clause(company_id: CompanyIds):
+    """Cláusula: visitas de la empresa o a propiedades de la empresa.
+
+    Las segundas (registradas por otra empresa a una propiedad suya) se ven
+    en solo lectura (PLAN_VISITAS_OTRA_EMPRESA.md §5, decisión 2).
+    """
+    return or_(
+        company_match(PropertyVisit.company_id, company_id),
+        PropertyVisit.property.has(company_match(Property.company_id, company_id)),
+    )
+
+
+def scope_visible_visits(query, company_id: CompanyIds):
+    """Visitas que la empresa ve: las suyas y las de otras a sus propiedades."""
+    return query.filter(visible_visit_clause(company_id))
 
 
 def scope_reports(query, company_id: CompanyIds):
@@ -163,7 +186,8 @@ def property_in_company(property_item, company_id: CompanyIds) -> bool:
 def child_in_company(obj, company_id: CompanyIds) -> bool:
     """Para alertas, visitas e informes.
 
-    Las alertas tienen empresa propia (pueden no tener propiedad); visitas e
+    Alertas y visitas tienen empresa propia (la alerta puede no tener
+    propiedad; la visita puede ser a una propiedad de otra empresa); los
     informes heredan la de su propiedad.
     """
     if obj is None:
@@ -219,8 +243,18 @@ def get_alert_in_company(db: Session, alert_id: int, company_id: CompanyIds):
 
 
 def get_visit_in_company(db: Session, visit_id: int, company_id: CompanyIds):
+    """Visita registrada en la empresa (para gestionarla: editar, firmar...)."""
     return (
         scope_visits(db.query(PropertyVisit), company_id)
+        .filter(PropertyVisit.id == visit_id)
+        .first()
+    )
+
+
+def get_visible_visit(db: Session, visit_id: int, company_id: CompanyIds):
+    """Visita de la empresa o a una propiedad suya (solo lectura: descargar)."""
+    return (
+        scope_visible_visits(db.query(PropertyVisit), company_id)
         .filter(PropertyVisit.id == visit_id)
         .first()
     )

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "components/phone_macros.html" as phone %}
+{% import "components/ui_macros.html" as ui %}
 
 {% block title %}
 Registrar visita
@@ -49,6 +50,15 @@ Registrar visita
         method="POST"
         class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"
     >
+
+        {# Empresa de la visita: solo un agente en vista unificada con varias empresas
+           la elige (PLAN_VISITAS_OTRA_EMPRESA.md, fase A); la principal va preseleccionada.
+           La ficha se emite con la marca de esta empresa. #}
+        {% if visit_company_choices %}
+        <div class="sm:col-span-2">
+            {{ ui.select(visit_company_field, "Empresa de la visita", visit_company_choices, value=visit_company.id, required=True, empty=None, help="La ficha de visita se emite con la marca de esta empresa y la visita cuenta en ella.", id="visitCompany") }}
+        </div>
+        {% endif %}
 
         <div>
 
