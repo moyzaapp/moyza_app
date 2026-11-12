@@ -238,8 +238,8 @@ def _phone_check(db, country_code, number, other_code, companies=()) -> dict:
     """Contexto `phone_check` de la pestaña "Consultar teléfono".
 
     Compone el número con los campos del macro `phone_field("phone_")` y
-    consulta las propiedades en cartera de ese propietario en `companies`, las
-    empresas del usuario (`lookup_properties_by_phone`). Forma, siempre la misma:
+    consulta las propiedades en cartera de ese propietario en `companies`, la
+    empresa activa (`lookup_properties_by_phone`). Forma, siempre la misma:
 
         {"searched", "error", "phone", "country_code", "local_number", "results",
          "company_names"}
@@ -345,12 +345,13 @@ async def properties_page(
         tab = "others" if (tab == "others" and show_others_tab) else "mine"
 
     # "Consultar teléfono": propiedades en cartera del propietario con ese
-    # teléfono, solo en las empresas del usuario (`allowed_companies`: las de
-    # su usuario y su ficha de agente; el admin, todas), no solo en la activa.
+    # teléfono, solo en la empresa activa (la del selector; el agente de una
+    # sola empresa queda fijado a la suya). Trabajando en MOES no salen
+    # propiedades de MOYZA, y al revés, también para el admin.
     # Sin datos del cliente, ver phone_lookup_service. Cada consulta
     # válida queda en el registro de actividad: ActivityMiddleware guarda
     # `request.state.activity_path` en lugar de la ruta.
-    phone_companies = list(getattr(request.state, "allowed_companies", None) or [company])
+    phone_companies = [company]
     if tab == "phone_check":
         phone_check = _phone_check(
             db, phone_country_code, phone_number, phone_country_code_other, phone_companies

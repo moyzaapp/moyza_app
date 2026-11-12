@@ -10,10 +10,9 @@ ya captado. Reglas:
   (`app.core.phone.canonical_phone`), nunca fragmentos.
 - En cartera = status Activa, Reservada o Pausada (PORTFOLIO_STATUSES). No se
   mira `estado_inmueble`: una "No disponible" con status Activa sigue captada.
-- Solo responde con propiedades de las empresas del usuario (`company_ids`:
-  las de `request.state.allowed_companies`; el admin, todas). Un agente de
-  MOYZA no ve si el propietario tiene inmuebles con MOES PREMIUM, y al revés.
-  No depende de la empresa activa: quien trabaja en las dos ve las dos.
+- Solo responde con propiedades de `company_ids`; la ruta pasa la empresa
+  activa. Trabajando en MOES PREMIUM no salen inmuebles de MOYZA, y al revés,
+  también para el admin y para quien está en las dos empresas.
 - Del propietario solo sale el nombre enmascarado ("Mar*** Na***"). El nombre
   real, el email, el teléfono guardado y el id del cliente no salen del
   servicio: no están en los dicts devueltos.
