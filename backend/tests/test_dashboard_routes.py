@@ -112,6 +112,8 @@ def setup():
     ]
     for user in users:
         user.companies.append(moyza)
+    # El captador trabaja en las dos empresas: el acceso sale del usuario, no de la ficha
+    users[0].companies.append(moes)
     db.add_all([owner, visitor, *users])
     db.flush()
     moyza_prop = Property(title=f"{TAG} PROP MOYZA", company_id=moyza.id, agent_id=owner.id,

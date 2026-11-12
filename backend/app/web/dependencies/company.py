@@ -9,8 +9,12 @@ resultado desde `request.state`:
 
 Regla de resolución:
 1. Admin: todas las empresas activas.
-2. Resto: las empresas del usuario (`user_companies`) más las de su ficha
-   de agente (`agent_companies`, enlazada por email).
+2. Resto: solo las empresas marcadas en su usuario (`user_companies`, lo que
+   se ve en la pantalla Usuarios). Las de su ficha de agente
+   (`agent_companies`) NO cuentan por ahora: asignarle una alerta de la otra
+   empresa añade esa empresa a la ficha (`alert_assignment_service.assign`) y
+   le abría el selector sin que nadie lo hubiera configurado. Medida
+   provisional (2026-11-12) hasta corregir esa asignación.
 3. Si la cookie `active_company` apunta a una empresa permitida, esa es la
    activa. Si no, la primera permitida (MOYZA por defecto).
 """
@@ -21,7 +25,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
 
 from app.core.constants import CompanyCode
-from app.models.agent import Agent
 from app.models.company import Company
 from app.models.user import User
 
@@ -47,16 +50,8 @@ def get_allowed_companies(user: User, db: Session) -> list[Company]:
     if _is_admin(user):
         return active
 
+    # Solo las del usuario; las de la ficha de agente no dan acceso (ver cabecera)
     allowed_ids = {c.id for c in user.companies}
-
-    agent = (
-        db.query(Agent)
-        .options(joinedload(Agent.companies))
-        .filter(Agent.email == user.email)
-        .first()
-    )
-    if agent:
-        allowed_ids.update(c.id for c in agent.companies)
 
     allowed = [c for c in active if c.id in allowed_ids]
 
