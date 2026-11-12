@@ -95,6 +95,8 @@
 
                 <td data-sort-value="{{ property.title or '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
                     {{ property.title }}
+                    {# Vista unificada con varias empresas: de qué empresa es (fase D) #}
+                    {% if show_company_badges %}<div>{{ ui.company_badge(property.company, extra="mt-1 whitespace-nowrap") }}</div>{% endif %}
                 </td>
 
                 <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
@@ -180,6 +182,7 @@
 
                     <button
                         data-id="{{ property.id }}"
+                        data-company-id="{{ property.company_id }}"
                         data-title="{{ (property.title or '')|e }}"
                         data-price="{{ property.price if property.price is not none else '' }}"
                         data-moneda="{{ (property.moneda or 'EUR')|e }}"

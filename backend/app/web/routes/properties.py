@@ -51,7 +51,9 @@ from app.services.phone_lookup_service import lookup_properties_by_phone
 from app.services.property_metrics import PropertyMetricsService
 from app.services.property_link import build_public_url, clean_public_url
 from app.web.dependencies.company import get_active_company
+from app.web.dependencies.company import get_allowed_companies_from_request
 from app.web.dependencies.company import get_company_ids
+from app.web.dependencies.company import is_unified_view
 from app.services.report_generator import generate_property_report
 from app.web.utils.flash import set_flash
 from app.web.utils.property_form import extract_fields
@@ -235,6 +237,18 @@ def _readonly_property_rows(query, search: str, include_address: bool = True) ->
     return result
 
 
+def _work_companies(request: Request, db: Session, company_ids) -> list:
+    """Empresas (objetos) de `company_ids`, en orden de id (MOYZA primero).
+
+    Salen de `request.state.allowed_companies` (ya cargadas por el
+    middleware); si la petición no las trae, de la BD.
+    """
+    allowed = [c for c in get_allowed_companies_from_request(request) if c.id in company_ids]
+    if len(allowed) == len(set(company_ids)):
+        return sorted(allowed, key=lambda c: c.id)
+    return db.query(Company).filter(Company.id.in_(company_ids)).order_by(Company.id).all()
+
+
 def _phone_check(db, country_code, number, other_code, companies=()) -> dict:
     """Contexto `phone_check` de la pestaña "Consultar teléfono".
 
@@ -307,6 +321,14 @@ async def properties_page(
 
     current_user = request.state.user
     company = get_active_company(request)
+    # Empresas con las que trabaja (PLAN_VISTA_UNIFICADA_AGENTES.md, fase D):
+    # la activa para el admin y la vista por empresa; todas las suyas en la
+    # vista unificada del agente
+    company_ids = get_company_ids(request)
+    work_companies = _work_companies(request, db, company_ids)
+    # Vista unificada con varias empresas: distintivo en "Mis propiedades" y
+    # una pestaña "Resto de {empresa}" por cada una
+    multi_company = is_unified_view(request) and len(company_ids) > 1
 
     # Filtro por tarjeta: 'activas' (por defecto) | 'no_disponible'.
     # Por ahora no se ofrece una vista con todas las propiedades.
@@ -324,35 +346,44 @@ async def properties_page(
     show_others_tab = not admin_view and agent is not None
 
     # "Propiedades de {otra empresa}": inventario activo y disponible de las
-    # demás empresas activas, visible para todos los roles. Es la única
-    # excepción al aislamiento por empresa y se limita a este listado de solo
-    # lectura (sin propietario, sin enlace al detalle, sin visitas ni edición).
+    # demás empresas activas (las que no son de trabajo), visible para todos
+    # los roles. Es la única excepción al aislamiento por empresa y se limita
+    # a este listado de solo lectura (sin propietario, sin enlace al detalle,
+    # sin visitas ni edición). Un agente unificado en MOYZA y MOES no tiene
+    # ninguna: las dos son suyas y salen como "Resto de {empresa}".
     other_companies = (
         db.query(Company)
-        .filter(Company.is_active.is_(True), Company.id != company.id)
+        .filter(Company.is_active.is_(True), Company.id.notin_(company_ids))
         .order_by(Company.id)
         .all()
     )
 
+    selected_other_company = None
+    # Empresa de la pestaña "Resto" seleccionada (solo con varias empresas)
+    selected_others_company = None
     if tab == "other_company" and other_companies:
         selected_other_company = next(
             (c for c in other_companies if c.id == company_id), other_companies[0]
         )
     elif tab == "phone_check":
         # "Consultar teléfono": visible para todos los roles
-        selected_other_company = None
+        pass
     else:
-        selected_other_company = None
         tab = "others" if (tab == "others" and show_others_tab) else "mine"
+        if tab == "others" and multi_company:
+            selected_others_company = next(
+                (c for c in work_companies if c.id == company_id), work_companies[0]
+            )
 
     # "Consultar teléfono": propiedades en cartera del propietario con ese
-    # teléfono, solo en la empresa activa (la del selector; el agente de una
-    # sola empresa queda fijado a la suya). Trabajando en MOES no salen
+    # teléfono, solo en las empresas de trabajo: la activa (la del selector;
+    # el agente de una sola empresa queda fijado a la suya) o, en la vista
+    # unificada, todas las del agente. Trabajando en MOES no salen
     # propiedades de MOYZA, y al revés, también para el admin.
     # Sin datos del cliente, ver phone_lookup_service. Cada consulta
     # válida queda en el registro de actividad: ActivityMiddleware guarda
     # `request.state.activity_path` en lugar de la ruta.
-    phone_companies = [company]
+    phone_companies = work_companies
     if tab == "phone_check":
         phone_check = _phone_check(
             db, phone_country_code, phone_number, phone_country_code_other, phone_companies
@@ -367,10 +398,11 @@ async def properties_page(
         )
 
     # Si es admin, mostrar todas las propiedades de la empresa activa
-    # Si es agente, mostrar solo sus propiedades
+    # Si es agente, mostrar solo sus propiedades (de todas sus empresas en la
+    # vista unificada)
     base_query = scope_properties(
         db.query(Property).filter(Property.status != PropertyStatus.ARCHIVED),
-        company.id
+        company_ids
     )
 
     if not admin_view:
@@ -380,16 +412,28 @@ async def properties_page(
             # Si no es admin y no tiene agente asociado, no mostrar nada
             base_query = base_query.filter(Property.id == -1)
 
-    # Selectores del formulario: solo clientes y agentes de la empresa activa
-    clients = scope_clients(db.query(Client), company.id).order_by(Client.name).all()
+    # Selectores del formulario: solo clientes y agentes de las empresas de
+    # trabajo. Con varias, cada opción lleva sus empresas (`data-companies`) y
+    # el formulario solo deja elegir los de la empresa de la propiedad
+    clients = (
+        scope_clients(db.query(Client), company_ids)
+        .options(joinedload(Client.companies))
+        .order_by(Client.name)
+        .all()
+    )
 
     # Captador: solo agentes activos (PLAN_BAJA_USUARIOS.md §4.3). Los dados de
     # baja que aún figuran como captador de alguna propiedad del listado se
     # añaden para que editar no les quite la propiedad: el formulario los
     # pinta con "(baja)" y solo los muestra al editar esa propiedad.
-    agents = scope_active_agents(db.query(Agent), company.id).order_by(Agent.name).all()
+    agents = (
+        scope_active_agents(db.query(Agent), company_ids)
+        .options(joinedload(Agent.companies))
+        .order_by(Agent.name)
+        .all()
+    )
     inactive_owners = (
-        scope_agents(db.query(Agent), company.id)
+        scope_agents(db.query(Agent), company_ids)
         .filter(
             Agent.is_active.is_(False),
             Agent.id.in_(base_query.with_entities(Property.agent_id)),
@@ -459,19 +503,32 @@ async def properties_page(
         ).all()
 
     # "Resto de propiedades": inventario activo de la empresa que NO está
-    # asociado al agente logueado (sin datos del propietario).
+    # asociado al agente logueado (sin datos del propietario). Con varias
+    # empresas (vista unificada), una pestaña "Resto de {empresa}" por cada
+    # una, con su contador; filas solo de la seleccionada.
     other_properties = []
     other_count = 0
+    others_tabs = []
 
-    if show_others_tab:
-        others_base = scope_properties(
+    def others_query(others_company_id):
+        return scope_properties(
             db.query(Property).filter(
                 Property.status == PropertyStatus.ACTIVE,
                 Property.available_clause(),
                 or_(Property.agent_id != agent.id, Property.agent_id.is_(None)),
             ),
-            company.id
+            others_company_id
         )
+
+    if show_others_tab and multi_company:
+        for work_company in work_companies:
+            others_base = others_query(work_company.id)
+            others_tabs.append({"id": work_company.id, "name": work_company.name, "count": others_base.count()})
+            if selected_others_company is not None and work_company.id == selected_others_company.id:
+                other_properties = _readonly_property_rows(others_base, search)
+        other_count = sum(t["count"] for t in others_tabs)
+    elif show_others_tab:
+        others_base = others_query(company_ids)
         other_count = others_base.count()
 
         if tab == "others":
@@ -535,6 +592,9 @@ async def properties_page(
             "company_name": company.name,
             "other_company_tabs": other_company_tabs,
             "selected_other_company": selected_other_company,
+            "others_tabs": others_tabs,
+            "selected_others_company": selected_others_company,
+            "multi_company": multi_company,
             "readonly_address_visible": readonly_address_visible,
             "phone_check": phone_check,
         }
@@ -660,16 +720,18 @@ async def update_property(
         set_flash(response, "error", field_errors[0] if field_errors else public_url_error)
         return response
 
-    company = get_active_company(request)
-
-    property = get_property_in_company(db, property_id, company.id)
+    # La propiedad, en cualquiera de las empresas de trabajo (vista unificada:
+    # también la de la empresa que no es la principal). Editar no cambia su
+    # empresa: cliente y captador tienen que ser de la empresa de la propiedad
+    property = get_property_in_company(db, property_id, get_company_ids(request))
 
     if not property:
         response = RedirectResponse(url="/properties", status_code=302)
         set_flash(response, "error", "Propiedad no encontrada")
         return response
 
-    # El cliente y el agente deben pertenecer a la empresa activa
+    company = property.company
+
     if not get_client_in_company(db, client_id, company.id):
         response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
         set_flash(response, "error", f"El cliente seleccionado no pertenece a {company.name}")
@@ -1059,17 +1121,18 @@ async def properties_last_update(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Última actividad sobre propiedades de la empresa activa: precio, estado o cambio."""
-    from app.web.dependencies.company import get_api_user, resolve_company_for_api
+    """Última actividad sobre propiedades de las empresas de trabajo: precio, estado o cambio."""
+    from app.services.company_scope import company_match
+    from app.web.dependencies.company import get_api_user, resolve_company_ids_for_api
 
-    # Las rutas /api no pasan por AuthMiddleware: resolver usuario y empresa aquí
+    # Las rutas /api no pasan por AuthMiddleware: resolver usuario y empresas aquí
     user = get_api_user(request, db)
-    company = resolve_company_for_api(request, user, db) if user else None
+    company_ids = resolve_company_ids_for_api(request, user, db) if user else []
 
-    if company is None:
+    if not company_ids:
         return JSONResponse({"last_update": None})
 
-    in_company = Property.company_id == company.id
+    in_company = company_match(Property.company_id, company_ids)
 
     t1 = (
         db.query(func.max(PropertyPriceHistory.created_at))

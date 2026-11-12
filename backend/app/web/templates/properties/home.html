@@ -101,16 +101,29 @@ Propiedades
 
 {% import "components/ui_macros.html" as ui %}
 
-{# La barra se pinta siempre: "Consultar teléfono" la ven todos los roles #}
+{# La barra se pinta siempre: "Consultar teléfono" la ven todos los roles.
+   Vista unificada con varias empresas (PLAN_VISTA_UNIFICADA_AGENTES.md, fase D):
+   "Mis propiedades" es de todas y hay un "Resto de {empresa}" por cada una
+   (sin "Propiedades de {otra}": las dos son suyas). #}
 {% set ns = namespace(items=[("mine", "Mis propiedades" if not is_admin else "Propiedades de " ~ company_name, "/properties?tab=mine", active_count)]) %}
-{% if show_others_tab %}
+{% if show_others_tab and others_tabs %}
+{% for ot in others_tabs %}
+{% set ns.items = ns.items + [("others:" ~ ot.id, "Resto de " ~ ot.name, "/properties?tab=others&company_id=" ~ ot.id, ot.count)] %}
+{% endfor %}
+{% elif show_others_tab %}
 {% set ns.items = ns.items + [("others", "Resto de propiedades", "/properties?tab=others", other_count)] %}
 {% endif %}
 {% for oc in other_company_tabs %}
 {% set ns.items = ns.items + [("other_company:" ~ oc.id, "Propiedades de " ~ oc.name, "/properties?tab=other_company&company_id=" ~ oc.id, oc.count)] %}
 {% endfor %}
 {% set ns.items = ns.items + [("phone_check", "Consultar teléfono", "/properties?tab=phone_check", none)] %}
-{% set current_tab = ("other_company:" ~ selected_other_company.id) if tab == 'other_company' else tab %}
+{% if tab == 'other_company' %}
+{% set current_tab = "other_company:" ~ selected_other_company.id %}
+{% elif tab == 'others' and selected_others_company %}
+{% set current_tab = "others:" ~ selected_others_company.id %}
+{% else %}
+{% set current_tab = tab %}
+{% endif %}
 
 <div class="mb-6" id="propertyTabs">
     {{ ui.tabs(ns.items, current_tab, label="Listados de propiedades") }}
@@ -123,12 +136,18 @@ Propiedades
 {% elif tab == 'others' %}
 
 <div class="mb-6">
-    {{ ui.banner("Estas propiedades pertenecen al inventario general de la empresa y no están asociadas actualmente a tu gestión.", tone="blue", text="Se muestran únicamente con fines informativos.") }}
+    {{ ui.banner("Estas propiedades pertenecen al inventario general de " ~ (selected_others_company.name if selected_others_company else "la empresa") ~ " y no están asociadas actualmente a tu gestión.", tone="blue", text="Se muestran únicamente con fines informativos.") }}
 </div>
 
 {% set readonly_tab = "others" %}
+{% if selected_others_company %}
+{% set readonly_company_id = selected_others_company.id %}
+{% set readonly_tab_href = "/properties?tab=others&company_id=" ~ selected_others_company.id %}
+{% set readonly_empty_text = "No hay más propiedades activas en el inventario de " ~ selected_others_company.name %}
+{% else %}
 {% set readonly_tab_href = "/properties?tab=others" %}
 {% set readonly_empty_text = "No hay más propiedades activas en el inventario de la empresa" %}
+{% endif %}
 {% include 'properties/table_others.html' %}
 
 {% elif tab == 'other_company' %}

@@ -10,7 +10,8 @@
             <select id="report_property_id" name="property_id" class="{{ ui.input_class }}">
                 <option value="">Selecciona una propiedad</option>
                 {% for property in properties %}
-                <option value="{{ property.id }}">{{ property.title }}</option>
+                {# Vista unificada con varias empresas: empresa de la propiedad (el informe hereda la suya) #}
+                <option value="{{ property.id }}">{{ property.title }}{% if show_company_badges %} · {{ property.company.name }}{% endif %}</option>
                 {% endfor %}
             </select>
         </div>

@@ -28,7 +28,7 @@ from app.models.property import Property
 from app.services.whatsapp import send_report
 from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, get_agent_from_user
-from app.web.dependencies.company import get_active_company
+from app.web.dependencies.company import get_company_ids
 from app.services.company_scope import (
     scope_reports,
     scope_properties,
@@ -48,17 +48,20 @@ async def reports_page(
 ):
 
     current_user = request.state.user
-    company = get_active_company(request)
+    # Empresas de trabajo: la activa (admin, vista por empresa) o todas las del
+    # agente en la vista unificada (PLAN_VISTA_UNIFICADA_AGENTES.md, fase D).
+    # Un informe hereda la empresa de su propiedad.
+    company_ids = get_company_ids(request)
 
-    # Todo dentro de la empresa activa.
+    # Todo dentro de las empresas de trabajo.
     # Si es admin, mostrar todos los informes y propiedades
     # Si es agente, mostrar solo informes de sus propiedades
     # El selector para subir informes solo ofrece propiedades disponibles;
     # el listado de informes ya subidos se mantiene completo.
-    reports_query = scope_reports(db.query(Report), company.id)
+    reports_query = scope_reports(db.query(Report), company_ids)
     properties_query = scope_properties(
         db.query(Property).filter(Property.available_clause()),
-        company.id
+        company_ids
     )
 
     if is_admin(current_user):
@@ -100,8 +103,8 @@ async def upload_report(
     current_user = request.state.user
     response = RedirectResponse(url="/reports", status_code=302)
 
-    # La propiedad debe ser de la empresa activa
-    if not get_property_in_company(db, property_id, get_active_company(request).id):
+    # La propiedad debe ser de una de las empresas de trabajo (el informe hereda la suya)
+    if not get_property_in_company(db, property_id, get_company_ids(request)):
         set_flash(response, "error", "Propiedad no encontrada")
         return response
 
@@ -196,7 +199,7 @@ async def download_report(
     db: Session = Depends(get_db)
 ):
 
-    report = get_report_in_company(db, report_id, get_active_company(request).id)
+    report = get_report_in_company(db, report_id, get_company_ids(request))
 
     if not report:
         response = RedirectResponse(url="/reports", status_code=302)
@@ -221,7 +224,7 @@ async def delete_report(
     db: Session = Depends(get_db)
 ):
 
-    report = get_report_in_company(db, report_id, get_active_company(request).id)
+    report = get_report_in_company(db, report_id, get_company_ids(request))
 
     response = RedirectResponse(url="/reports", status_code=302)
 
@@ -255,7 +258,7 @@ async def send_report_whatsapp(
     redirect_url = request.headers.get("referer") or "/reports"
     response = RedirectResponse(url=redirect_url, status_code=302)
 
-    report = get_report_in_company(db, report_id, get_active_company(request).id)
+    report = get_report_in_company(db, report_id, get_company_ids(request))
 
     if not report:
         set_flash(response, "error", "Informe no encontrado")

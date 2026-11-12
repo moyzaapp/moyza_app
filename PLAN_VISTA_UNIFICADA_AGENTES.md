@@ -130,8 +130,15 @@ En ejecución con agentes Opus 5.5 high, un commit por fase.
   varias empresas", el siguiente a `8eed19f`): listado, contadores, compradores, detalle,
   seguimientos, Propuesta, cola, cesión, buscadores, altas con empresa y distintivos; sin
   el banner "cambia de empresa" en la vista unificada.
-- Pendiente: fases C (Inicio y notificaciones), D (propiedades, clientes, informes), E
-  (visitas) y F (Resultados del agente, docs de MULTIEMPRESA_MOYZA_MOES.md §2 y §16).
+- **Fase C — hecha** (`f55c8d5`): Inicio del agente con la suma de sus empresas
+  (métricas, objetivos, agenda, compradores, cartera, tendencia) y notificaciones de todas
+  (campana, contador, página, Novedades) con distintivo.
+- **Fase D — hecha** (commit "feat(propiedades): listados, ficha y alta con empresa para
+  agentes de varias empresas", el siguiente a `f55c8d5`): "Mis propiedades" de todas sus
+  empresas, "Resto de {empresa}" por empresa, edición de las de cualquier empresa del
+  agente, clientes, informes y logs de informes por lista.
+- Pendiente: fases E (visitas) y F (Resultados del agente, docs de MULTIEMPRESA_MOYZA_MOES.md
+  §2 y §16).
 
 ### 6.1 Decisiones de implementación (donde el plan no era explícito)
 
@@ -186,3 +193,63 @@ En ejecución con agentes Opus 5.5 high, un commit por fase.
   propiedad de otra empresa del agente. El listado, la edición y el resto de propiedades
   siguen con la empresa activa (fase D). Inicio, notificaciones, visitas y resultados
   reciben la empresa principal y funcionan como antes (fases C, E y F).
+
+**Fase C**
+
+- `DashboardService(db, company_id)` acepta un id o una lista. Con varias empresas
+  (`is_multi`), métricas y objetivos se calculan **por empresa** (cada una con su criterio:
+  vivo o snapshot congelado) y se suman con `sum_metrics` / `sum_targets`
+  (`performance_report_service`, para reutilizarlos en la fase F). Un desglose que es
+  None en todas sigue None; si falta en alguna cuenta 0. Objetivo: suma de los de cada
+  empresa; si solo hay en una, ese; "Sin objetivos" solo si no hay en ninguna.
+- Puesto ("Puesto N de M"): entre los agentes activos de cualquiera de sus empresas, cada
+  uno con sus cifras y objetivos sumados en esas empresas.
+- Observaciones del admin: una por empresa en el snapshot; con varias se unen con el
+  nombre de la empresa delante ("MOYZA: …").
+- Agenda, "sin leer", "sin respuesta", compradores que requieren atención (una consulta
+  sin empresa filtrada por las suyas), cartera y tendencia leen de todas; la cola sigue
+  por empresa (unión de bloqueos). Distintivo en filas de agenda, ventana de compradores y
+  propiedades sin visitas; cabecera "MOYZA y MOES PREMIUM · fecha".
+- El Inicio del admin sigue con `DashboardService(db, company.id)`; `admin_home` usa
+  `company_id` (una empresa). "Sin ficha de agente" mira todas las empresas del usuario.
+- Notificaciones: lectura por `company_ids` (`_scoped` con `company_match`); las `/api/*`
+  con `resolve_user_company_scope`. Distintivo (`serialize(with_company=True)`, relación
+  `Notification.company`) solo si vista unificada con más de una empresa; la campana lo
+  pinta en JS con el mismo HTML que `ui.company_badge`. Crear notificaciones no cambia.
+
+**Fase D**
+
+- Pestañas de Propiedades del agente unificado en MOYZA y MOES: "Mis propiedades" (las
+  suyas de las dos, distintivo en la fila) / "Resto de MOYZA" / "Resto de MOES PREMIUM" /
+  "Consultar teléfono". Sin "Propiedades de {otra empresa}": las dos son suyas, así que
+  su inventario sale como "Resto" (con calle, sin propietario, como el resto de su
+  empresa) y no se repite. "Propiedades de {X}" queda solo para empresas fuera de sus
+  `company_ids` (el admin y la vista por empresa: igual que antes). URL
+  `?tab=others&company_id=N`; sin empresa, la primera. Con una sola empresa, "Resto de
+  propiedades" como siempre.
+- "Consultar teléfono" busca en todas sus empresas (el texto ya decía "MOYZA y MOES
+  PREMIUM" y cada resultado lleva su distintivo).
+- Edición: la propiedad se busca en `company_ids` (antes fallaba la de la empresa que no
+  es la principal); cliente y captador se validan contra la **empresa de la propiedad**
+  (editar no cambia de empresa). El formulario carga clientes y agentes de todas sus
+  empresas con `data-companies` y, al editar, `filterCompanyOptions(companyId)` (del
+  `data-company-id` del botón Editar) solo deja elegir los de esa empresa.
+- **Alta**: crear propiedades y clientes es solo del admin (`deny_if_not_admin`, desde
+  antes de este plan), que sigue con la empresa activa. Por eso no hay select de empresa
+  en esos formularios: un agente no llega a verlos. Si algún día se abre el alta a
+  agentes, hará falta el select (principal preseleccionada, validado contra
+  `company_ids`) y filtrar cliente y captador por la empresa elegida con
+  `filterCompanyOptions`.
+- Clientes: listado por `company_ids` (solo los clientes de sus propiedades), distintivo
+  junto a cada inmueble. Editar y quitar, del admin en la activa.
+- Informes (`/reports`, subir, descargar, borrar, enviar) y logs de informes (página y
+  `/api/*`) por `company_ids`; el informe hereda la empresa de su propiedad. Distintivo
+  en el listado y empresa en el select de subir.
+- `routes/agents.py` es del admin salvo editar el propio perfil y la firma: esos dos
+  buscan la ficha en `company_ids` (antes, en la principal; fallaba si la ficha no
+  estaba en ella). El listado sigue igual.
+- `test_other_company_address.py::test_agente_de_las_dos_empresas_ve_la_calle` pasa a
+  mirar "Resto de MOES PREMIUM" (consecuencia directa de las pestañas nuevas).
+- Visitas sin tocar (fase E): `/visits` funciona (empresa principal), pero "Registrar
+  visita" desde la ficha de una propiedad de la empresa que no es la principal redirige a
+  `/properties`.
