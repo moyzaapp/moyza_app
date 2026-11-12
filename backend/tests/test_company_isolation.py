@@ -194,7 +194,9 @@ def test_detalle_por_id_cruzado_redirige(moyza, moes, moes_data):
     assert moyza.get(f"/properties/{prop_id}")[0] == 302
     assert moes.get(f"/buyers/{buyer_id}")[0] == 200
     assert moyza.get(f"/buyers/{buyer_id}")[0] == 302
-    assert moyza.get(f"/visits/new/{prop_id}")[0] == 302
+    # Las visitas sí cruzan: se registran desde MOYZA a una propiedad de MOES
+    # (PLAN_VISITAS_OTRA_EMPRESA.md); la ficha de la propiedad sigue fuera
+    assert moyza.get(f"/visits/new/{prop_id}")[0] == 200
 
 
 def test_alta_cruzada_rechazada(moyza, db, moes_data):
@@ -290,6 +292,7 @@ def test_pestana_otra_empresa_lista_solo_inventario_disponible(moyza, moes, db, 
     assert moes_data["client"].name not in body      # propietario nunca
     assert f"{tag} NO-DISPONIBLE" not in body
     assert f'href="/properties/{prop.id}"' not in body  # sin enlace al detalle
+    assert f'href="/visits/new/{prop.id}"' in body      # sí a registrar visita
 
     # Buscador por título dentro de la pestaña
     status, body, _ = moyza.get(f"/properties?tab=other_company&search={urllib.parse.quote(tag)}")
@@ -297,9 +300,11 @@ def test_pestana_otra_empresa_lista_solo_inventario_disponible(moyza, moes, db, 
     status, body, _ = moyza.get("/properties?tab=other_company&search=zzz-no-existe-zzz")
     assert status == 200 and f"{tag} PROP" not in body
 
-    # El detalle y el alta de visita siguen fuera de alcance desde MOYZA
+    # El detalle sigue fuera de alcance desde MOYZA; el alta de visita no
+    # (PLAN_VISITAS_OTRA_EMPRESA.md), salvo la propiedad no disponible
     assert moyza.get(f"/properties/{prop.id}")[0] == 302
-    assert moyza.get(f"/visits/new/{prop.id}")[0] == 302
+    assert moyza.get(f"/visits/new/{prop.id}")[0] == 200
+    assert moyza.get(f"/visits/new/{no_disponible.id}")[0] == 302
 
     # Desde MOES la pestaña muestra MOYZA, no su propio inventario
     status, body, _ = moes.get("/properties?tab=other_company")

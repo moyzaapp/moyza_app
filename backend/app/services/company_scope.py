@@ -27,10 +27,14 @@ PLAN_SUGERENCIAS_MULTIEMPRESA.md): las sugerencias del perfil del comprador
 (`buyer_matching.matching_properties` sin empresa), las opciones del perfil
 (`geo_options`, tipos), el buscador de la Propuesta con `alert_id` y asociar
 una propiedad a una alerta (`routes/alerts.py::_linkable_property`) NO pasan
-por estos filtros de propiedades. No añadir más sin decisión explícita.
+por estos filtros de propiedades; tampoco el selector y el alta de visitas
+(`get_visitable_property`, PLAN_VISITAS_OTRA_EMPRESA.md: una visita se puede
+registrar a una propiedad de cualquier empresa). No añadir más sin decisión
+explícita.
 """
 from typing import Union
 
+from sqlalchemy import and_
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -206,6 +210,40 @@ def get_property_in_company(db: Session, property_id: int, company_id: CompanyId
     return (
         scope_properties(db.query(Property), company_id)
         .filter(Property.id == property_id)
+        .first()
+    )
+
+
+def visitable_property_clause(company_id: CompanyIds):
+    """Propiedades en las que se puede registrar una visita (sin disponibilidad).
+
+    PLAN_VISITAS_OTRA_EMPRESA.md §5 (decisión 4): de cualquier empresa activa.
+    De las empresas del usuario (`company_id`), cualquier estado salvo
+    archivada (como siempre); de las demás, solo las activas (mismo criterio
+    que la pestaña "Propiedades de {otra empresa}"). La disponibilidad
+    (`Property.available_clause` / `is_available`) la comprueba quien llama.
+    """
+    from app.core.constants import PropertyStatus
+
+    return and_(
+        Property.company.has(Company.is_active.is_(True)),
+        or_(
+            and_(company_match(Property.company_id, company_id), Property.status != PropertyStatus.ARCHIVED),
+            Property.status == PropertyStatus.ACTIVE,
+        ),
+    )
+
+
+def get_visitable_property(db: Session, property_id: int, company_id: CompanyIds):
+    """Propiedad de cualquier empresa sobre la que se puede registrar una visita.
+
+    Ver `visitable_property_clause`. Excepción consciente al alcance por
+    empresa (cabecera del módulo): la visita es de la empresa desde la que se
+    registra, no de la propiedad.
+    """
+    return (
+        db.query(Property)
+        .filter(Property.id == property_id, visitable_property_clause(company_id))
         .first()
     )
 

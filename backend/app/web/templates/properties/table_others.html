@@ -5,6 +5,10 @@
   readonly_company_id, readonly_tab_href, readonly_empty_text,
   readonly_address_visible.
 
+  "Registrar visita" junto al título (sin columna nueva): se puede visitar
+  cualquier propiedad de cualquier empresa (PLAN_VISITAS_OTRA_EMPRESA.md,
+  fase B); las filas ya son solo activas y disponibles.
+
   Sin readonly_address_visible (propiedades de una empresa a la que el
   usuario no pertenece) las filas llegan sin calle (address = None) y la
   búsqueda no mira la dirección: se queda la columna Ciudad / Zona.
@@ -102,15 +106,25 @@
             <tr class="border-b border-gray-100 hover:bg-gray-50">
 
                 <td data-sort-value="{{ property.title or '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
-                    {# Sin columna de acciones: "Abrir en la web" junto al título, solo con enlace
+                    {# Sin columna de acciones: "Registrar visita" y "Abrir en la web" junto al título
                        (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2; `public_url` viene calculado en la fila) #}
                     <div class="flex items-center gap-2">
-                        <div class="flex flex-col min-w-0">
+                        <div class="flex flex-col min-w-0 flex-1">
                             <span class="font-medium">{{ property.title }}</span>
                             {% if readonly_address_visible %}
                             <span class="text-xs text-gray-500">{{ (property.address | street) or '-' }}</span>
                             {% endif %}
                         </div>
+                        {% if property.id %}
+                        <a
+                            href="/visits/new/{{ property.id }}"
+                            title="Registrar visita"
+                            aria-label="Registrar visita en {{ property.title }}"
+                            class="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+                        >
+                            <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5M12 12.75v4.5m2.25-2.25h-4.5"/></svg>
+                        </a>
+                        {% endif %}
                         {% if property.public_url %}
                         <a
                             href="{{ property.public_url }}"

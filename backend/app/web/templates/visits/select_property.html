@@ -1,17 +1,21 @@
 {% extends 'base.html' %}
+{% import "components/ui_macros.html" as ui %}
 
 {% block title %}
 Seleccionar Propiedad
 {% endblock %}
 
-{% macro property_card(property) %}
+{# `show_street`: calle visible con la regla de Propiedades (de otra empresa, solo si
+   el usuario pertenece a ella o es admin); si no, ni se pinta ni se busca por ella.
+   Distintivo de empresa si la propiedad no es de la empresa activa o se ven varias. #}
+{% macro property_card(property, show_street=True) %}
     <a
         href="/visits/new/{{ property.id }}"
-        class="property-card bg-white rounded-2xl border border-gray-200 p-6 hover:border-gray-400 hover:shadow-md transition-all cursor-pointer"
-        data-search="{{ [property.title, property.address | street, property.city, property.agent.name if property.agent else '']|select|join(' ')|lower }}"
+        class="property-card bg-white rounded-2xl border border-gray-200 p-6 hover:border-gray-400 hover:shadow-md transition-all cursor-pointer min-w-0"
+        data-search="{{ [property.title, (property.address | street) if show_street else '', property.city, property.agent.name if property.agent else '', property.company.name if property.company else '']|select|join(' ')|lower }}"
     >
         <div class="flex items-start justify-between mb-3">
-            <h3 class="text-lg font-bold text-gray-800 flex-1">
+            <h3 class="text-lg font-bold text-gray-800 flex-1 min-w-0 break-words">
                 {{ property.title }}
             </h3>
             {% if property.status == 'Activa' %}
@@ -29,8 +33,12 @@ Seleccionar Propiedad
             {% endif %}
         </div>
 
+        {% if show_company_badges or (active_company and property.company_id != active_company.id) %}
+        <p class="mb-2">{{ ui.company_badge(property.company) }}</p>
+        {% endif %}
+
         <p class="text-sm text-gray-500 mb-3">
-            {{ (property.address | street) or 'Sin dirección' }}{% if property.city %} · {{ property.city }}{% endif %}
+            {% if show_street %}{{ (property.address | street) or 'Sin dirección' }}{% if property.city %} · {{ property.city }}{% endif %}{% else %}{{ property.city or 'Sin población' }}{% if property.zona %} · {{ property.zona }}{% endif %}{% endif %}
         </p>
 
         {% if property.price %}
@@ -82,63 +90,36 @@ Seleccionar Propiedad
     <input
         type="search"
         id="property-search"
-        placeholder="Buscar por título, dirección, ciudad o captador"
+        placeholder="Buscar por título, dirección, ciudad, captador o empresa"
         autocomplete="off"
         class="w-full sm:max-w-md border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
     >
 </div>
 
-{% if not is_admin %}
-
-<section class="property-section mb-8">
-    <h2 class="text-base sm:text-xl font-bold text-gray-800 mb-3 sm:mb-4">
-        Mis propiedades
-        <span class="section-count text-sm font-normal text-gray-500">({{ own_properties|length }})</span>
+{# Una sección por grupo: "Mis propiedades" (agente) y una por empresa activa
+   (PLAN_VISITAS_OTRA_EMPRESA.md §5, decisión 4). La búsqueda filtra todas. #}
+{% for section in sections %}
+<section class="property-section {% if not loop.last %}mb-8{% endif %}">
+    <h2 class="text-base sm:text-xl font-bold text-gray-800 {% if section.subtitle %}mb-1{% else %}mb-3 sm:mb-4{% endif %}">
+        {{ section.title }}
+        <span class="section-count text-sm font-normal text-gray-500">({{ section.properties|length }})</span>
     </h2>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {% for property in own_properties %}
-            {{ property_card(property) }}
-        {% endfor %}
-        <div class="section-empty col-span-full text-center py-8 {% if own_properties %}hidden{% endif %}">
-            <p class="text-gray-500">No hay propiedades</p>
-        </div>
-    </div>
-</section>
-
-<section class="property-section">
-    <h2 class="text-base sm:text-xl font-bold text-gray-800 mb-1">
-        Otras propiedades de la empresa
-        <span class="section-count text-sm font-normal text-gray-500">({{ other_properties|length }})</span>
-    </h2>
+    {% if section.subtitle %}
     <p class="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4">
-        Captadas por otros agentes. La visita quedará registrada a tu nombre.
+        {{ section.subtitle }}
     </p>
+    {% endif %}
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {% for property in other_properties %}
-            {{ property_card(property) }}
+        {% for property in section.properties %}
+            {{ property_card(property, show_street=section.show_street) }}
         {% endfor %}
-        <div class="section-empty col-span-full text-center py-8 {% if other_properties %}hidden{% endif %}">
+        <div class="section-empty col-span-full text-center py-8 {% if section.properties %}hidden{% endif %}">
             <p class="text-gray-500">No hay propiedades</p>
         </div>
     </div>
 </section>
-
-{% else %}
-
-<section class="property-section">
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {% for property in other_properties %}
-            {{ property_card(property) }}
-        {% endfor %}
-        <div class="section-empty col-span-full text-center py-12 {% if other_properties %}hidden{% endif %}">
-            <p class="text-gray-500">No hay propiedades disponibles</p>
-        </div>
-    </div>
-</section>
-
-{% endif %}
+{% endfor %}
 
 <script>
 (function () {
