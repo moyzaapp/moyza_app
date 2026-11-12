@@ -43,6 +43,8 @@ from app.models.agent import Agent
 from app.models.closing import Closing
 from app.models.property import Property
 from app.models.property_alert import PropertyAlert
+from app.services import closing_service
+from app.services.closing_service import ClosingError
 from app.services.company_scope import get_agent_in_company
 from app.services.company_scope import scope_active_agents
 from app.services.company_scope import scope_agents
@@ -650,7 +652,8 @@ async def create_closing(
     db: Session = Depends(get_db),
 ):
     """Registra un cierre: agente activo de la empresa, fecha no futura, Venta / Alquiler,
-    propiedad opcional de la empresa y nota. Refresca los snapshots congelados."""
+    propiedad opcional de la empresa y nota. Refresca los snapshots congelados
+    (`closing_service.create_closing`)."""
     current_user = request.state.user
     if not is_admin(current_user):
         return _forbidden_redirect("Solo administradores pueden registrar cierres")
@@ -659,11 +662,7 @@ async def create_closing(
     today = madrid_today()
 
     agent_pk = _parse_int(agent_id)
-    agent = (
-        scope_active_agents(db.query(Agent), company_id).filter(Agent.id == agent_pk).first()
-        if agent_pk else None
-    )
-    if agent is None:
+    if agent_pk is None:
         return _closing_redirect("error", "Elige un agente activo de la empresa")
 
     try:
@@ -675,39 +674,28 @@ async def create_closing(
     if closed_day.year < MIN_PERIOD_YEAR:
         return _closing_redirect("error", "La fecha del cierre no es válida")
 
-    if not BusinessType.is_valid(business_type):
-        return _closing_redirect("error", "Indica si el cierre es de Venta o de Alquiler")
-
-    prop = None
+    prop_pk = None
     if (property_id or "").strip():
         prop_pk = _parse_int(property_id)
-        prop = (
-            scope_properties(db.query(Property), company_id).filter(Property.id == prop_pk).first()
-            if prop_pk else None
-        )
-        if prop is None:
+        if prop_pk is None:
             return _closing_redirect("error", "La propiedad no pertenece a la empresa activa")
 
-    closing = Closing(
-        company_id=company_id,
-        agent_id=agent.id,
-        business_type=business_type,
-        closed_on=closed_day,
-        property_id=prop.id if prop else None,
-        notes=(notes or "").strip() or None,
-        created_by=current_user.id,
-    )
     try:
-        db.add(closing)
-        db.commit()
-        PerformanceReportService(db, company_id).refresh_closings_snapshot(agent.id, closed_day)
+        closings = closing_service.create_closing(
+            db, company_id, [agent_pk], business_type, closed_day,
+            property_id=prop_pk, notes=notes, created_by=current_user.id,
+        )
+    except ClosingError as e:
+        db.rollback()
+        return _closing_redirect("error", str(e))
     except Exception:
         db.rollback()
-        logger.exception("Error registrando cierre: agent_id=%s", agent.id)
+        logger.exception("Error registrando cierre: agent_id=%s", agent_pk)
         return _closing_redirect("error", "Error al registrar el cierre", closed_day.year)
 
+    names = " y ".join(c.agent.name for c in closings)
     return _closing_redirect(
-        "success", f"Cierre de {agent.name} registrado ({closed_day.strftime('%d/%m/%Y')})", closed_day.year,
+        "success", f"Cierre de {names} registrado ({closed_day.strftime('%d/%m/%Y')})", closed_day.year,
     )
 
 
@@ -717,30 +705,24 @@ async def delete_closing(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    """Borra un cierre; si es compartido, también el registro del otro agente."""
     current_user = request.state.user
     if not is_admin(current_user):
         return _forbidden_redirect("Solo administradores pueden borrar cierres")
 
     company_id = get_active_company(request).id
-    closing = (
-        db.query(Closing)
-        .filter(Closing.id == closing_id, Closing.company_id == company_id)
-        .first()
-    )
-    if closing is None:
-        return _closing_redirect("error", "Cierre no encontrado en la empresa activa")
-
-    agent_id, closed_day = closing.agent_id, closing.closed_on
     try:
-        db.delete(closing)
-        db.commit()
-        PerformanceReportService(db, company_id).refresh_closings_snapshot(agent_id, closed_day)
+        deleted = closing_service.delete_closing(db, company_id, closing_id)
+    except ClosingError as e:
+        db.rollback()
+        return _closing_redirect("error", str(e))
     except Exception:
         db.rollback()
         logger.exception("Error borrando cierre: closing_id=%s", closing_id)
-        return _closing_redirect("error", "Error al borrar el cierre", closed_day.year)
+        return _closing_redirect("error", "Error al borrar el cierre")
 
-    return _closing_redirect("success", "Cierre eliminado", closed_day.year)
+    message = "Cierre eliminado a los dos agentes" if deleted.shared else "Cierre eliminado"
+    return _closing_redirect("success", message, deleted.closed_on.year)
 
 
 # ---------------------------------------------------------------------------
