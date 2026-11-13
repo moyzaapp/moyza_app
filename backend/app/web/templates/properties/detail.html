@@ -391,19 +391,14 @@ Detalle Propiedad
     </div>
 
     {# Enlace a la ficha en la web de la empresa (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2):
-       el pegado a mano o el automático de la referencia (app/services/property_link.py) #}
+       el de `properties.public_url` (ETL o a mano) o, si está vacío, el de la plantilla de la empresa. Sin enlace no se pinta nada #}
     {% set web_url = property | public_url %}
+    {% if web_url %}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 mb-4 border-b border-gray-100">
         <div class="min-w-0">
             <p class="text-xs text-gray-500">Enlace en la web</p>
-            {% if web_url %}
             <p class="text-sm text-gray-700 truncate" title="{{ web_url }}">{{ web_url }}</p>
-            <p class="text-xs text-gray-400">{{ "Manual" if (property | public_url_source) == "manual" else "Automático por referencia" }}</p>
-            {% else %}
-            <p class="text-sm text-gray-400">Sin enlace — añádelo al editar la propiedad</p>
-            {% endif %}
         </div>
-        {% if web_url %}
         <div class="flex gap-2 shrink-0">
             {% set open_attrs %}target="_blank" rel="noopener noreferrer"{% endset %}
             {% call ui.button("Abrir", "secondary", href=web_url, attrs=open_attrs, extra="whitespace-nowrap") %}
@@ -415,8 +410,8 @@ Detalle Propiedad
             {% endcall %}
             <span id="copyPublicUrlStatus" class="sr-only" aria-live="polite"></span>
         </div>
-        {% endif %}
     </div>
+    {% endif %}
 
     {% if features %}
     <div class="flex flex-wrap gap-2 pb-4 mb-4 border-b border-gray-100">

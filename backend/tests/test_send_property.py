@@ -456,7 +456,7 @@ def test_propuesta_pinta_el_boton_y_la_fecha_del_envio(env):
     assert f'action="/alerts/{alert.id}/send-property"' in html
     assert html.count("Enviar por WhatsApp</button>") >= 1
     assert f'href="{URL_1933}"' in html and "Ver en la web" in html
-    assert "Sin enlace web" in html                       # Piso Bea, sin referencia
+    assert "Sin enlace web" not in html                   # Piso Bea, sin enlace: sin aviso
     assert "Enviada el" not in html
 
     _send(env, env.users["ana"], alert, "ana")
@@ -585,7 +585,7 @@ def test_tarjeta_con_sent_at():
 
 def test_tarjeta_sin_enlace():
     html = _card(send_action="/x", buyer_phone="600111222", referencia=None)
-    assert "Sin enlace web" in html
+    assert "Sin enlace" not in html
     assert "Enviar por WhatsApp</button>" not in html and "Ver en la web" not in html
 
 

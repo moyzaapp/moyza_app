@@ -25,7 +25,7 @@
     Con él, debajo de la acción de la tarjeta: botón secundario "Enviar por WhatsApp"
     (formulario con target="_blank": la pestaña nueva acaba en wa.me; sin data-once, se
     puede reenviar), enlace "Ver en la web" y, si `sent_at`, "Enviada el dd/mm". El botón
-    no se pinta si la propiedad no tiene enlace (`prop | public_url`, "Sin enlace web") o
+    no se pinta si la propiedad no tiene enlace (`prop | public_url`; sin aviso) o
     si `buyer_phone` no sirve para WhatsApp ("Comprador sin teléfono válido"). Al pulsar,
     ui.js cambia la línea a "Enviada hoy" (la pestaña original no se recarga).
   - sent_at: fecha (UTC) del último envío de esta propiedad al comprador, o None.
@@ -102,8 +102,6 @@
                     Ver en la web
                     <svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
                 </a>
-                {% else %}
-                <span class="py-1">Sin enlace web</span>
                 {% endif %}
                 {% if not phone_ok %}<span class="py-1">Comprador sin teléfono válido</span>{% endif %}
                 <span class="py-1{{ '' if sent_at else ' hidden' }}" data-sent-label>{% if sent_at %}Enviada el {{ sent_at | madrid_dt('%d/%m') }}{% endif %}</span>
