@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "components/phone_macros.html" as phone %}
+{% import "components/ui_macros.html" as ui %}
 
 {% block title %}
 Registrar visita
@@ -11,11 +12,12 @@ Registrar visita
 
     <div class="flex-1 min-w-0">
 
+        {# La ficha solo se abre si la propiedad es de una empresa del usuario #}
         <a
-            href="/properties/{{ property.id }}"
+            href="{{ '/properties/' ~ property.id if property_in_scope else '/visits/select-property' }}"
             class="text-xs sm:text-sm text-gray-500 hover:text-gray-700 inline-flex items-center gap-1"
         >
-            ← Volver al detalle
+            {{ '← Volver al detalle' if property_in_scope else '← Volver a seleccionar propiedad' }}
         </a>
 
         <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-800 mt-2 break-words">
@@ -26,11 +28,35 @@ Registrar visita
             {{ property.title }}
         </p>
 
+        {# Calle con la regla de Propiedades (`street_visible`); si no, población y zona #}
+        <p class="text-xs sm:text-sm text-gray-500 mt-0.5 break-words">
+            {% if street_visible %}{{ (property.address | street) or 'Sin dirección' }}{% if property.city %} · {{ property.city }}{% endif %}{% else %}{{ property.city or 'Sin población' }}{% if property.zona %} · {{ property.zona }}{% endif %}{% endif %}
+        </p>
+
     </div>
 
 </div>
 
 <div class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
+
+    {# Propiedad de otra empresa que la de la visita (PLAN_VISITAS_OTRA_EMPRESA.md, fase B).
+       Con el select "Empresa de la visita" el texto sigue a la empresa elegida y el aviso
+       se oculta si coincide con la de la propiedad (script al final). #}
+    {% set cross_company = property.company_id != visit_company.id %}
+    {% if cross_company or visit_company_choices %}
+    <div id="crossCompanyNotice" data-property-company="{{ property.company_id }}"
+         class="mb-4 sm:mb-6 bg-blue-50 border border-blue-200 text-blue-800 px-3 sm:px-4 py-2 sm:py-3 rounded-xl text-xs sm:text-sm flex items-start gap-2 {% if not cross_company %}hidden{% endif %}"
+         role="status">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+        </svg>
+        <p>
+            Propiedad de <span class="font-medium">{{ property.company.name }}</span>: la visita se registra en
+            <span class="font-medium" id="crossCompanyVisitName">{{ visit_company.name }}</span>
+            y la ficha lleva su marca.
+        </p>
+    </div>
+    {% endif %}
 
     {% if is_foreign_property %}
     <div class="mb-4 sm:mb-6 bg-blue-50 border border-blue-200 text-blue-800 px-3 sm:px-4 py-2 sm:py-3 rounded-xl text-xs sm:text-sm flex items-start gap-2">
@@ -49,6 +75,15 @@ Registrar visita
         method="POST"
         class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"
     >
+
+        {# Empresa de la visita: solo un agente en vista unificada con varias empresas
+           la elige (PLAN_VISITAS_OTRA_EMPRESA.md, fase A); la principal va preseleccionada.
+           La ficha se emite con la marca de esta empresa. #}
+        {% if visit_company_choices %}
+        <div class="sm:col-span-2">
+            {{ ui.select(visit_company_field, "Empresa de la visita", visit_company_choices, value=visit_company.id, required=True, empty=None, help="La ficha de visita se emite con la marca de esta empresa y la visita cuenta en ella.", id="visitCompany") }}
+        </div>
+        {% endif %}
 
         <div>
 
@@ -312,5 +347,23 @@ Registrar visita
 </div>
 
 <script src="{{ static_url('/static/js/phone-field.js') }}"></script>
+
+{% if visit_company_choices %}
+<script>
+// Aviso de propiedad de otra empresa: sigue a la empresa elegida para la visita
+(function () {
+    var select = document.getElementById('visitCompany');
+    var notice = document.getElementById('crossCompanyNotice');
+    var name = document.getElementById('crossCompanyVisitName');
+    if (!select || !notice || !name) return;
+    function update() {
+        var option = select.options[select.selectedIndex];
+        name.textContent = option ? option.text : '';
+        notice.classList.toggle('hidden', select.value === notice.dataset.propertyCompany);
+    }
+    select.addEventListener('change', update);
+})();
+</script>
+{% endif %}
 
 {% endblock %}

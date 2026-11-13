@@ -21,14 +21,19 @@
   El bloque nace oculto en el alta y se muestra al conocer la propiedad (el JS
   marca el select como obligatorio solo entonces, para no bloquear el envío
   con un campo oculto). Necesita `with context` (lee active_company).
+  - company: empresa del bloque si no es la activa (cesión en el detalle de una alerta
+    de otra de las empresas del agente, vista unificada de PLAN_VISTA_UNIFICADA_AGENTES.md).
+  - Los grupos pueden llevar `company_id` (cesión desde el listado unificado): el
+    optgroup lo expone en data-company-id.
 #}
-{% macro assign_fields(prefix, groups=[], is_admin=False, mode="create") -%}
+{% macro assign_fields(prefix, groups=[], is_admin=False, mode="create", company=None) -%}
 {% set input_cls = "w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500" %}
+{% set block_company = company or active_company %}
 <div id="{{ prefix }}AssignBlock"
      class="{% if mode not in ['reassign', 'cede'] %}hidden{% endif %} space-y-3"
      data-mode="{{ mode }}"
-     data-company-id="{{ active_company.id if active_company else '' }}"
-     data-company-name="{{ active_company.name if active_company else '' }}">
+     data-company-id="{{ block_company.id if block_company else '' }}"
+     data-company-name="{{ block_company.name if block_company else '' }}">
 
     {% if is_admin or mode == 'cede' %}
     <div>
@@ -39,7 +44,7 @@
                 aria-describedby="{{ prefix }}AssignHint" class="{{ input_cls }}">
             <option value="">Selecciona un agente</option>
             {% for group in groups %}
-            <optgroup label="{{ group.label }}">
+            <optgroup label="{{ group.label }}"{% if group.company_id %} data-company-id="{{ group.company_id }}"{% endif %}>
                 {% for agent in group.agents %}
                 <option value="{{ agent.id }}"
                         data-name="{{ agent.name }}"

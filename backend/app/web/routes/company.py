@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse
 from app.web.dependencies.company import ACTIVE_COMPANY_COOKIE
 from app.web.dependencies.company import ACTIVE_COMPANY_COOKIE_MAX_AGE
 from app.web.dependencies.company import get_allowed_companies_from_request
+from app.web.dependencies.company import is_unified_view
 from app.web.utils.flash import set_flash
 
 router = APIRouter()
@@ -38,11 +39,17 @@ async def switch_company(
     code: str = Form(...),
     next_url: str = Form(None, alias="next"),
 ):
+    response = RedirectResponse(url=_safe_next(next_url), status_code=303)
+
+    # Vista unificada (PLAN_VISTA_UNIFICADA_AGENTES.md): ya ve todas sus
+    # empresas a la vez; no hay empresa activa que cambiar
+    if is_unified_view(request):
+        set_flash(response, "info", "Ya ves todas tus empresas a la vez: no hace falta cambiar de empresa.")
+        return response
+
     allowed = get_allowed_companies_from_request(request)
 
     target = next((c for c in allowed if c.code == code), None)
-
-    response = RedirectResponse(url=_safe_next(next_url), status_code=303)
 
     if target is None:
         set_flash(response, "error", "No tienes acceso a esa empresa.")

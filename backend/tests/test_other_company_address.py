@@ -127,8 +127,8 @@ def data():
     for key, companies in (("moyza", [moyza]), ("dual", [moyza, moes])):
         email = f"{tag}-{key}@example.com"
         user = User(email=email, full_name=f"{tag} {key}", hashed_password="x", role=agent_role)
-        # El acceso sale de las empresas del usuario (no de la ficha de agente)
-        user.companies.extend(companies)
+        # El usuario solo en MOYZA: la otra empresa le llega por la ficha de agente
+        user.companies.extend([moyza])
         agent = Agent(name=f"{tag} {key}", email=email)
         agent.companies.extend(companies)
         created += [user, agent]
@@ -192,7 +192,12 @@ def test_admin_ve_la_calle_de_moes(data):
 
 @integration
 def test_agente_de_las_dos_empresas_ve_la_calle(data):
-    status, html = _Client(data["emails"]["dual"]).get(_tab(data, _search(data["tag"])))
+    # Vista unificada (PLAN_VISTA_UNIFICADA_AGENTES.md, fase D): MOES es una de
+    # sus empresas, así que su inventario sale en "Resto de MOES PREMIUM" (no
+    # en "Propiedades de {otra empresa}") y con la calle
+    path = f"/properties?tab=others&company_id={data['moes'].id}{_search(data['tag'])}"
+    status, html = _Client(data["emails"]["dual"]).get(path)
     assert status == 200
+    assert "Resto de MOES PREMIUM" in html and "Propiedades de MOES PREMIUM" not in html
     assert f"{data['tag']} PROP" in html
     assert f">{data['street']}<" in html

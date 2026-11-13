@@ -2,8 +2,9 @@
 
 Solo viven dentro de la app (campana del navbar, página /notifications y
 bloque "Novedades" del Inicio): nunca se envían por email ni WhatsApp.
-Cada notificación es de un usuario y de una empresa; solo se ve con esa
-empresa activa.
+Cada notificación es de un usuario y de una empresa; se ve con esa empresa
+activa o, en la vista unificada del agente (PLAN_VISTA_UNIFICADA_AGENTES.md),
+junto a las de sus otras empresas con el distintivo de la suya.
 """
 from datetime import datetime
 
@@ -50,6 +51,7 @@ class Notification(Base):
 
     user = relationship("User", foreign_keys=[user_id])
     actor = relationship("User", foreign_keys=[actor_user_id])
+    company = relationship("Company")
 
     __table_args__ = (
         # Badge (no leídas) y listado del usuario

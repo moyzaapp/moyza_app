@@ -171,16 +171,27 @@ def agent_open_alerts_ordered(agent_id: int, db: Session, company_id: int):
     )
 
 
-def get_locked_alert_ids(agent_id: int, db: Session, company_id: int) -> set:
+def get_locked_alert_ids(agent_id: int, db: Session, company_id) -> set:
     """IDs de las alertas bloqueadas para un agente en la empresa.
+
+    Con una lista de empresas (vista unificada, PLAN_VISTA_UNIFICADA_AGENTES.md)
+    devuelve la unión de los bloqueos de cada una: la cola sigue siendo por
+    empresa, así que una alerta de MOYZA nunca bloquea una de MOES.
 
     Una alerta de la cola está bloqueada si alguna anterior aún no tiene un
     seguimiento real registrado **desde su asignación**: los seguimientos del
     agente anterior de una alerta reasignada no cuentan, así que esa alerta
     bloquea las siguientes hasta que el nuevo agente registre uno.
 
-    Dos consultas: la cola y, agrupada, qué alertas de la cola ya se iniciaron.
+    Dos consultas por empresa: la cola y, agrupada, qué alertas de la cola ya
+    se iniciaron.
     """
+    if isinstance(company_id, (list, tuple, set, frozenset)):
+        locked = set()
+        for one_company_id in dict.fromkeys(company_id):
+            locked |= get_locked_alert_ids(agent_id, db, one_company_id)
+        return locked
+
     open_alerts = agent_open_alerts_ordered(agent_id, db, company_id)
     if not open_alerts:
         return set()

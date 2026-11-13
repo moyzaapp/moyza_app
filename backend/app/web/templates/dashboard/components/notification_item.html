@@ -1,10 +1,13 @@
 {#
   Una notificación in-app (Novedades del Inicio y /notifications).
   `n` = notification_service.serialize(...): id, title, body, url (abre y
-  marca leída), icon, tone, created_at (ISO UTC), read.
+  marca leída), icon, tone, created_at (ISO UTC), read y company (solo si el
+  usuario ve varias empresas a la vez: distintivo de empresa, vista unificada
+  de PLAN_VISTA_UNIFICADA_AGENTES.md).
   Sin leer: fondo azul suave + punto (components.md: fila destacada).
 #}
 {% from "dashboard/components/icons.html" import icon_box %}
+{% import "components/ui_macros.html" as ui %}
 
 {% macro notification_item(n, when) -%}
 <li>
@@ -15,7 +18,11 @@
                 {% if not n.read %}<span class="sr-only">Sin leer: </span>{% endif %}{{ n.title }}
             </span>
             {% if n.body %}<span class="block text-xs text-gray-500 mt-0.5">{{ n.body }}</span>{% endif %}
+            {% if n.company %}
+            <span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 mt-0.5">{{ when }} {{ ui.company_badge(n.company, title="Aviso de " ~ n.company.name) }}</span>
+            {% else %}
             <span class="block text-xs text-gray-500 mt-0.5">{{ when }}</span>
+            {% endif %}
         </span>
         {% if not n.read %}<span class="w-2 h-2 rounded-full bg-blue-600 shrink-0 mt-2" aria-hidden="true"></span>{% endif %}
     </a>

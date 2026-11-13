@@ -18,6 +18,7 @@ from fastapi import Form
 from fastapi.responses import RedirectResponse
 
 from app.web.dependencies.company import get_active_company
+from app.web.dependencies.company import get_company_ids
 from app.web.utils.flash import set_flash
 from app.services.company_scope import (
     scope_clients,
@@ -35,17 +36,20 @@ router = APIRouter()
 async def clients_page(request: Request, db: Session = Depends(get_db)):
 
     current_user = request.state.user
-    company = get_active_company(request)
+    # Empresas de trabajo: la activa (admin, vista por empresa) o todas las del
+    # agente en la vista unificada (PLAN_VISTA_UNIFICADA_AGENTES.md, fase D).
+    # Crear, editar y quitar clientes es del admin y sigue en la activa.
+    company_ids = get_company_ids(request)
 
-    # Solo clientes de la empresa activa
-    base_query = scope_clients(db.query(Client), company.id)
+    # Solo clientes de las empresas de trabajo
+    base_query = scope_clients(db.query(Client), company_ids)
 
-    # Propiedades que el usuario puede ver en la empresa activa: las de su
-    # agente, o todas si es admin. Alimentan la columna "Dirección del
+    # Propiedades que el usuario puede ver en sus empresas de trabajo: las de
+    # su agente, o todas si es admin. Alimentan la columna "Dirección del
     # inmueble" y la búsqueda por dirección. Las archivadas también salen,
     # marcadas (decisión 2026-10-28): un cliente cuyo único inmueble con el
     # agente está archivado sigue en su lista y no debe quedar sin dirección.
-    visible_properties = scope_properties(db.query(Property), company.id).filter(
+    visible_properties = scope_properties(db.query(Property), company_ids).filter(
         Property.client_id.isnot(None),
     )
 
@@ -54,7 +58,7 @@ async def clients_page(request: Request, db: Session = Depends(get_db)):
         agent = get_agent_from_user(current_user, db)
         if agent:
             client_ids = (
-                scope_properties(db.query(Property.client_id), company.id)
+                scope_properties(db.query(Property.client_id), company_ids)
                 .filter(
                     Property.agent_id == agent.id,
                     Property.client_id.isnot(None)

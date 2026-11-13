@@ -1,6 +1,8 @@
 {#
   Evento del feed de actividad (admin) o de Novedades. `event`: dict con
-  icon, tone, title, text, when (UTC naive), href y cross (visita cruzada).
+  icon, tone, title, text, when (UTC naive), href, cross (visita cruzada) y,
+  opcional, company + company_title (distintivo de una visita a una propiedad
+  de otra empresa o registrada por otra empresa, PLAN_VISITAS_OTRA_EMPRESA.md).
 #}
 {% import "components/ui_macros.html" as ui %}
 {% from "dashboard/components/icons.html" import icon_box %}
@@ -13,6 +15,7 @@
             <span class="flex flex-wrap items-center gap-2">
                 <span class="text-sm font-medium text-gray-900">{{ event.title }}</span>
                 {% if event.cross %}{{ ui.badge("Visita cruzada", "blue") }}{% endif %}
+                {% if event.company %}{{ ui.company_badge(event.company, title=event.company_title) }}{% endif %}
             </span>
             {% if event.text %}<span class="block text-xs text-gray-500 mt-0.5 truncate">{{ event.text }}</span>{% endif %}
         </span>

@@ -1,5 +1,5 @@
 {% import "components/ui_macros.html" as ui %}
-{% from 'components/company_macros.html' import company_checkboxes %}
+{% from 'components/company_macros.html' import company_checkboxes, company_view_fields %}
 
 <!-- Modal: editar usuario -->
 {% call ui.modal("userEditModal", "Editar usuario", size="lg") %}
@@ -14,7 +14,7 @@
             <label for="edit_role_id" class="block text-sm font-medium text-gray-700 mb-1">Rol <span class="text-red-500" aria-hidden="true">*</span></label>
             <select id="edit_role_id" name="role_id" required class="{{ ui.input_class }}">
                 {% for role in roles %}
-                <option value="{{ role.id }}">{{ role.name }}</option>
+                <option value="{{ role.id }}" {% if role.name | lower == 'admin' %}data-admin="1"{% endif %}>{{ role.name }}</option>
                 {% endfor %}
             </select>
         </div>
@@ -26,6 +26,9 @@
             {{ company_checkboxes(all_companies, [], 'edit') }}
             <p class="mt-2 text-xs text-gray-500">Si es agente, su ficha de agente queda en las mismas empresas.</p>
         </div>
+
+        {# Vista unificada (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1): solo para no admin #}
+        {{ company_view_fields(all_companies, 'edit') }}
     </div>
 
     {{ ui.modal_footer() }}
@@ -62,7 +65,46 @@
 
 
 <script>
-function editUser(id, fullName, email, phone, companyIds, roleId) {
+// ---- "Puede cambiar de empresa" y "Empresa principal" (company_view_fields) ----
+// La principal solo ofrece las empresas marcadas; si la elegida se desmarca,
+// pasa a la primera marcada. El bloque se oculta si el rol es admin (siempre
+// tiene selector); sus valores se envían igual y no cuentan para él.
+function syncPrimaryCompany(prefix) {
+    const select = document.getElementById(prefix + "_primary_company_id")
+    if (!select) return
+    const checked = new Set(
+        Array.from(document.querySelectorAll(`[data-company-group="${prefix}"] input[name="company_ids"]:checked`))
+            .map(cb => cb.value)
+    )
+    let first = null
+    Array.from(select.options).forEach(opt => {
+        const on = checked.has(opt.value)
+        opt.disabled = !on
+        opt.hidden = !on
+        if (on && first === null) first = opt.value
+    })
+    if (!checked.has(select.value)) select.value = first || ""
+}
+
+function syncCompanyViewRole(prefix, roleSelect) {
+    const block = document.getElementById(prefix + "_company_view")
+    if (!block || !roleSelect) return
+    const option = roleSelect.options[roleSelect.selectedIndex]
+    block.classList.toggle("hidden", !!(option && option.dataset.admin === "1"))
+}
+
+function initCompanyView(prefix, roleSelect) {
+    document.querySelectorAll(`[data-company-group="${prefix}"] input[name="company_ids"]`)
+        .forEach(cb => cb.addEventListener("change", () => syncPrimaryCompany(prefix)))
+    if (roleSelect) roleSelect.addEventListener("change", () => syncCompanyViewRole(prefix, roleSelect))
+    syncPrimaryCompany(prefix)
+    syncCompanyViewRole(prefix, roleSelect)
+}
+
+initCompanyView("edit", document.getElementById("edit_role_id"))
+initCompanyView("new", document.getElementById("new_role_id"))
+
+function editUser(id, fullName, email, phone, companyIds, roleId, companySwitchEnabled, primaryCompanyId) {
     document.getElementById("userEditForm").reset()
 
     document.getElementById("edit_user_id").value = id
@@ -71,6 +113,10 @@ function editUser(id, fullName, email, phone, companyIds, roleId) {
     document.getElementById("edit_phone").value = phone
     setCompanyChecks("edit", companyIds)
     document.getElementById("edit_role_id").value = roleId
+    document.getElementById("edit_company_switch_enabled").checked = !!companySwitchEnabled
+    document.getElementById("edit_primary_company_id").value = primaryCompanyId == null ? "" : String(primaryCompanyId)
+    syncPrimaryCompany("edit")
+    syncCompanyViewRole("edit", document.getElementById("edit_role_id"))
 
     UI.openModal("userEditModal")
 }

@@ -1,8 +1,10 @@
 # Multiempresa: MOYZA y MOES PREMIUM
 
 La aplicación gestiona dos empresas internas con una sola base de datos y un
-solo despliegue. El usuario elige la empresa activa en el selector del sidebar
-y todas las secciones muestran únicamente los datos de esa empresa.
+solo despliegue. El admin elige la empresa activa en el selector del sidebar
+y todas las secciones muestran únicamente los datos de esa empresa. Los
+agentes trabajan por defecto con todas sus empresas a la vez, sin selector
+(vista unificada, §22).
 
 ## 1. Modelo de datos
 
@@ -11,7 +13,8 @@ y todas las secciones muestran únicamente los datos de esa empresa.
 | `companies` | — | Identidad legal y de marca de cada empresa |
 | `properties`, `buyers` | `company_id` (NOT NULL) | Pertenecen a una sola empresa |
 | `users`, `agents`, `clients` | N:M (`user_companies`, `agent_companies`, `client_companies`) | Pueden trabajar en ambas |
-| alertas, visitas, informes, logs | Heredan de su propiedad o agente | No llevan columna propia |
+| `property_alerts`, `property_visits` | `company_id` propio (NOT NULL) | La alerta puede no tener propiedad; la visita es de la empresa desde la que se registra, que puede no ser la de la propiedad (§22) |
+| informes, logs | Heredan de su propiedad o agente | No llevan columna propia |
 
 Códigos estables: `MOYZA` y `MOES` (columna `companies.code`, clase
 `CompanyCode` en `app/core/constants.py`). El nombre visible de MOES es
@@ -30,13 +33,22 @@ editan desde la interfaz. Se pueden eliminar en una migración futura.
 - **Permisos**: el admin ve todas las empresas; el resto, las de su usuario
   más las de su ficha de agente. Un usuario sin ninguna cae a MOYZA.
 - **Selector**: `POST /switch-company` valida la empresa contra las permitidas
-  y guarda la cookie un año. Solo se muestra si el usuario tiene más de una.
+  y guarda la cookie un año. Solo se muestra si el usuario tiene más de una y
+  no está en la vista unificada: el admin siempre lo tiene; un agente, solo
+  con la casilla "Puede cambiar de empresa" de su usuario (§22).
+- **Vista unificada** (agentes, §22): `request.state.company_ids` (todas sus
+  empresas) y `request.state.unified_view`; `request.state.company` es su
+  empresa principal. Helpers `get_company_ids`, `is_unified_view` y
+  `get_active_company` en `app/web/dependencies/company.py`.
 - **Filtrado**: todo pasa por `app/services/company_scope.py` (`scope_*`,
   `get_*_in_company`). Un objeto de otra empresa se trata como inexistente.
 - **Marca en documentos**: `branding_for(company)` en
   `app/services/company_service.py` alimenta la ficha de visita (PDF y
   preview), el informe PDF, los recordatorios de compradores y los emails de
-  cuenta. Los documentos usan la empresa de la propiedad, no la de la cookie.
+  cuenta. Los documentos usan la empresa del objeto, no la de la cookie: el
+  informe, la de la propiedad; la ficha de visita, la de la **visita** (la
+  agencia del agente), con "Inmueble comercializado por {empresa}" si la
+  propiedad es de otra (§22).
 - **Endpoints `/api/*`**: no pasan por el middleware; resuelven usuario y
   empresa desde las cookies con `get_api_user` y `resolve_company_for_api`.
   Los de logs e IA devuelven 401 sin sesión (antes respondían a cualquiera).
@@ -54,8 +66,10 @@ editan desde la interfaz. Se pueden eliminar en una migración futura.
   `/properties?tab=other_company` todos los roles ven, en solo lectura, las
   propiedades activas y disponibles de la otra empresa (sin propietario ni
   enlace al detalle); y las sugerencias del perfil del comprador salen de las
-  dos empresas, con distintivo, y se pueden asociar a la alerta. Nada más de
-  la otra empresa se expone.
+  dos empresas, con distintivo, y se pueden asociar a la alerta. Además, las
+  **visitas cruzan** (§22): un agente registra visitas a propiedades de
+  cualquier empresa; la visita queda en su empresa y la de la propiedad la ve
+  en solo lectura. Nada más de la otra empresa se expone.
 
 ## 3. Despliegue en producción
 
@@ -149,10 +163,12 @@ docker exec moyza_backend python -m pytest tests/test_visit_agents.py -q
 ## 6. Visitas con agente propio y acompañante
 
 Detalle en `PLAN_VISITAS_AGENTES.md`. Cualquier agente puede registrar
-visitas en cualquier propiedad disponible de la empresa activa; la visita
+visitas en cualquier propiedad disponible (desde el 2026-11-12, de cualquier
+empresa, §22); la visita
 guarda quién la hizo (`property_visits.agent_id`) y un acompañante opcional
 (`companion_agent_id`). El principal debe ser agente de la empresa activa; el
 acompañante puede ser de cualquier empresa (cambio del 2026-10-09, commit a78f721).
+Desde §22 el principal se valida contra la empresa **de la visita**.
 
 - Listado `/visits` del agente: visitas en las que participó y las que otros
   hicieron a sus propiedades.
@@ -197,6 +213,8 @@ conservando los query params.
   en la tabla como histórico.
 - Nuevo job `freeze_yearly_reports` (1 de enero, 00:01); semanal y mensual
   congelan ahora un snapshot por empresa y agente.
+- Sigue siendo **solo del admin** también con la vista unificada (§22): el
+  agente ve sus resultados, con la suma de sus empresas, en su Inicio.
 
 Despliegue (migración `t3u4v5w6x7y8_add_company_and_breakdown_to_performance`:
 `company_id` en objetivos y snapshots con backfill a MOYZA, clave única por
@@ -229,7 +247,8 @@ docker exec moyza_backend python -m pytest tests/test_performance_service.py tes
 
 Detalle en `PLAN_DASHBOARD_INICIO.md`. `/dashboard` es el **Inicio** para
 todos los roles (el login sigue llevando ahí; el agente ya no ve "Acceso
-denegado") y todo su contenido es de la empresa activa:
+denegado") y todo su contenido es de la empresa activa (el del agente en
+vista unificada, de todas sus empresas sumadas, §22):
 
 - Agente: KPIs del período (semana / mes / año) con delta y anillo de
   objetivo solo en las métricas de `PerformanceObjectives`, % global y
@@ -577,6 +596,8 @@ excepción consciente y acotada. Lo **único** que cruza:
 | Opciones del perfil | Cascada País → Provincia → Población → Zona y tipos de inmueble | `buyer_matching.geo_options(db)` y `_property_filter_values(db, criteria)` en `routes/alerts.py` |
 | Buscador manual de la Propuesta | "¿No está en la lista?" / "Buscar una propiedad" | `/alerts/search-properties` **solo con `alert_id`** de una alerta de la empresa activa que el usuario puede trabajar; cada resultado lleva `company` |
 | Asociar / cambiar propiedad | `/alerts/{id}/link-property` y el aviso de duplicado | `_linkable_property` (sin `get_property_in_company`); exige no archivada y disponible |
+| Visitas (desde 2026-11-12, §22) | Selector `/visits/select-property` (una sección por empresa), alta `/visits/new|create/{id}`, botón "Registrar visita" de las tablas de solo lectura de Propiedades | `company_scope.get_visitable_property` / `visitable_property_clause`: de sus empresas, no archivada; de las demás, activa; siempre disponible. La visita lleva `company_id` propio |
+| Visitas de otra empresa a mis propiedades | Historial de la ficha de la propiedad, `/visits` (solo lectura), descarga de la ficha, Inicio del admin | `scope_visible_visits` / `get_visible_visit`; gestionar (editar, firmar, borrar, generar) solo con `get_visit_in_company` (empresa de la visita) |
 
 Reglas:
 
@@ -599,7 +620,12 @@ Reglas:
 **No cruza** (sigue limitado a la empresa activa): el modal de creación de
 alertas con referencia y su buscador (`/alerts/search-properties` sin
 `alert_id`), `/alerts/create`, la ficha de propiedad (`/properties/{id}` da
-"no encontrada"), visitas, informes, métricas y listados de propiedades.
+"no encontrada"), informes, métricas y listados de propiedades. Las visitas
+cruzan desde el 2026-11-12 (§22).
+
+La vista unificada de agentes (§22) no es una excepción a esta lista: un
+agente solo ve a la vez las empresas a las que pertenece (usuario o ficha de
+agente), y en ella no sale "Cambia de empresa para ver la ficha".
 
 Sin migración ni variables nuevas: desplegar el código y reiniciar.
 
@@ -748,3 +774,140 @@ Tras desplegar:
    prueba y después de verdad:
    `docker exec <backend> python scripts/normalize_city_names.py` y
    `docker exec <backend> python scripts/normalize_city_names.py --apply`.
+
+## 22. Visitas a propiedades de cualquier empresa y vista unificada de agentes (2026-11-12)
+
+Detalle en `PLAN_VISTA_UNIFICADA_AGENTES.md` (fases A a F) y
+`PLAN_VISITAS_OTRA_EMPRESA.md` (su fase E). Resumen de los dos planes:
+
+**Vista unificada de agentes** (`PLAN_VISTA_UNIFICADA_AGENTES.md`):
+
+- Un usuario agente trabaja con **todas sus empresas a la vez**, sin
+  selector: `request.state.company_ids` (las de su usuario más las de su
+  ficha de agente) y `request.state.unified_view`. La empresa "activa" es su
+  **empresa principal** (`users.primary_company_id`), que da la marca del
+  sidebar y la empresa por defecto de lo que crea. Con la casilla "Puede
+  cambiar de empresa" (`users.company_switch_enabled`) vuelve a la vista por
+  empresa con selector. El admin, siempre con selector y una empresa activa.
+- `scope_*` / `get_*_in_company` aceptan un id o una lista. Alertas,
+  compradores, Inicio (métricas y objetivos sumados), notificaciones,
+  propiedades, clientes e informes leen de todas sus empresas, con
+  distintivo (`ui.company_badge`) cuando ve más de una.
+
+**Visitas a propiedades de cualquier empresa** (`PLAN_VISITAS_OTRA_EMPRESA.md`):
+
+- **Modelo**: `property_visits.company_id` (migración `g3v4i5s6c7o8`):
+  empresa desde la que se registra la visita (la agencia del agente).
+  Backfill = empresa de la propiedad (nada cambia para las existentes). Si un
+  alta no la fija, se rellena con la de la propiedad (`before_insert`).
+  `scope_visits` / `get_visit_in_company` filtran por ella.
+- **Empresa de una visita nueva**: admin y vista por empresa, la activa;
+  agente en vista unificada con una empresa, esa; con dos, la elegida en el
+  select "Empresa de la visita" del formulario (principal preseleccionada,
+  validada contra `company_ids`). El agente principal se valida contra la
+  empresa de la visita; el acompañante, de cualquier empresa, como siempre.
+- **Selector**: "Mis propiedades" y una sección por empresa activa ("Otras
+  propiedades de {empresa}" para las suyas, "Propiedades de {empresa}" para
+  las demás, solo inventario activo y disponible), con distintivo y búsqueda
+  sobre todas. Las tablas de solo lectura de Propiedades llevan "Registrar
+  visita" junto al título.
+- **Calle**: la de una propiedad de otra empresa, en el selector y el
+  formulario solo para quien pertenece a esa empresa o el admin (regla de
+  Propiedades); la ficha PDF y su vista previa la imprimen siempre.
+- **Ficha**: marca de la empresa de la visita (logo, razón social, "en
+  calidad de representante de la agencia inmobiliaria {marca}", RGPD); si la
+  propiedad es de otra empresa, fila "Comercialización: Inmueble
+  comercializado por {empresa de la propiedad}" en los datos del inmueble.
+- **Visibilidad**: la empresa de la visita la gestiona (editar, firmar,
+  completar, borrar, generar y enviar la ficha). La de la propiedad la ve en
+  el historial de la ficha de la propiedad y en `/visits` marcada "Visita de
+  {empresa}", en solo lectura (solo descargar la ficha), y en la actividad
+  reciente de su Inicio. El captador recibe el aviso in-app como siempre (en
+  la empresa de la propiedad); acompañante, ficha firmada y envío fallido,
+  en la de la visita. Los logs de envío de la ficha van por la empresa de la
+  visita.
+- **Métrica "Hojas de visita"**: cuenta para el agente (principal o
+  acompañante) en la empresa de la visita, sea de quien sea la propiedad
+  (Resultados, Inicio, equipo, tendencia). La lupa lo explica ("visitas
+  realizadas por {agente} como principal o acompañante, registradas en
+  {empresa}, a propiedades de cualquier empresa") y marca con distintivo, sin
+  enlace, las propiedades de otra empresa. Los snapshots congelados no
+  cambian (antes no había visitas cruzadas y el backfill mantiene la cifra).
+
+**Resultados del agente** (fase F de `PLAN_VISTA_UNIFICADA_AGENTES.md`):
+
+- **Resultados Comerciales sigue siendo solo del admin**, también con la
+  vista unificada: sidebar, pestañas, lupa y CSV (decisiones de
+  `PLAN_RESULTADOS_COMERCIALES.md` y `PLAN_TRAZABILIDAD_INDICADORES.md`:
+  "nada para agentes"). Un agente que entra por URL vuelve a `/alerts` con
+  "Solo administradores…" y la lupa responde 403, como antes.
+- Los resultados del agente con la **suma de sus empresas** (§5-3 del plan)
+  son los de su **Inicio**: KPIs y objetivos de la semana y el mes calculados
+  por empresa (en vivo o desde el snapshot congelado de cada una) y sumados
+  (`sum_metrics` / `sum_targets` de `performance_report_service`); objetivo
+  = suma de los de cada empresa, o el de la única que lo tenga; puesto entre
+  los agentes de sus empresas; observaciones del admin unidas con el nombre
+  de la empresa delante ("MOYZA: …"); cabecera "MOYZA y MOES PREMIUM · fecha".
+- El enlace "Ver histórico y año" del Inicio queda solo para el admin: al
+  agente lo llevaba a Resultados y de ahí a `/alerts` con un error. El agente
+  no tiene vista anual ni histórico desde que el Inicio perdió el selector
+  de período (`PLAN_INICIO_SEMANA_MES.md`, D2); abrirle una vista propia en
+  Resultados sería una decisión nueva (permisos).
+- El admin no cambia: selector, Rendimiento / Evolución / Cierres por empresa
+  activa, snapshots y objetivos por agente y empresa, lupa y CSV sin columna
+  "Empresa", observaciones por empresa.
+
+**Despliegue de toda la tanda** (vista unificada fases A a F y visitas a
+cualquier empresa; commits en `PLAN_VISTA_UNIFICADA_AGENTES.md` §6):
+
+1. Copia de seguridad:
+   `docker exec moyza_db pg_dump -U <usuario> -d <bd> -Fc > backup_pre_vista_unificada_$(date +%F).dump`
+2. Desplegar el código y `docker exec moyza_backend alembic upgrade head`.
+   Aplica, en este orden:
+   - `f2u3v4i5e6w7_user_unified_view`: `users.company_switch_enabled`
+     (false para todos) y `users.primary_company_id` (rellenada con la primera
+     empresa de `user_companies` de cada usuario).
+   - `g3v4i5s6c7o8_visit_company`: `property_visits.company_id` (backfill =
+     empresa de la propiedad, NOT NULL, índice).
+3. Verificar:
+
+   ```bash
+   docker exec moyza_db psql -U <usuario> -d <bd> -c "
+     select company_switch_enabled, count(*) from users group by 1;
+     select count(*) as sin_principal from users where primary_company_id is null;
+     select count(*) as visitas, count(*) filter (where v.company_id <> p.company_id) as cruzadas
+       from property_visits v join properties p on p.id = v.property_id;"
+   ```
+
+   Esperado: todos los usuarios con `company_switch_enabled = false`, ninguno
+   sin empresa principal (salvo usuarios sin empresas) y 0 visitas cruzadas.
+4. CSS: sin clases de Tailwind nuevas en ninguna fase; recompilar solo si el
+   entorno no trae `static/css/tailwind.css` compilado. Los JS cambiados
+   (`notifications.js`, `alert-assign.js`) llevan `?v=<mtime>`: no hace falta
+   vaciar la caché del navegador.
+5. Reiniciar el backend: `docker restart moyza_backend`. Sin variables de
+   entorno nuevas ni jobs nuevos.
+6. **Aviso al equipo**: tras el despliegue todos los usuarios agente están en
+   la **vista unificada**. Los que tienen usuario o ficha de agente en las dos
+   empresas ven las dos a la vez, sin selector, con la marca de su empresa
+   principal; la ficha de agente vuelve a dar acceso (sustituye la medida
+   provisional de `ee09752`), así que un agente con ficha en MOES y usuario
+   solo en MOYZA pasa a ver también MOES. Para que alguien conserve el
+   selector: Usuarios → Editar → "Puede cambiar de empresa". Revisar la
+   "Empresa principal" de los usuarios que trabajan sobre todo en MOES. El
+   admin no cambia.
+7. Prueba manual: como admin, el selector sigue en el sidebar y cambiar de
+   empresa cambia Compradores, Propiedades, Visitas y Resultados; como un
+   agente de las dos empresas, sin selector, Compradores / Propiedades /
+   Visitas / Notificaciones con distintivo de empresa e Inicio con
+   "MOYZA y MOES PREMIUM".
+
+Rollback: `docker exec moyza_backend alembic downgrade e1n2v3p4r5o6` con el
+código anterior desplegado. El downgrade de `g3v4i5s6c7o8` se detiene si ya
+hay visitas cruzadas (hay que borrarlas antes); el de `f2u3v4i5e6w7` borra
+las dos columnas de `users` (se pierde "Puede cambiar de empresa" y la
+empresa principal de cada usuario).
+
+```bash
+docker exec moyza_backend python -m pytest tests/test_unified_view_alerts.py tests/test_unified_view_dashboard.py tests/test_unified_view_properties.py tests/test_unified_view_results.py tests/test_visit_company.py tests/test_visits_cross_company.py -q
+```

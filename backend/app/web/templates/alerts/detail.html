@@ -28,7 +28,9 @@
                     <div class="space-y-2">
                         <div>
                             {# Propiedad de la otra empresa (PLAN_SUGERENCIAS_MULTIEMPRESA.md): distintivo y
-                               sin enlace (fuera de su empresa la ficha es "no encontrada") #}
+                               sin enlace (fuera de su empresa la ficha es "no encontrada"). Vista unificada:
+                               "Ver" si es de alguna empresa del usuario; distintivo si no es la de la alerta #}
+                            {% set property_badge = property_other_company or alert.property.company_id != alert.company_id %}
                             {% if property_link_allowed and not property_other_company %}
                             <a href="/properties/{{ alert.property.id }}"
                                class="text-blue-600 hover:underline font-semibold text-base">
@@ -37,10 +39,10 @@
                             {% else %}
                             <p class="text-gray-900 font-semibold text-base">{{ alert.property.title }}</p>
                             {% endif %}
-                            {% if property_other_company %}
+                            {% if property_badge %}
                             <p class="mt-1 flex flex-wrap items-center gap-2">
                                 {{ ui.company_badge(alert.property.company) }}
-                                {% if property_link_allowed %}<span class="text-xs text-gray-500">Cambia de empresa para ver la ficha</span>{% endif %}
+                                {% if property_link_allowed and property_other_company and not unified_view %}<span class="text-xs text-gray-500">Cambia de empresa para ver la ficha</span>{% endif %}
                             </p>
                             {% endif %}
                         </div>
@@ -156,7 +158,11 @@
                 </svg>
             </a>
             <div>
-                <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">Detalle de Alerta</h1>
+                {# Vista unificada con varias empresas: de qué empresa es la alerta (PLAN_VISTA_UNIFICADA_AGENTES.md) #}
+                <h1 class="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xl sm:text-3xl font-bold text-gray-800">
+                    <span>Detalle de Alerta</span>
+                    {% if show_company_badges %}{{ ui.company_badge(alert.company, title="Alerta de " ~ alert.company.name) }}{% endif %}
+                </h1>
                 {% if alert.property %}
                 <p class="text-gray-600 mt-1">{{ alert.lead_name }} - {{ alert.property.title }}</p>
                 {% else %}
@@ -504,7 +510,7 @@
 <form method="POST" action="/alerts/{{ alert.id }}/cede" data-once data-loading-text="Cediendo…">
     <input type="hidden" name="next" value="/alerts/{{ alert.id }}">
     <div class="p-6 space-y-4">
-        {{ assign_fields("ce", groups=cession_groups, mode="cede") }}
+        {{ assign_fields("ce", groups=cession_groups, mode="cede", company=alert.company) }}
         <p class="text-sm text-gray-500">El comprador pasará al agente elegido como alerta nueva (Pendiente y sin leer) y dejará de aparecer en tu listado. Los seguimientos se conservan.</p>
     </div>
     {{ ui.modal_footer(submit_label="Ceder comprador") }}

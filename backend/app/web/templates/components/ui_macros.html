@@ -42,9 +42,11 @@
   con el punto del color de la empresa (`companies.primary_color`, señal de identidad;
   tokens.md "Marca por empresa"). Nunca color de empresa en botones. Sin empresa, nada.
   El JS del buscador de Propuesta (alerts/_search_steps.html) pinta el mismo HTML.
+  `title` cambia el tooltip para lo que no es una propiedad (alerta, comprador; vista
+  unificada de PLAN_VISTA_UNIFICADA_AGENTES.md).
 #}
-{% macro company_badge(company, extra="") -%}
-{% if company %}<span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium {{ _tones['gray'] }} {{ extra }}" title="Propiedad de {{ company.name }}">
+{% macro company_badge(company, extra="", title=None) -%}
+{% if company %}<span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium {{ _tones['gray'] }} {{ extra }}" title="{{ title or ('Propiedad de ' ~ company.name) }}">
     <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background-color: {{ company.primary_color or '#000000' }}" aria-hidden="true"></span><span class="sr-only">Empresa: </span>{{ company.name }}
 </span>{% endif %}
 {%- endmacro %}

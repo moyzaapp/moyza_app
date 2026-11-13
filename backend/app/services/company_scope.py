@@ -2,11 +2,22 @@
 
 Punto único para restringir consultas a la empresa activa. Reglas:
 
+- `company_id` puede ser un id (`==`) o una lista / tupla / set de ids (`IN`):
+  la vista unificada de los agentes (PLAN_VISTA_UNIFICADA_AGENTES.md) lee de
+  todas sus empresas a la vez con `get_company_ids(request)`. Una lista vacía
+  no encuentra nada. `add_to_company` / `remove_from_company` siguen siendo de
+  una sola empresa (escriben).
+
 - `properties`, `buyers` y `property_alerts` tienen `company_id` directo (las
   alertas desde PLAN_ALERTA_SIN_REFERENCIA.md: una búsqueda general puede no
   tener propiedad todavía).
 - `agents` y `clients` pertenecen a N empresas (tablas de pertenencia).
-- Visitas, informes y logs heredan la empresa de su propiedad.
+- `property_visits` tiene `company_id` propio (PLAN_VISITAS_OTRA_EMPRESA.md):
+  la empresa desde la que se registra, que puede no ser la de la propiedad.
+  `scope_visits` filtra por esa columna (lo que la empresa gestiona y cuenta
+  en "Hojas de visita"); `scope_visible_visits` añade las visitas que otras
+  empresas registraron a sus propiedades (solo lectura).
+- Informes y logs heredan la empresa de su propiedad.
 
 Se usan EXISTS (`.has()` / `.any()`) en lugar de JOIN para que el filtro
 se pueda añadir a cualquier consulta sin chocar con joins ya existentes.
@@ -16,8 +27,14 @@ PLAN_SUGERENCIAS_MULTIEMPRESA.md): las sugerencias del perfil del comprador
 (`buyer_matching.matching_properties` sin empresa), las opciones del perfil
 (`geo_options`, tipos), el buscador de la Propuesta con `alert_id` y asociar
 una propiedad a una alerta (`routes/alerts.py::_linkable_property`) NO pasan
-por estos filtros de propiedades. No añadir más sin decisión explícita.
+por estos filtros de propiedades; tampoco el selector y el alta de visitas
+(`get_visitable_property`, PLAN_VISITAS_OTRA_EMPRESA.md: una visita se puede
+registrar a una propiedad de cualquier empresa). No añadir más sin decisión
+explícita.
 """
+from typing import Union
+
+from sqlalchemy import and_
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -31,20 +48,46 @@ from app.models.property_visit import PropertyVisit
 from app.models.report import Report
 
 
+# Un id o varios (vista unificada)
+CompanyIds = Union[int, list, tuple, set, frozenset]
+
+_MANY = (list, tuple, set, frozenset)
+
+
+def _is_many(company_id) -> bool:
+    return isinstance(company_id, _MANY)
+
+
+def company_match(column, company_id: CompanyIds):
+    """Cláusula `column == id` o `column IN (ids)` según llegue uno o varios."""
+    if _is_many(company_id):
+        return column.in_(list(company_id))
+    return column == company_id
+
+
+def company_contains(company_id: CompanyIds, value) -> bool:
+    """`value == id` o `value in ids` (comprobaciones en Python)."""
+    if value is None:
+        return False
+    if _is_many(company_id):
+        return value in company_id
+    return value == company_id
+
+
 # ---------------------------------------------------------------------------
 # Filtros de consulta
 # ---------------------------------------------------------------------------
 
-def scope_properties(query, company_id: int):
-    return query.filter(Property.company_id == company_id)
+def scope_properties(query, company_id: CompanyIds):
+    return query.filter(company_match(Property.company_id, company_id))
 
 
-def scope_buyers(query, company_id: int):
-    return query.filter(Buyer.company_id == company_id)
+def scope_buyers(query, company_id: CompanyIds):
+    return query.filter(company_match(Buyer.company_id, company_id))
 
 
-def scope_agents(query, company_id: int):
-    return query.filter(Agent.companies.any(Company.id == company_id))
+def scope_agents(query, company_id: CompanyIds):
+    return query.filter(Agent.companies.any(company_match(Company.id, company_id)))
 
 
 def active_agents(query):
@@ -57,27 +100,45 @@ def active_agents(query):
     return query.filter(Agent.is_active.is_(True))
 
 
-def scope_active_agents(query, company_id: int):
+def scope_active_agents(query, company_id: CompanyIds):
     """Agentes activos de la empresa (PLAN_BAJA_USUARIOS.md §4.2)."""
     return active_agents(scope_agents(query, company_id))
 
 
-def scope_clients(query, company_id: int):
-    return query.filter(Client.companies.any(Company.id == company_id))
+def scope_clients(query, company_id: CompanyIds):
+    return query.filter(Client.companies.any(company_match(Company.id, company_id)))
 
 
-def scope_alerts(query, company_id: int):
+def scope_alerts(query, company_id: CompanyIds):
     # Columna propia de la alerta: incluye las búsquedas sin propiedad y evita
     # el EXISTS sobre properties
-    return query.filter(PropertyAlert.company_id == company_id)
+    return query.filter(company_match(PropertyAlert.company_id, company_id))
 
 
-def scope_visits(query, company_id: int):
-    return query.filter(PropertyVisit.property.has(Property.company_id == company_id))
+def scope_visits(query, company_id: CompanyIds):
+    """Visitas registradas en la empresa (columna propia de la visita)."""
+    return query.filter(company_match(PropertyVisit.company_id, company_id))
 
 
-def scope_reports(query, company_id: int):
-    return query.filter(Report.property.has(Property.company_id == company_id))
+def visible_visit_clause(company_id: CompanyIds):
+    """Cláusula: visitas de la empresa o a propiedades de la empresa.
+
+    Las segundas (registradas por otra empresa a una propiedad suya) se ven
+    en solo lectura (PLAN_VISITAS_OTRA_EMPRESA.md §5, decisión 2).
+    """
+    return or_(
+        company_match(PropertyVisit.company_id, company_id),
+        PropertyVisit.property.has(company_match(Property.company_id, company_id)),
+    )
+
+
+def scope_visible_visits(query, company_id: CompanyIds):
+    """Visitas que la empresa ve: las suyas y las de otras a sus propiedades."""
+    return query.filter(visible_visit_clause(company_id))
+
+
+def scope_reports(query, company_id: CompanyIds):
+    return query.filter(Report.property.has(company_match(Property.company_id, company_id)))
 
 
 def visit_agent_clause(agent_id: int):
@@ -97,45 +158,47 @@ def visits_for_agent(query, agent_id: int):
     return query.filter(visit_agent_clause(agent_id))
 
 
-def property_in_company_clause(company_id: int):
+def property_in_company_clause(company_id: CompanyIds):
     """Cláusula reutilizable para modelos con relación `property` (logs)."""
-    return Property.company_id == company_id
+    return company_match(Property.company_id, company_id)
 
 
 # ---------------------------------------------------------------------------
 # Comprobaciones sobre objetos ya cargados
 # ---------------------------------------------------------------------------
 
-def in_company(obj, company_id: int) -> bool:
-    """True si el objeto (con `companies` N:M o `company_id`) pertenece a la empresa."""
+def in_company(obj, company_id: CompanyIds) -> bool:
+    """True si el objeto (con `companies` N:M o `company_id`) pertenece a la
+    empresa o, con una lista de ids, a alguna de ellas."""
     if obj is None:
         return False
 
     if hasattr(obj, "company_id"):
-        return obj.company_id == company_id
+        return company_contains(company_id, obj.company_id)
 
     companies = getattr(obj, "companies", None)
     if companies is not None:
-        return any(c.id == company_id for c in companies)
+        return any(company_contains(company_id, c.id) for c in companies)
 
     return False
 
 
-def property_in_company(property_item, company_id: int) -> bool:
-    return property_item is not None and property_item.company_id == company_id
+def property_in_company(property_item, company_id: CompanyIds) -> bool:
+    return property_item is not None and company_contains(company_id, property_item.company_id)
 
 
-def child_in_company(obj, company_id: int) -> bool:
+def child_in_company(obj, company_id: CompanyIds) -> bool:
     """Para alertas, visitas e informes.
 
-    Las alertas tienen empresa propia (pueden no tener propiedad); visitas e
+    Alertas y visitas tienen empresa propia (la alerta puede no tener
+    propiedad; la visita puede ser a una propiedad de otra empresa); los
     informes heredan la de su propiedad.
     """
     if obj is None:
         return False
     own_company_id = getattr(obj, "company_id", None)
     if own_company_id is not None:
-        return own_company_id == company_id
+        return company_contains(company_id, own_company_id)
     return property_in_company(getattr(obj, "property", None), company_id)
 
 
@@ -143,7 +206,7 @@ def child_in_company(obj, company_id: int) -> bool:
 # Búsquedas por id dentro de la empresa
 # ---------------------------------------------------------------------------
 
-def get_property_in_company(db: Session, property_id: int, company_id: int):
+def get_property_in_company(db: Session, property_id: int, company_id: CompanyIds):
     return (
         scope_properties(db.query(Property), company_id)
         .filter(Property.id == property_id)
@@ -151,7 +214,41 @@ def get_property_in_company(db: Session, property_id: int, company_id: int):
     )
 
 
-def get_buyer_in_company(db: Session, buyer_id: int, company_id: int):
+def visitable_property_clause(company_id: CompanyIds):
+    """Propiedades en las que se puede registrar una visita (sin disponibilidad).
+
+    PLAN_VISITAS_OTRA_EMPRESA.md §5 (decisión 4): de cualquier empresa activa.
+    De las empresas del usuario (`company_id`), cualquier estado salvo
+    archivada (como siempre); de las demás, solo las activas (mismo criterio
+    que la pestaña "Propiedades de {otra empresa}"). La disponibilidad
+    (`Property.available_clause` / `is_available`) la comprueba quien llama.
+    """
+    from app.core.constants import PropertyStatus
+
+    return and_(
+        Property.company.has(Company.is_active.is_(True)),
+        or_(
+            and_(company_match(Property.company_id, company_id), Property.status != PropertyStatus.ARCHIVED),
+            Property.status == PropertyStatus.ACTIVE,
+        ),
+    )
+
+
+def get_visitable_property(db: Session, property_id: int, company_id: CompanyIds):
+    """Propiedad de cualquier empresa sobre la que se puede registrar una visita.
+
+    Ver `visitable_property_clause`. Excepción consciente al alcance por
+    empresa (cabecera del módulo): la visita es de la empresa desde la que se
+    registra, no de la propiedad.
+    """
+    return (
+        db.query(Property)
+        .filter(Property.id == property_id, visitable_property_clause(company_id))
+        .first()
+    )
+
+
+def get_buyer_in_company(db: Session, buyer_id: int, company_id: CompanyIds):
     return (
         scope_buyers(db.query(Buyer), company_id)
         .filter(Buyer.id == buyer_id)
@@ -159,7 +256,7 @@ def get_buyer_in_company(db: Session, buyer_id: int, company_id: int):
     )
 
 
-def get_agent_in_company(db: Session, agent_id: int, company_id: int):
+def get_agent_in_company(db: Session, agent_id: int, company_id: CompanyIds):
     return (
         scope_agents(db.query(Agent), company_id)
         .filter(Agent.id == agent_id)
@@ -167,7 +264,7 @@ def get_agent_in_company(db: Session, agent_id: int, company_id: int):
     )
 
 
-def get_client_in_company(db: Session, client_id: int, company_id: int):
+def get_client_in_company(db: Session, client_id: int, company_id: CompanyIds):
     return (
         scope_clients(db.query(Client), company_id)
         .filter(Client.id == client_id)
@@ -175,7 +272,7 @@ def get_client_in_company(db: Session, client_id: int, company_id: int):
     )
 
 
-def get_alert_in_company(db: Session, alert_id: int, company_id: int):
+def get_alert_in_company(db: Session, alert_id: int, company_id: CompanyIds):
     return (
         scope_alerts(db.query(PropertyAlert), company_id)
         .filter(PropertyAlert.id == alert_id)
@@ -183,7 +280,8 @@ def get_alert_in_company(db: Session, alert_id: int, company_id: int):
     )
 
 
-def get_visit_in_company(db: Session, visit_id: int, company_id: int):
+def get_visit_in_company(db: Session, visit_id: int, company_id: CompanyIds):
+    """Visita registrada en la empresa (para gestionarla: editar, firmar...)."""
     return (
         scope_visits(db.query(PropertyVisit), company_id)
         .filter(PropertyVisit.id == visit_id)
@@ -191,7 +289,16 @@ def get_visit_in_company(db: Session, visit_id: int, company_id: int):
     )
 
 
-def get_report_in_company(db: Session, report_id: int, company_id: int):
+def get_visible_visit(db: Session, visit_id: int, company_id: CompanyIds):
+    """Visita de la empresa o a una propiedad suya (solo lectura: descargar)."""
+    return (
+        scope_visible_visits(db.query(PropertyVisit), company_id)
+        .filter(PropertyVisit.id == visit_id)
+        .first()
+    )
+
+
+def get_report_in_company(db: Session, report_id: int, company_id: CompanyIds):
     return (
         scope_reports(db.query(Report), company_id)
         .filter(Report.id == report_id)

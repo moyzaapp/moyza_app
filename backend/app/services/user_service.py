@@ -18,12 +18,25 @@ INACTIVE_EMAIL_MESSAGE = "Ese usuario está dado de baja. Reactívalo desde la l
 HAS_HISTORY_MESSAGE = "Tiene historial: dale de baja en lugar de eliminarlo."
 
 
-def _apply_companies(db: Session, user: User, agent: Optional[Agent], company_ids: list[int]):
-    """Asigna las empresas al usuario y, si existe, a su ficha de agente."""
+# Empresa principal fuera de las marcadas (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1)
+PRIMARY_COMPANY_MESSAGE = "La empresa principal tiene que ser una de las empresas marcadas."
+
+
+def _apply_companies(db: Session, user: User, agent: Optional[Agent], company_ids: list[int],
+                     primary_company_id: Optional[int] = None):
+    """Asigna las empresas al usuario y, si existe, a su ficha de agente.
+
+    También la empresa principal (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1): la
+    elegida si está entre las asignadas (si no, 400) o, sin elegir, la primera.
+    """
     companies = resolve_companies(db, company_ids)
+
+    if primary_company_id is not None and primary_company_id not in {c.id for c in companies}:
+        raise HTTPException(status_code=400, detail=PRIMARY_COMPANY_MESSAGE)
 
     user.companies = list(companies)
     user.company = companies_label(companies)
+    user.primary_company_id = primary_company_id if primary_company_id is not None else companies[0].id
 
     if agent is not None:
         agent.companies = list(companies)
@@ -78,13 +91,15 @@ def create_user(
         hashed_password=hash_password(user.password),
         role_id=user.role_id,
         phone=user.phone,
-        company=user.company
+        company=user.company,
+        company_switch_enabled=user.company_switch_enabled,
     )
 
     db.add(db_user)
 
-    # Empresas del usuario (y texto heredado `company`)
-    _apply_companies(db, db_user, None, user.company_ids)
+    # Empresas del usuario (y texto heredado `company`) y empresa principal.
+    # Si la principal no vale, se lanza antes del commit: no queda nada a medias.
+    _apply_companies(db, db_user, None, user.company_ids, user.primary_company_id)
 
     db.commit()
     db.refresh(db_user)
@@ -163,6 +178,7 @@ def update_user(db: Session, user_id: int, data: UserUpdate):
     user.full_name = data.full_name
     user.role_id = data.role_id
     user.phone = data.phone
+    user.company_switch_enabled = data.company_switch_enabled
 
     agent = db.query(Agent).filter(Agent.email == user.email).first()
 
@@ -182,7 +198,7 @@ def update_user(db: Session, user_id: int, data: UserUpdate):
             db.add(agent)
 
     # Empresas del usuario y de su ficha de agente (si la tiene)
-    _apply_companies(db, user, agent, data.company_ids)
+    _apply_companies(db, user, agent, data.company_ids, data.primary_company_id)
 
     db.commit()
     db.refresh(user)

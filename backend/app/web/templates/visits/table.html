@@ -1,3 +1,12 @@
+{#
+  Listado de visitas. Además de las registradas en las empresas del usuario
+  (`company_ids`), las que otra empresa registró a propiedades suyas, en solo
+  lectura: distintivo "Visita de {empresa}" y solo "Descargar"
+  (PLAN_VISITAS_OTRA_EMPRESA.md §5, decisión 2). La propiedad lleva el
+  distintivo de su empresa si no es la de la visita (y no es una de las del
+  usuario, o se ven varias) y solo enlaza a su ficha si es de sus empresas.
+#}
+{% import "components/ui_macros.html" as ui %}
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
 
     <div class="overflow-x-auto">
@@ -42,6 +51,8 @@
             <tbody>
 
                 {% for visit in visits %}
+                {% set visit_editable = visit.company_id in company_ids %}
+                {% set property_linkable = visit.property and visit.property.company_id in company_ids %}
 
                 <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
 
@@ -50,9 +61,22 @@
                     </td>
 
                     <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
+                        {% if property_linkable %}
                         <a href="/properties/{{ visit.property_id }}" class="text-blue-600 hover:text-blue-800 hover:underline">
                             {{ visit.property.title }}
                         </a>
+                        {% else %}
+                        <span>{{ visit.property.title }}</span>
+                        {% endif %}
+                        {% if visit.is_cross_company and (not property_linkable or show_company_badges) %}
+                        <div class="mt-1">{{ ui.company_badge(visit.property.company, extra="whitespace-nowrap") }}</div>
+                        {% endif %}
+                        {% if not visit_editable %}
+                        <div class="mt-1 flex flex-wrap items-center gap-1">
+                            <span class="text-xs text-gray-500">Visita de</span>
+                            {{ ui.company_badge(visit.company, extra="whitespace-nowrap", title="Visita registrada en " ~ visit.company.name ~ " (solo lectura)") }}
+                        </div>
+                        {% endif %}
                     </td>
 
                     <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
@@ -121,6 +145,7 @@
                     <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
                         <div class="flex items-center justify-center gap-2 whitespace-nowrap">
 
+                            {% if visit_editable %}
                             <!-- Editar -->
                             <a
                                 href="/visits/edit/{{ visit.id }}"
@@ -133,8 +158,10 @@
                                 <span class="hidden sm:inline">Editar</span>
                             </a>
 
+                            {% endif %}
+
                             {% if visit.visit_sheet_filepath %}
-                                <!-- Descargar -->
+                                <!-- Descargar (también en solo lectura) -->
                                 <a
                                     href="/visits/{{ visit.id }}/download"
                                     class="bg-gray-800 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-gray-900 active:bg-black transition-colors text-xs sm:text-sm font-medium flex items-center gap-1"
@@ -145,7 +172,7 @@
                                     </svg>
                                     <span class="hidden sm:inline">Descargar</span>
                                 </a>
-                            {% else %}
+                            {% elif visit_editable %}
                                 <!-- Generar PDF -->
                                 <form action="/visits/{{ visit.id }}/generate-pdf" method="POST" class="inline-block">
                                     <button
@@ -161,6 +188,7 @@
                                 </form>
                             {% endif %}
 
+                            {% if visit_editable %}
                             <!-- Eliminar -->
                             <form
                                 action="/visits/delete"
@@ -180,6 +208,9 @@
                                     <span class="hidden sm:inline">Eliminar</span>
                                 </button>
                             </form>
+                            {% elif not visit.visit_sheet_filepath %}
+                            <span class="text-xs text-gray-500">Solo lectura</span>
+                            {% endif %}
 
                         </div>
                     </td>

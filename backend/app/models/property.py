@@ -36,10 +36,10 @@ class Property(Base):
 
     ref_catastral = Column(String, nullable=True)
 
-    # Enlace a la ficha en la web de la empresa pegado a mano
-    # (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.1). Tiene prioridad sobre la
-    # plantilla de la empresa (`Company.property_url_template`); cubre las
-    # excepciones del patrón y las empresas sin plantilla. Leer con
+    # Enlace a la ficha en la web de la empresa
+    # (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.1). Lo trae la ETL del CRM y se
+    # puede corregir en el formulario. Tiene prioridad; si está vacío se usa
+    # la plantilla de la empresa (`Company.property_url_template`). Leer con
     # app/services/property_link.property_public_url.
     public_url = Column(String(500), nullable=True)
 

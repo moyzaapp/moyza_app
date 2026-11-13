@@ -101,6 +101,20 @@ async def auth_page(
 from app.services.company_service import company_ids_from_form as _company_ids_from_form
 
 
+def company_view_from_form(form) -> dict:
+    """Casilla "Puede cambiar de empresa" y "Empresa principal" del formulario
+    de usuario (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1). La principal vacía o no
+    numérica cuenta como sin elegir (la primera marcada)."""
+    try:
+        primary_company_id = int(form.get("primary_company_id") or "")
+    except (TypeError, ValueError):
+        primary_company_id = None
+    return {
+        "company_switch_enabled": form.get("company_switch_enabled") in ("1", "on", "true"),
+        "primary_company_id": primary_company_id,
+    }
+
+
 
 @router.post("/login")
 async def login(
@@ -231,6 +245,7 @@ async def create_user_endpoint(
             phone=phone,
             company=company,
             company_ids=_company_ids_from_form(form),
+            **company_view_from_form(form),
         )
 
         # El correo de bienvenida lleva la marca de la empresa activa del admin
@@ -281,6 +296,7 @@ async def update_user_endpoint(
             phone=phone,
             company=company,
             company_ids=_company_ids_from_form(form),
+            **company_view_from_form(form),
         )
 
         update_user(db, user_id, user_data)

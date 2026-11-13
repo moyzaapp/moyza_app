@@ -490,31 +490,29 @@ def test_agente_solo_moes_recibe_alerta_moyza(data):
     [alert] = _alerts_of_buyer(db, name)
     db.close()
 
-    # Con MOES activa: banner con el cambio de empresa, y la alerta no sale en la lista
+    # Vista unificada (PLAN_VISTA_UNIFICADA_AGENTES.md, fase B): el agente de MOES
+    # ve la alerta de MOYZA en su listado, con distintivo, sin banner ni selector
     moes_view = _Client(EMAIL.format("moes"), "MOES")
     status, body, _ = moes_view.get("/alerts")
-    assert status == 200 and "Tienes 1 comprador asignado en MOYZA" in body
-    assert 'action="/switch-company"' in body and 'name="code" value="MOYZA"' in body
-    assert name not in body
-    # El aviso in-app vive en MOYZA: con MOES activa no está en la campana
-    assert f"Te han asignado un comprador: {name}" not in moes_view.get("/dashboard")[1]
-
-    # Puede cambiar a MOYZA
-    status, _, headers = moes_view.post("/switch-company", {"code": "MOYZA", "next": "/alerts"})
-    assert status == 303 and "active_company=MOYZA" in headers.get("set-cookie", "")
-
-    # Con MOYZA activa: ve y trabaja su alerta, la campana tiene el aviso y no el banner
-    moyza_view = _Client(EMAIL.format("moes"), "MOYZA")
-    status, body, _ = moyza_view.get("/alerts")
     assert status == 200 and name in body and "comprador asignado en" not in body
+    assert 'action="/switch-company"' not in body
+    assert 'title="Alerta de MOYZA"' in body
     # Solo sus alertas: no ve las de otros agentes de MOYZA
     assert f"{TAG} DEFECTO" not in body and f"{TAG} OTRO CON MOTIVO" not in body
-    assert moyza_view.get(f"/alerts/{alert.id}")[0] == 200
-    status, _, headers = moyza_view.post(f"/alerts/{alert.id}/follow-up", {
-        "action_type": "CONTACTADO", "notes": "Llamada desde MOES",
+
+    # No hay empresa que cambiar
+    status, _, headers = moes_view.post("/switch-company", {"code": "MOYZA", "next": "/alerts"})
+    assert status == 303 and "active_company=" not in headers.get("set-cookie", "")
+    assert _flash(headers).get("category") == "info"
+
+    # Abre y trabaja su alerta sin cambiar de empresa (la campana unificada es la fase C)
+    assert moes_view.get(f"/alerts/{alert.id}")[0] == 200
+    # «Sin respuesta»: no exige el perfil del comprador (Contactado sí)
+    status, _, headers = moes_view.post(f"/alerts/{alert.id}/follow-up", {
+        "action_type": "SIN_RESPUESTA", "notes": "Llamada desde MOES",
     })
-    assert _flash(headers).get("category") == "success"
-    assert f"Te han asignado un comprador: {name}" in moyza_view.get("/dashboard")[1]
+    assert _flash(headers).get("category") == "success", _flash(headers)
+    moyza_view = moes_view
 
     # Una alerta de MOYZA de otro agente sigue fuera de su alcance
     db = _session()

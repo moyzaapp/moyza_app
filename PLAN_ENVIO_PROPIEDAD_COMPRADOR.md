@@ -259,3 +259,20 @@ desde su asignación; "Enviada el" por alerta en la Propuesta y por las alertas 
 la ficha; el botón también en la tarjeta de la propiedad asociada; `{zona o ciudad}` como
 "zona, ciudad"; `table_others` sin columna Acciones lleva el icono junto al título;
 `seeds/initial_data.py` no crea empresas y no se tocó).
+
+## Cambio del 2026-11-13: enlace de la ETL con la plantilla como reserva
+
+- Comprobado contra la web con 15 referencias de MOYZA: cada inmueble funciona con una sola
+  variante (con `00` o sin él) y no hay regla que salga de la referencia; además hay inmuebles
+  sin ficha publicada. La plantilla de MOYZA acierta solo en parte de los inmuebles.
+- Decisión del usuario: el enlace bueno lo traerá la **ETL** en `properties.public_url`
+  (columna ya existente, String 500). Mientras esté vacía se sigue usando la plantilla de la
+  empresa, como antes. Sin columna ni plantilla aplicable, la app no muestra nada: ni enlace,
+  ni botón de enviar, ni aviso "Sin enlace".
+- Migración `h4m5o6e7s8l9`: plantilla de MOES
+  `https://www.inmoespremium.com/inmueble.php?ID=7533675336{referencia}` (verificada con la
+  Ref. 1525). La de MOYZA sigue siendo `…cod_inmueble=9834998349{referencia}00`.
+- Para la ETL: en MOYZA el enlace es
+  `https://www.inmobiliariamoyza.com/recursos/nficham06.php?cod_inmueble=<código interno del CRM>`.
+  Que solo escriba la columna cuando tenga enlace (no vaciarla), para no borrar uno corregido
+  a mano en el formulario.

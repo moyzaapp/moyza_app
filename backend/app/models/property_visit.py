@@ -9,6 +9,8 @@ from sqlalchemy import Text
 from sqlalchemy import DateTime
 from sqlalchemy import Boolean
 from sqlalchemy import ForeignKey
+from sqlalchemy import event
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
 
@@ -30,6 +32,20 @@ class PropertyVisit(Base):
         Integer,
         ForeignKey("properties.id"),
         nullable=False
+    )
+
+    # Empresa de la visita: la desde la que se registra (la agencia del
+    # agente), no siempre la de la propiedad (PLAN_VISITAS_OTRA_EMPRESA.md):
+    # un agente de MOYZA puede visitar una propiedad de MOES PREMIUM y la
+    # visita es de MOYZA (alcance, marca de la ficha y "Hojas de visita").
+    # Las anteriores a la columna tienen la de la propiedad (backfill). Si
+    # un alta no la fija, se rellena con la de la propiedad
+    # (`_fill_company_id`).
+    company_id = Column(
+        Integer,
+        ForeignKey("companies.id"),
+        nullable=False,
+        index=True
     )
 
     visitor_name = Column(
@@ -223,6 +239,7 @@ class PropertyVisit(Base):
 
     # Relaciones
     property = relationship("Property", back_populates="visits")
+    company = relationship("Company")
     # `foreign_keys` explícito: property_visits tiene dos FK a users.
     creator = relationship("User", foreign_keys=[created_by])
     agent_signatures_confirmer = relationship(
@@ -310,6 +327,15 @@ class PropertyVisit(Base):
         return f"{amount} {unit} + IVA"
 
     @builtins.property
+    def is_cross_company(self):
+        """La propiedad es de otra empresa que la visita (visita cruzada)."""
+        return (
+            self.property is not None
+            and self.company_id is not None
+            and self.property.company_id != self.company_id
+        )
+
+    @builtins.property
     def signing_agent(self):
         """Agente que figura y firma en la ficha.
 
@@ -357,3 +383,24 @@ class PropertyVisit(Base):
     def can_finalize_agents(self):
         """Los agentes no bloquean el cierre: visita individual o firmas confirmadas."""
         return not self.requires_agent_confirmation or self.agent_signatures_confirmed
+
+
+@event.listens_for(PropertyVisit, "before_insert")
+def _fill_company_id(mapper, connection, target):
+    """Red de seguridad: visita creada sin empresa.
+
+    Rellena `company_id` con la empresa de la propiedad (mismo criterio que el
+    backfill de la migración), para que ningún alta que no la fije falle por
+    el NOT NULL. Las rutas de alta la fijan siempre (`create_visit`).
+    """
+    if target.company_id is not None:
+        return
+    # Sin cargar la relación (estamos dentro del flush): solo si ya está
+    loaded_property = target.__dict__.get("property")
+    if loaded_property is not None and loaded_property.company_id is not None:
+        target.company_id = loaded_property.company_id
+    elif target.property_id is not None:
+        target.company_id = connection.execute(
+            text("SELECT company_id FROM properties WHERE id = :id"),
+            {"id": target.property_id},
+        ).scalar()

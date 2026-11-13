@@ -27,6 +27,7 @@ from app.models.property import Property
 
 from app.web.dependencies.auth import is_admin, get_agent_from_user, deny_if_not_admin
 from app.web.dependencies.company import get_active_company
+from app.web.dependencies.company import get_company_ids
 from app.services.company_scope import (
     scope_agents,
     scope_properties,
@@ -283,8 +284,9 @@ async def update_agent(
             status_code=302
         )
 
-    # Solo se pueden editar agentes de la empresa activa
-    agent = get_agent_in_company(db, agent_id, get_active_company(request).id)
+    # Solo se pueden editar agentes de las empresas de trabajo (admin: la
+    # activa; agente en la vista unificada: su ficha, esté en la empresa que esté)
+    agent = get_agent_in_company(db, agent_id, get_company_ids(request))
 
     if not agent:
         return RedirectResponse(
@@ -531,7 +533,8 @@ async def upload_agent_signature(
     Endpoint para subir la firma del agente.
     signature_data viene como base64 string desde el canvas del frontend
     """
-    agent = get_agent_in_company(db, agent_id, get_active_company(request).id)
+    # Empresas de trabajo, como en /agents/update
+    agent = get_agent_in_company(db, agent_id, get_company_ids(request))
 
     if not agent:
         return RedirectResponse(

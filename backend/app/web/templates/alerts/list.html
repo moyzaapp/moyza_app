@@ -52,7 +52,8 @@
             </div>
         </div>
 
-        <!-- Compradores asignados en otra empresa (agente): no salen en este listado -->
+        <!-- Compradores asignados en otra empresa (agente con vista por empresa): no salen en
+             este listado. En la vista unificada salen todos y la lista llega vacía -->
         {% for item in other_company_alerts %}
         <div class="mb-6">
             {% call ui.banner(
@@ -314,8 +315,9 @@
                                         <div class="flex flex-col items-start">
                                             <span class="font-medium">{{ alert.property.title }}</span>
                                             <span class="text-xs text-gray-500">{{ alert.property.address | street }}</span>
-                                            {# Propiedad de la otra empresa asociada desde la Propuesta (PLAN_SUGERENCIAS_MULTIEMPRESA.md) #}
-                                            {% if active_company and alert.property.company_id != active_company.id %}{{ ui.company_badge(alert.property.company, extra="mt-1") }}{% endif %}
+                                            {# Propiedad de otra empresa que la de la alerta, asociada desde la Propuesta
+                                               (PLAN_SUGERENCIAS_MULTIEMPRESA.md). Para el admin la alerta es de la activa #}
+                                            {% if alert.property.company_id != alert.company_id %}{{ ui.company_badge(alert.property.company, extra="mt-1") }}{% endif %}
                                         </div>
                                         {% else %}
                                         {# Alerta sin referencia (búsqueda general) aún sin propiedad (PLAN_ALERTA_SIN_REFERENCIA.md) #}
@@ -329,11 +331,13 @@
                                     </td>
 
                                     <td class="px-6 py-4 text-sm text-gray-700">
-                                        <div class="flex flex-col">
+                                        <div class="flex flex-col items-start">
                                             <span class="font-medium">{{ alert.lead_name }}</span>
                                             {% if alert.lead_phone %}
                                             <span class="text-xs text-gray-500">{{ alert.lead_phone | phone_display }}</span>
                                             {% endif %}
+                                            {# Vista unificada con varias empresas: de qué empresa es la alerta #}
+                                            {% if show_company_badges %}{{ ui.company_badge(alert.company, extra="mt-1 whitespace-nowrap", title="Alerta de " ~ alert.company.name) }}{% endif %}
                                             {# Sin gestionar: ya se reasignó y el nuevo agente tampoco la ha tocado #}
                                             {% if attention_filter and alert.previous_agent_id and alert.assigned_at %}
                                             <span class="text-xs font-medium text-red-700">Reasignada el {{ alert.assigned_at | madrid_dt('%d/%m') }}{% if alert.previous_agent %} · antes {{ alert.previous_agent.name }}{% endif %}</span>
@@ -449,6 +453,8 @@
                                             <button type="button" class="{{ row_btn }} text-gray-700 bg-gray-100 hover:bg-gray-200"
                                                 data-cede
                                                 data-alert-id="{{ alert.id }}"
+                                                data-company-id="{{ alert.company_id }}"
+                                                data-company-name="{{ alert.company.name if alert.company else '' }}"
                                                 data-agent-id="{{ alert.agent_id }}"
                                                 data-agent-name="{{ alert.agent.name if alert.agent else '' }}"
                                                 data-lead="{{ alert.lead_name }} · {{ alert.property.title if alert.property else 'Búsqueda general' }}"
@@ -592,6 +598,7 @@
                                         <a href="/buyers/{{ buyer.id }}" class="text-blue-600 hover:underline font-medium">
                                             {{ buyer.name }}
                                         </a>
+                                        {% if show_company_badges %}<div>{{ ui.company_badge(buyer.company, extra="mt-1 whitespace-nowrap", title="Comprador de " ~ buyer.company.name) }}</div>{% endif %}
                                     </td>
                                     <td class="px-6 py-4 text-sm text-gray-600">{{ buyer.email or '-' }}</td>
                                     <td class="px-6 py-4 text-center">
@@ -704,6 +711,11 @@
             {{ ui.field("email", "Email", type="email", id="cbEmail") }}
         </div>
         {{ ui.field("notes", "Notas", type="textarea", id="cbNotes") }}
+        {# Vista unificada con varias empresas (PLAN_VISTA_UNIFICADA_AGENTES.md): la principal preseleccionada #}
+        {% if creation_companies %}
+        {% set company_options = [] %}{% for c in creation_companies %}{% set _ = company_options.append((c.id, c.name)) %}{% endfor %}
+        {{ ui.select("company_id", "Empresa", company_options, value=active_company.id if active_company else None, required=True, empty=None, id="cbCompany", help="El comprador queda en esta empresa.") }}
+        {% endif %}
     </div>
     {{ ui.modal_footer(submit_label="Crear comprador") }}
 </form>
@@ -831,6 +843,14 @@
                         <p id="refWithoutRentText" class="hidden rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
                             Búsqueda general de alquiler: al llamarle, busca y asóciale una propiedad de toda la empresa.
                         </p>
+                        {# Vista unificada con varias empresas: con comprador nuevo se elige la empresa
+                           (la principal preseleccionada); con uno existente, la suya (JS: syncAlertCompany) #}
+                        {% if creation_companies %}
+                        <div id="alertCompanyWrap" class="hidden">
+                            {% set company_options = [] %}{% for c in creation_companies %}{% set _ = company_options.append((c.id, c.name)) %}{% endfor %}
+                            {{ ui.select("company_id", "Empresa", company_options, value=active_company.id if active_company else None, required=True, empty=None, id="alertCompanySelect", attrs="disabled", help="El comprador nuevo y su búsqueda quedan en esta empresa.") }}
+                        </div>
+                        {% endif %}
                         {% if not is_admin %}
                         <p class="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
                             <svg class="w-5 h-5 shrink-0 text-gray-500" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
@@ -1016,6 +1036,8 @@
         form.action = '/alerts/' + encodeURIComponent(btn.dataset.alertId) + '/cede';
         if (subtitle) subtitle.textContent = btn.dataset.lead;
         assign.setCurrent(btn.dataset.agentId, btn.dataset.agentName);
+        // Vista unificada: solo los agentes de la empresa de la alerta
+        assign.setCompany(btn.dataset.companyId, btn.dataset.companyName);
         UI.openModal('cedeModal', btn);
     });
 })();
@@ -1037,6 +1059,9 @@ function openCreateAlertModal() {
 function closeCreateAlertModal() {
     UI.closeModal('createAlertModal');
 }
+// Vista unificada con varias empresas: la empresa en los resultados del alta
+var SHOW_COMPANY = {{ (show_company_badges or false) | tojson }};
+
 // ---- Propiedad: con referencia / sin referencia (búsqueda general) ----
 var referenceMode = 'with';
 
@@ -1071,7 +1096,20 @@ function setReferenceMode(mode) {
         if (window.caAssign) window.caAssign.clear();
     }
 
+    syncAlertCompany();
     if (window.alertDupRefresh) window.alertDupRefresh();
+}
+
+// Empresa de la búsqueda general (vista unificada con varias empresas): solo con
+// comprador nuevo; con uno existente la búsqueda va a su empresa y con propiedad,
+// a la de la propiedad. Oculto, el select va deshabilitado y no se envía.
+function syncAlertCompany() {
+    var wrap = document.getElementById('alertCompanyWrap');
+    var select = document.getElementById('alertCompanySelect');
+    if (!wrap || !select) return;
+    var visible = referenceMode === 'without' && currentBuyerMode === 'new';
+    wrap.classList.toggle('hidden', !visible);
+    select.disabled = !visible;
 }
 
 // ---- Modo comprador (existente / nuevo) ----
@@ -1105,6 +1143,7 @@ function setBuyerMode(mode) {
         clearBuyerSelection();
     }
 
+    syncAlertCompany();
     if (window.alertDupRefresh) window.alertDupRefresh();
 }
 
@@ -1151,7 +1190,7 @@ function setBuyerMode(mode) {
         }
 
         list.innerHTML = results.map(function (b, i) {
-            const meta = [b.phone_display || b.phone, b.email].filter(Boolean).join(' · ');
+            const meta = [b.phone_display || b.phone, b.email, SHOW_COMPANY ? b.company : ''].filter(Boolean).join(' · ');
             return '<li data-index="' + i + '" class="buyer-option px-4 py-2 cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0">'
                 + '<p class="text-sm font-medium text-gray-800">' + escapeHtml(b.name) + '</p>'
                 + (meta ? '<p class="text-xs text-gray-500">' + escapeHtml(meta) + '</p>' : '')
@@ -1173,7 +1212,7 @@ function setBuyerMode(mode) {
         input.classList.add('hidden');
 
         selectedName.textContent = buyer.name;
-        selectedMeta.textContent = [buyer.phone_display || buyer.phone, buyer.email].filter(Boolean).join(' · ');
+        selectedMeta.textContent = [buyer.phone_display || buyer.phone, buyer.email, SHOW_COMPANY ? buyer.company : ''].filter(Boolean).join(' · ');
         selected.classList.remove('hidden');
 
         hideResults();
@@ -1274,7 +1313,7 @@ function setBuyerMode(mode) {
         activeIndex = -1;
         if (!results.length) { showMessage('Sin coincidencias'); return; }
         list.innerHTML = results.map(function (p, i) {
-            const meta = [p.address, p.city].filter(Boolean).join(' · ');
+            const meta = [p.address, p.city, SHOW_COMPANY ? p.company_name : ''].filter(Boolean).join(' · ');
             return '<li data-index="' + i + '" class="property-option px-4 py-2 cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0">'
                 + '<p class="text-sm font-medium text-gray-800">' + escapeHtml(p.title) + '</p>'
                 + (meta ? '<p class="text-xs text-gray-500">' + escapeHtml(meta) + '</p>' : '')
@@ -1297,7 +1336,7 @@ function setBuyerMode(mode) {
         input.value = '';
         input.classList.add('hidden');
         selectedTitle.textContent = property.title;
-        selectedMeta.textContent = [property.address, property.city].filter(Boolean).join(' · ');
+        selectedMeta.textContent = [property.address, property.city, SHOW_COMPANY ? property.company_name : ''].filter(Boolean).join(' · ');
         selected.classList.remove('hidden');
         hideResults();
         if (assign) assign.setOwner(property.agent_id, property.agent);

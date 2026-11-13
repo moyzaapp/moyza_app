@@ -7,8 +7,10 @@ Estos endpoints manejan el proceso de:
 - Finalización y generación de PDF
 
 Las rutas /api no pasan por AuthMiddleware: cada endpoint resuelve usuario y
-empresa activa desde las cookies con `_visit_for_api` (401 sin sesión, 404 si
-la visita no es de la empresa activa). PLAN_FIRMA_AGENTES_VISITA.md, decisión 6.
+empresas desde las cookies con `_visit_for_api` (401 sin sesión, 404 si la
+visita no es de una empresa con la que trabaja: la activa o, en la vista
+unificada, cualquiera de las suyas). PLAN_FIRMA_AGENTES_VISITA.md, decisión 6;
+PLAN_VISITAS_OTRA_EMPRESA.md (la empresa es la de la visita).
 """
 
 import logging
@@ -33,7 +35,7 @@ from app.services.visit_audit_service import (
 from app.services.visit_whatsapp_log_service import log_whatsapp_attempt
 from app.services.company_scope import get_visit_in_company
 from app.web.dependencies.company import get_api_user
-from app.web.dependencies.company import resolve_company_for_api
+from app.web.dependencies.company import resolve_company_ids_for_api
 
 
 router = APIRouter()
@@ -41,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 def _visit_for_api(request: Request, db: Session, visit_id: int):
-    """Visita de la empresa activa del usuario de la sesión.
+    """Visita registrada en una empresa del usuario de la sesión (`company_ids`).
 
     Devuelve (visit, user). Lanza 401 si no hay sesión válida y 404 si la
     visita no existe o es de otra empresa (no se distingue, para no revelar
@@ -51,8 +53,8 @@ def _visit_for_api(request: Request, db: Session, visit_id: int):
     if user is None:
         raise HTTPException(status_code=401, detail="No autenticado")
 
-    company = resolve_company_for_api(request, user, db)
-    visit = get_visit_in_company(db, visit_id, company.id) if company is not None else None
+    company_ids = resolve_company_ids_for_api(request, user, db)
+    visit = get_visit_in_company(db, visit_id, company_ids) if company_ids else None
     if visit is None:
         raise HTTPException(status_code=404, detail="Visita no encontrada")
 
@@ -501,7 +503,12 @@ async def finalize_visit(
             "pdf_sent": len(sent_to) > 0,
             "sent_to": sent_to,
             "visit_sheet_url": f"/visits/{visit_id}/download",
-            "redirect_url": f"/properties/{property_item.id}"
+            # Visita cruzada: la ficha de la propiedad puede no ser accesible
+            "redirect_url": (
+                f"/properties/{property_item.id}"
+                if property_item.company_id in (resolve_company_ids_for_api(request, user, db) or [])
+                else "/visits"
+            )
         }
 
     except Exception as e:

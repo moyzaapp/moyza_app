@@ -16,7 +16,12 @@ from app.services.company_service import company_ids_from_form
 from app.services.company_scope import child_in_company
 from app.services.company_scope import in_company
 from app.services.company_scope import property_in_company
+from app.web.dependencies.company import can_switch_company
+from app.web.dependencies.company import get_company_ids
+from app.web.dependencies.company import is_unified_view
 from app.web.dependencies.company import resolve_active_company
+from app.web.dependencies.company import resolve_company_scope
+from app.web.template_env import company_context
 from app.web.routes.company import _safe_next
 
 
@@ -66,6 +71,110 @@ class TestResolveActiveCompany:
 
     def test_sin_empresas_devuelve_none(self):
         assert resolve_active_company([], "MOYZA") is None
+
+
+# ---------------------------------------------------------------------------
+# Vista unificada (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1)
+# ---------------------------------------------------------------------------
+
+def user(role="agent", switch=False, primary_id=None):
+    return SimpleNamespace(
+        role=SimpleNamespace(name=role),
+        company_switch_enabled=switch,
+        primary_company_id=primary_id,
+    )
+
+
+def request_for(scope, user_obj):
+    """Request mínimo con lo que deja el middleware en `request.state`."""
+    state = SimpleNamespace(
+        user=user_obj,
+        company=scope.company,
+        allowed_companies=scope.allowed,
+        company_ids=scope.company_ids,
+        unified_view=scope.unified_view,
+    )
+    return SimpleNamespace(state=state)
+
+
+class TestResolveCompanyScope:
+
+    def test_admin_vista_por_empresa_con_cookie(self):
+        scope = resolve_company_scope(user("admin"), [MOYZA, MOES], "MOES")
+        assert scope.unified_view is False
+        assert scope.company is MOES
+        assert scope.company_ids == [MOES.id]
+
+    def test_admin_ignora_company_switch_enabled_y_principal(self):
+        """El admin siempre tiene selector, aunque su usuario diga otra cosa."""
+        scope = resolve_company_scope(user("Admin", switch=False, primary_id=MOES.id), [MOYZA, MOES], None)
+        assert scope.unified_view is False
+        assert scope.company is MOYZA
+        assert scope.company_ids == [MOYZA.id]
+
+    def test_agente_en_una_empresa(self):
+        scope = resolve_company_scope(user(), [MOES], "MOYZA")
+        assert scope.unified_view is True
+        assert scope.company is MOES
+        assert scope.company_ids == [MOES.id]
+
+    def test_agente_en_dos_empresas_unificada(self):
+        """Sin selector: la cookie no cuenta y trabaja con las dos."""
+        scope = resolve_company_scope(user(primary_id=MOES.id), [MOYZA, MOES], "MOYZA")
+        assert scope.unified_view is True
+        assert scope.company is MOES  # su principal, no la cookie
+        assert scope.company_ids == [MOYZA.id, MOES.id]
+
+    def test_agente_sin_principal_cae_a_moyza(self):
+        scope = resolve_company_scope(user(), [MOYZA, MOES], "MOES")
+        assert scope.company is MOYZA
+        assert scope.company_ids == [MOYZA.id, MOES.id]
+
+    def test_principal_fuera_de_las_permitidas_cae_a_la_primera(self):
+        scope = resolve_company_scope(user(primary_id=MOES.id), [MOYZA], None)
+        assert scope.company is MOYZA
+        assert scope.company_ids == [MOYZA.id]
+
+    def test_agente_con_company_switch_enabled_como_antes(self):
+        scope = resolve_company_scope(user(switch=True, primary_id=MOYZA.id), [MOYZA, MOES], "MOES")
+        assert scope.unified_view is False
+        assert scope.company is MOES  # la cookie manda, no la principal
+        assert scope.company_ids == [MOES.id]
+
+    def test_sin_empresas(self):
+        scope = resolve_company_scope(user(), [], None)
+        assert scope.company is None
+        assert scope.company_ids == []
+
+    def test_helpers_de_request(self):
+        unified = request_for(resolve_company_scope(user(), [MOYZA, MOES], None), user())
+        assert get_company_ids(unified) == [MOYZA.id, MOES.id]
+        assert is_unified_view(unified) is True
+        assert can_switch_company(unified) is False
+
+        admin = request_for(resolve_company_scope(user("admin"), [MOYZA, MOES], "MOES"), user("admin"))
+        assert get_company_ids(admin) == [MOES.id]
+        assert is_unified_view(admin) is False
+        assert can_switch_company(admin) is True
+
+    def test_get_company_ids_sin_estado_nuevo_usa_la_activa(self):
+        request = SimpleNamespace(state=SimpleNamespace(company=MOES))
+        assert get_company_ids(request) == [MOES.id]
+
+    def test_contexto_de_plantillas(self):
+        agent = user(primary_id=MOES.id)
+        ctx = company_context(request_for(resolve_company_scope(agent, [MOYZA, MOES], None), agent))
+        assert ctx["can_switch_company"] is False
+        assert ctx["unified_view"] is True
+        assert ctx["company_ids"] == [MOYZA.id, MOES.id]
+        assert ctx["show_company_badges"] is True
+        assert ctx["brand_name"] == "MOES PREMIUM"
+
+        switcher = user(switch=True)
+        ctx = company_context(request_for(resolve_company_scope(switcher, [MOYZA, MOES], "MOES"), switcher))
+        assert ctx["can_switch_company"] is True
+        assert ctx["unified_view"] is False
+        assert ctx["show_company_badges"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +257,23 @@ class TestMembershipHelpers:
 
     def test_in_company_none(self):
         assert not in_company(None, 1)
+
+    def test_in_company_con_lista_de_ids(self):
+        """Vista unificada: pertenece a alguna de las empresas de la lista."""
+        assert in_company(SimpleNamespace(company_id=2), [1, 2])
+        assert not in_company(SimpleNamespace(company_id=3), (1, 2))
+        assert in_company(SimpleNamespace(companies=[MOES]), {1, 2})
+        assert not in_company(SimpleNamespace(company_id=1), [])
+        visit = SimpleNamespace(property=SimpleNamespace(company_id=2))
+        assert child_in_company(visit, [1, 2])
+        assert property_in_company(SimpleNamespace(company_id=1), [1])
+
+    def test_scope_con_un_id_o_con_varios(self):
+        from app.models.property_alert import PropertyAlert
+        from app.services.company_scope import company_match
+
+        assert " = " in str(company_match(PropertyAlert.company_id, 1))
+        assert " IN " in str(company_match(PropertyAlert.company_id, [1, 2]))
 
     def test_child_in_company_usa_la_propiedad(self):
         visit = SimpleNamespace(property=SimpleNamespace(company_id=2))

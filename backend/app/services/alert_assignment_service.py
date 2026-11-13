@@ -7,10 +7,10 @@ Reglas (decisiones §4):
   mientras está abierta (pendiente o en proceso).
 - Se puede elegir cualquier agente de cualquier empresa activa (§4-1, opción
   B). Si no pertenece a la empresa de la propiedad, se le añade a esa empresa
-  con `add_to_company`, igual que desde la ficha del agente. OJO: desde el
-  2026-11-12 eso ya NO le da acceso a esa empresa (`get_allowed_companies`
-  solo mira las empresas del usuario, medida provisional): no podrá abrir la
-  alerta si su usuario no tiene marcada esa empresa.
+  con `add_to_company`, igual que desde la ficha del agente. Su usuario gana
+  acceso porque `get_allowed_companies` suma las empresas de su ficha y, en
+  la vista unificada (PLAN_VISTA_UNIFICADA_AGENTES.md), la alerta le sale en
+  su listado sin cambiar de empresa.
 - Propiedad sin captador: se puede crear la alerta si el admin elige agente (§4-7).
 - Alerta sin referencia (búsqueda general, PLAN_ALERTA_SIN_REFERENCIA.md): no
   hay captador; el admin elige el agente (obligatorio) y el agente que la crea
@@ -304,12 +304,16 @@ def cession_agents(db: Session, company_id: int, exclude_agent_id: Optional[int]
 
 def assignable_agents_for_cession(db: Session, company_id: int,
                                   exclude_agent_id: Optional[int] = None) -> list[dict]:
-    """`cession_agents` en el formato de grupos de `assign_fields` (un solo grupo: la empresa)."""
+    """`cession_agents` en el formato de grupos de `assign_fields` (un solo grupo: la empresa).
+
+    El grupo lleva `company_id`: el listado de la vista unificada junta los
+    grupos de varias empresas y el JS solo deja elegir los de la alerta.
+    """
     agents = cession_agents(db, company_id, exclude_agent_id)
     if not agents:
         return []
     company = db.get(Company, company_id)
-    return [{"label": company.name if company is not None else "", "agents": agents}]
+    return [{"label": company.name if company is not None else "", "agents": agents, "company_id": company_id}]
 
 
 

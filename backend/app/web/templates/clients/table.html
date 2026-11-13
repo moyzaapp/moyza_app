@@ -97,6 +97,8 @@
                         {% for p in client_properties[:3] %}
                         <li class="flex flex-wrap items-center gap-1.5">
                             <a href="/properties/{{ p.id }}" title="{{ p.title }}" class="text-blue-600 hover:text-blue-700 hover:underline">{{ p.street or p.title }}</a>
+                            {# Vista unificada con varias empresas: empresa del inmueble (fase D) #}
+                            {% if show_company_badges %}{{ ui.company_badge(p.company, extra="whitespace-nowrap") }}{% endif %}
                             {% if p.status == archived_status %}{{ ui.badge("Archivada", "gray") }}{% endif %}
                         </li>
                         {% endfor %}
@@ -108,6 +110,7 @@
                             {% for p in client_properties[3:] %}
                             <li class="flex flex-wrap items-center gap-1.5">
                                 <a href="/properties/{{ p.id }}" title="{{ p.title }}" class="text-blue-600 hover:text-blue-700 hover:underline">{{ p.street or p.title }}</a>
+                                {% if show_company_badges %}{{ ui.company_badge(p.company, extra="whitespace-nowrap") }}{% endif %}
                                 {% if p.status == archived_status %}{{ ui.badge("Archivada", "gray") }}{% endif %}
                             </li>
                             {% endfor %}

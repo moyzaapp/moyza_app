@@ -38,3 +38,15 @@ class User(Base):
         secondary="user_companies",
         back_populates="users"
     )
+
+    # Vista por empresa (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1): con False (por
+    # defecto) un usuario no admin trabaja con todas sus empresas a la vez, sin
+    # selector; con True conserva el selector y la empresa activa por cookie.
+    # El admin siempre tiene selector, valga lo que valga.
+    company_switch_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    # Empresa principal: marca del sidebar en la vista unificada y empresa por
+    # defecto de lo que crea. NULL o fuera de sus empresas = la primera de ellas.
+    primary_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True)
+
+    primary_company = relationship("Company", foreign_keys=[primary_company_id])

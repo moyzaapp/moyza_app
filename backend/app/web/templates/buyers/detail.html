@@ -31,7 +31,11 @@
                         </svg>
                     </div>
                     <div>
-                        <h1 class="text-2xl font-bold text-gray-800">{{ buyer.name }}</h1>
+                        {# Vista unificada con varias empresas: de qué empresa es (PLAN_VISTA_UNIFICADA_AGENTES.md) #}
+                        <h1 class="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xl font-bold text-gray-800">
+                            <span>{{ buyer.name }}</span>
+                            {% if show_company_badges %}{{ ui.company_badge(buyer.company, title="Comprador de " ~ buyer.company.name) }}{% endif %}
+                        </h1>
                         <div class="flex flex-wrap gap-3 mt-1">
                             {% if buyer.phone %}
                             <span class="flex items-center gap-1 text-sm text-gray-600">
@@ -223,7 +227,7 @@
                    si es de la otra, sin "Ver" (la tarjeta lo resuelve con active_company_id) #}
                 {# Enviar por WhatsApp (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): solo con una alerta
                    del comprador donde registrarlo (send_action); independiente de "Crear alerta" #}
-                {% call property_card(prop, show_link=own_property, active_company_id=active_company_id,
+                {% call property_card(prop, show_link=own_property, active_company_id=active_company_id, link_company_ids=link_company_ids, switch_hint=not unified_view,
                                       send_action=send_action, sent_at=sent_dates.get(prop.id), buyer_phone=buyer.phone) %}
                     {# Crear alerta: admin sobre cualquier propiedad; el agente solo sobre las suyas
                        (el backend lo exige también). Una de la otra empresa no: el alta con

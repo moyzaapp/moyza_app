@@ -5,6 +5,8 @@ PLAN_RESULTADOS_COMERCIALES.md. Reglas:
 - Todas las métricas se calculan dentro de una empresa (`company_id`): las
   de sus propiedades, alertas, seguimientos y visitas. Un agente que está
   en las dos empresas tiene resultados, objetivos y snapshots separados.
+  La vista unificada del agente (PLAN_VISTA_UNIFICADA_AGENTES.md §5-3) los
+  suma después con `sum_metrics` / `sum_targets`; aquí no se mezclan.
 - Captaciones, bajadas y cierres se desglosan en venta / alquiler. El tipo
   sale de la propiedad; en cierres, del propio registro. Lo que no es venta
   ni alquiler cuenta en el total ("otros") pero en ningún tipo.
@@ -130,6 +132,58 @@ class Period:
 
 def _empty_counts() -> dict:
     return {kind: 0 for kind in KINDS}
+
+
+def sum_metrics(metrics_list) -> dict:
+    """Suma de varios diccionarios de métricas (un agente en varias empresas).
+
+    PLAN_VISTA_UNIFICADA_AGENTES.md §5-3: las métricas del agente en la vista
+    unificada son la suma de sus empresas. Cada empresa conserva su cálculo
+    (vivo o snapshot); aquí solo se suman. Una clave que es None en todas
+    sigue siendo None (p. ej. un desglose anterior a los snapshots con
+    desglose); si solo falta en alguna, cuenta como 0.
+    """
+    metrics_list = [m for m in metrics_list if m is not None]
+    if len(metrics_list) == 1:
+        return dict(metrics_list[0])
+    keys = []
+    for metrics in metrics_list:
+        keys.extend(k for k in metrics if k not in keys)
+    result = {}
+    for key in keys:
+        values = [m.get(key) for m in metrics_list]
+        result[key] = None if all(v is None for v in values) else sum(v or 0 for v in values)
+    return result
+
+
+@dataclass(frozen=True)
+class SummedTarget:
+    """Objetivo de un agente sumado entre empresas (mismos atributos `target_*`
+    que `AgentPerformanceTarget`, para `target_value`)."""
+
+    target_contactos: Optional[int] = None
+    target_bajadas: Optional[int] = None
+    target_captaciones_crm: Optional[int] = None
+    target_cierres: Optional[int] = None
+    target_hojas_visita: Optional[int] = None
+
+
+def sum_targets(targets):
+    """Suma de los objetivos de un agente en varias empresas (§5-3).
+
+    None si no hay objetivo en ninguna; si solo hay en una, sus valores. Un
+    campo sin valor en todas sigue siendo None.
+    """
+    targets = [t for t in targets if t is not None]
+    if not targets:
+        return None
+    if len(targets) == 1:
+        return targets[0]
+    values = {}
+    for field_name in PerformanceObjectives.TARGET_FIELDS.values():
+        parts = [getattr(t, field_name, None) for t in targets]
+        values[field_name] = None if all(v is None for v in parts) else sum(v or 0 for v in parts)
+    return SummedTarget(**values)
 
 
 def business_kind(column):
@@ -429,8 +483,10 @@ class PerformanceReportService:
         )
 
     def _visits_query(self, query, agent_id: int, period_start: datetime, period_end: datetime):
-        """Visitas en las que participó el agente (principal o acompañante) sobre
-        propiedades de la empresa; el captador que no estuvo no suma."""
+        """Visitas en las que participó el agente (principal o acompañante)
+        registradas en la empresa (`PropertyVisit.company_id`), a propiedades
+        de cualquier empresa (PLAN_VISITAS_OTRA_EMPRESA.md §2); el captador
+        que no estuvo no suma."""
         return (
             scope_visits(visits_for_agent(query, agent_id), self._require_company())
             .filter(
@@ -588,7 +644,9 @@ class PerformanceReportService:
         """
         if indicator == "hojas_visita":
             query = self._visits_query(
-                self.db.query(PropertyVisit).options(joinedload(PropertyVisit.property)),
+                self.db.query(PropertyVisit).options(
+                    joinedload(PropertyVisit.property).joinedload(Property.company)
+                ),
                 agent_id, period_start, period_end,
             )
             return query, PropertyVisit.created_at, PropertyVisit.id
@@ -653,6 +711,13 @@ class PerformanceReportService:
                 "status": visit.visit_status,
                 "has_pdf": bool(visit.visit_sheet_filepath),
                 **self._property_fields(visit.property),
+                # Propiedad de otra empresa: distintivo y sin enlace a su ficha
+                # (PLAN_VISITAS_OTRA_EMPRESA.md §2)
+                "property_company": (
+                    visit.property.company
+                    if visit.property is not None and visit.property.company_id != self.company_id
+                    else None
+                ),
             }
 
         if indicator == "contactos":
@@ -817,8 +882,8 @@ class PerformanceReportService:
             )
         if indicator == "hojas_visita":
             return (
-                f"{label} = visitas a propiedades de {brand} en las que {name} fue agente principal "
-                f"o acompañante, creadas {dates}."
+                f"{label} = visitas realizadas por {name} como principal o acompañante, "
+                f"registradas en {brand}, a propiedades de cualquier empresa, creadas {dates}."
             )
         raise ValueError(f"Indicador desconocido: {indicator}")
 

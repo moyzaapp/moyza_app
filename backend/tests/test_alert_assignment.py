@@ -317,26 +317,18 @@ def test_reasignar_al_captador_tambien_notifica(ctx):
     assert note.notes.endswith("por Admin")  # sin motivo, sin ":"
 
 
-def test_agente_de_otra_empresa_no_gana_acceso_por_la_ficha(ctx):
+def test_agente_de_otra_empresa_gana_acceso(ctx):
     from app.models.user import User
     from app.web.dependencies.company import get_allowed_companies
 
     alert, result = _new_alert(ctx, ctx.carla)
     assert result.granted_company.id == ctx.moyza.id
     assert {c.code for c in ctx.carla.companies} == {"MOYZA", "MOES"}
-    # La ficha de agente gana la empresa, pero el acceso (selector) solo sale
-    # de las empresas marcadas en el usuario: medida provisional del 2026-11-12
+    # El usuario vinculado por email ve ya la empresa (no hace falta user_companies):
+    # la ficha de agente vuelve a contar (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1)
     carla_user = ctx.db.query(User).filter_by(email="pytest.asig.carla@example.com").one()
-    moes = next(c for c in ctx.carla.companies if c.code == "MOES")
-    carla_user.companies = [moes]
-    ctx.db.flush()
-    assert {c.code for c in get_allowed_companies(carla_user, ctx.db)} == {"MOES"}
-    # Con las dos marcadas en el usuario, las dos
-    carla_user.companies = [ctx.moyza, moes]
-    ctx.db.flush()
+    assert carla_user.companies == []
     assert {c.code for c in get_allowed_companies(carla_user, ctx.db)} == {"MOYZA", "MOES"}
-    carla_user.companies = []
-    ctx.db.flush()
     # La notificación vive en la empresa de la propiedad
     assert [n.company_id for n in _notifications(ctx, ctx.users["carla"])] == [ctx.moyza.id]
 

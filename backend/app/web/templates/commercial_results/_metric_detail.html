@@ -32,7 +32,14 @@
 
 {% macro property_cell(r, search_label="Búsqueda general") -%}
 <td class="{{ td }}">
-  {% if r.property_id %}
+  {% if r.property_id and r.property_company %}
+  {# Hojas de visita a una propiedad de otra empresa (PLAN_VISITAS_OTRA_EMPRESA.md):
+     su ficha no se abre desde esta empresa; distintivo de su empresa #}
+  <span class="font-medium text-gray-900">{{ r.property_title or ('Propiedad #' ~ r.property_id) }}</span>
+  <span class="block mt-1">{{ ui.company_badge(r.property_company, extra="whitespace-nowrap") }}</span>
+  {% set meta = [r.property_ref if r.property_ref != r.property_title else none, r.property_city] | select | list %}
+  {% if meta %}<span class="block text-xs text-gray-500">{{ meta | join(' · ') }}</span>{% endif %}
+  {% elif r.property_id %}
   <a href="/properties/{{ r.property_id }}" class="font-medium text-gray-900 hover:text-blue-600 hover:underline">{{ r.property_title or ('Propiedad #' ~ r.property_id) }}</a>
   {# La referencia no se repite cuando el título ya es la referencia #}
   {% set meta = [r.property_ref if r.property_ref != r.property_title else none, r.property_city] | select | list %}

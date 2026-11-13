@@ -69,10 +69,18 @@ Vista Previa del Documento - Visita
                 <td class="py-2 font-semibold">Precio de venta:</td>
                 <td class="py-2">€{{ "{:,.2f}".format(property.price) if property.price else 'No especificado' }}</td>
             </tr>
-            <tr>
+            <tr {% if marketed_by %}class="border-b"{% endif %}>
                 <td class="py-2 font-semibold">Honorarios en caso de compra:</td>
                 <td class="py-2">{{ visit.purchase_fees_display or 'Según condiciones establecidas' }}</td>
             </tr>
+            {# Propiedad de otra empresa que la de la ficha (PLAN_VISITAS_OTRA_EMPRESA.md §5);
+               debe coincidir con visit_sheet_generator #}
+            {% if marketed_by %}
+            <tr>
+                <td class="py-2 font-semibold">Comercialización:</td>
+                <td class="py-2">Inmueble comercializado por {{ marketed_by }}</td>
+            </tr>
+            {% endif %}
         </table>
     </div>
 

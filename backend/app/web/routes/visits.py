@@ -2,6 +2,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from time import perf_counter
 from uuid import uuid4
 
@@ -35,17 +36,21 @@ from app.services.notification_service import notify_visit_created
 from app.services.notification_service import notify_visit_sheet_failed
 from app.services.company_scope import (
     scope_active_agents,
-    scope_visits,
-    scope_properties,
+    scope_visible_visits,
     visit_agent_clause,
+    visitable_property_clause,
+    get_visible_visit,
     get_visit_in_company,
-    get_property_in_company,
+    get_visitable_property,
 )
 from app.services.visit_agents import VisitAgentsError
 from app.services.visit_agents import companion_agent_groups
 from app.services.visit_agents import parse_visit_agents
 from app.services.visit_agents import visit_agents_locked
 from app.web.dependencies.company import get_active_company
+from app.web.dependencies.company import get_allowed_companies_from_request
+from app.web.dependencies.company import get_company_ids
+from app.web.dependencies.company import is_unified_view
 
 
 router = APIRouter()
@@ -108,11 +113,79 @@ def visit_phone_from_form(form) -> str | None:
     )
 
 
-def _visit_agents_context(request: Request, db: Session, property_item, visit=None) -> dict:
+# Select "Empresa" del alta de visita (agente en vista unificada con varias empresas)
+VISIT_COMPANY_FIELD = "visit_company_id"
+
+
+def visit_company_options(request: Request) -> list:
+    """Empresas entre las que un agente elige la de la visita nueva.
+
+    Solo en la vista unificada con varias empresas
+    (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1): con una sola, el admin y la vista
+    por empresa no se pregunta (lista vacía).
+    """
+    if not is_unified_view(request):
+        return []
+    company_ids = get_company_ids(request)
+    if len(company_ids) < 2:
+        return []
+    return [c for c in get_allowed_companies_from_request(request) if c.id in company_ids]
+
+
+def resolve_visit_company(request: Request, form=None):
+    """Empresa de una visita nueva (PLAN_VISITAS_OTRA_EMPRESA.md, fase A).
+
+    La visita es de la agencia desde la que se registra, no de la propiedad:
+    - Admin o vista por empresa: la empresa activa.
+    - Vista unificada con una empresa: esa (es su principal).
+    - Vista unificada con varias: la elegida en el select "Empresa"
+      (`visit_company_id`), validada contra `company_ids`; sin valor, la
+      principal (la preseleccionada).
+    Lanza VisitAgentsError (mensaje para el flash) si la elegida no es suya.
+    """
+    principal = get_active_company(request)
+    options = visit_company_options(request)
+    if not options:
+        return principal
+    raw = str(form.get(VISIT_COMPANY_FIELD) or "").strip() if form is not None else ""
+    if not raw:
+        return principal
+    for company in options:
+        if str(company.id) == raw:
+            return company
+    raise VisitAgentsError("La empresa elegida para la visita no es una de tus empresas")
+
+
+def _street_visible(request: Request, property_item) -> bool:
+    """Calle de la propiedad: regla de Propiedades (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.2).
+
+    Visible si la propiedad es de una empresa a la que pertenece el usuario
+    (`allowed_companies`) o es admin. La ficha PDF y su vista previa la
+    imprimen siempre (documento legal, PLAN_VISITAS_OTRA_EMPRESA.md §5).
+    """
+    if is_admin(request.state.user):
+        return True
+    allowed_ids = {c.id for c in get_allowed_companies_from_request(request)}
+    return property_item.company_id in allowed_ids or property_item.company_id in get_company_ids(request)
+
+
+def _property_back_url(property_item, company_ids, fallback: str = "/visits/select-property") -> str:
+    """Ficha de la propiedad si es de una empresa del usuario; si no, `fallback`.
+
+    Una visita cruzada (PLAN_VISITAS_OTRA_EMPRESA.md) puede ser a una
+    propiedad cuya ficha el usuario no puede abrir.
+    """
+    if property_item is not None and property_item.company_id in company_ids:
+        return f"/properties/{property_item.id}"
+    return fallback
+
+
+def _visit_agents_context(request: Request, db: Session, property_item, visit=None, company=None) -> dict:
     """Datos de la sección "Agentes de la visita" (alta y edición).
 
-    - `agents`: agentes activos de la empresa activa (select del principal,
-      admin) más el de la visita si está dado de baja, para no perderlo al
+    - `agents`: agentes activos de la empresa de la visita (`company`; en la
+      edición la de `visit`; si no, la activa) para el select del principal
+      (admin), más el de la visita si está dado de baja, para no perderlo al
       editar (opción "(baja)", PLAN_BAJA_USUARIOS.md §4.3).
     - `companion_agents`: agentes de todas las empresas activas agrupados
       por empresa (select del acompañante); ver `companion_agent_groups`.
@@ -124,7 +197,9 @@ def _visit_agents_context(request: Request, db: Session, property_item, visit=No
     current_user = request.state.user
     current_agent = get_agent_from_user(current_user, db)
 
-    company_id = get_active_company(request).id
+    if company is None:
+        company = visit.company if visit is not None and visit.company is not None else get_active_company(request)
+    company_id = company.id
     agents = (
         scope_active_agents(db.query(Agent), company_id)
         .order_by(Agent.name)
@@ -176,14 +251,20 @@ async def visits_page(
     # Si es admin, mostrar todas las visitas de la empresa activa.
     # Si es agente: las visitas en las que participó (principal o
     # acompañante) y las que otros hicieron a sus propiedades.
-    visits_query = scope_visits(
+    # Además de las registradas en sus empresas, las que otra empresa
+    # registró a propiedades suyas, en solo lectura (PLAN_VISITAS_OTRA_EMPRESA.md
+    # §5, decisión 2): la plantilla no ofrece editar, generar ni borrar si
+    # la empresa de la visita no está en `company_ids`.
+    visits_query = scope_visible_visits(
         db.query(PropertyVisit).options(
             joinedload(PropertyVisit.agent),
             joinedload(PropertyVisit.companion_agent),
             joinedload(PropertyVisit.creator),
+            joinedload(PropertyVisit.company),
             joinedload(PropertyVisit.property).joinedload(Property.agent),
+            joinedload(PropertyVisit.property).joinedload(Property.company),
         ),
-        get_active_company(request).id
+        get_company_ids(request)
     )
 
     if not is_admin(current_user):
@@ -218,46 +299,81 @@ async def select_property(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    from app.core.constants import PropertyStatus
+    from app.models.company import Company
 
     current_user = request.state.user
+    admin = bool(is_admin(current_user))
+    company_ids = get_company_ids(request)
+    active_company = get_active_company(request)
 
     # Cualquier agente puede registrar visita en cualquier propiedad
-    # disponible de la empresa activa (decisión 1: sin aprobación previa).
+    # disponible (decisión 1: sin aprobación previa), de cualquier empresa
+    # (PLAN_VISITAS_OTRA_EMPRESA.md §5, decisión 4): de las suyas, todo lo no
+    # archivado; de las demás, el inventario activo.
     properties = (
-        scope_properties(
-            db.query(Property)
-            .options(joinedload(Property.agent))
-            .filter(
-                Property.status != PropertyStatus.ARCHIVED,
-                Property.available_clause()
-            ),
-            get_active_company(request).id
-        )
+        db.query(Property)
+        .options(joinedload(Property.agent), joinedload(Property.company))
+        .filter(visitable_property_clause(company_ids), Property.available_clause())
         .order_by(Property.title)
         .all()
     )
+    companies = db.query(Company).filter(Company.is_active.is_(True)).order_by(Company.id).all()
 
-    own_properties = []
-    other_properties = properties
+    # Calle de una propiedad de otra empresa: la regla de Propiedades (`_street_visible`)
+    def street_visible(company):
+        return _street_visible(request, SimpleNamespace(company_id=company.id))
 
-    # Para un agente: primero las suyas, después el resto de la empresa
-    if not is_admin(current_user):
-        agent = get_agent_from_user(current_user, db)
-        if agent:
-            own_properties = [p for p in properties if p.agent_id == agent.id]
-            other_properties = [p for p in properties if p.agent_id != agent.id]
+    # Empresa en la que quedará la visita, para el texto de las secciones
+    options = visit_company_options(request)
+    visit_company_label = "la empresa que elijas" if options else active_company.name
+
+    agent = None if admin else get_agent_from_user(current_user, db)
+    sections = []
+
+    if not admin:
+        own = [p for p in properties if agent is not None and p.agent_id == agent.id and p.company_id in company_ids]
+        sections.append({
+            "title": "Mis propiedades",
+            "subtitle": None,
+            "properties": own,
+            "show_street": True,
+        })
+
+    for company in companies:
+        rows = [p for p in properties if p.company_id == company.id]
+        if not admin:
+            # Un usuario sin ficha de agente no registra visitas: no se le ofrece nada
+            rows = [p for p in rows if agent is not None and p.agent_id != agent.id]
+        own_company = company.id in company_ids
+        if admin:
+            title = f"Propiedades de {company.name}"
+        elif own_company:
+            title = f"Otras propiedades de {company.name}"
         else:
-            other_properties = []
+            title = f"Propiedades de {company.name}"
+        if own_company and not admin:
+            subtitle = "Captadas por otros agentes. La visita quedará registrada a tu nombre."
+        elif own_company:
+            subtitle = None
+        else:
+            subtitle = (
+                f"Inmuebles comercializados por {company.name}. "
+                f"La visita se registra en {visit_company_label} y la ficha lleva su marca."
+            )
+        sections.append({
+            "title": title,
+            "subtitle": subtitle,
+            "properties": rows,
+            "show_street": street_visible(company),
+        })
 
     return templates.TemplateResponse(
         request=request,
         name="visits/select_property.html",
         context={
             "request": request,
-            "is_admin": bool(is_admin(current_user)),
-            "own_properties": own_properties,
-            "other_properties": other_properties,
+            "is_admin": admin,
+            "sections": sections,
             "current_user": current_user
         }
     )
@@ -269,20 +385,29 @@ async def new_visit(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    property_item = get_property_in_company(db, property_id, get_active_company(request).id)
+    company_ids = get_company_ids(request)
+    # Propiedad de cualquier empresa (PLAN_VISITAS_OTRA_EMPRESA.md, fase B)
+    property_item = get_visitable_property(db, property_id, company_ids)
 
     if not property_item:
-        response = RedirectResponse(url="/properties", status_code=302)
+        response = RedirectResponse(url="/visits/select-property", status_code=302)
         set_flash(response, "error", "Propiedad no encontrada")
         return response
 
     if not property_item.is_available:
-        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        response = RedirectResponse(url=_property_back_url(property_item, company_ids), status_code=302)
         set_flash(response, "error", "No se pueden registrar visitas en una propiedad No disponible")
         return response
 
-    agents_context = _visit_agents_context(request, db, property_item)
+    # Empresa de la visita: la preseleccionada (la principal o la activa);
+    # un agente en varias empresas la puede cambiar en el select "Empresa"
+    visit_company = resolve_visit_company(request)
+    agents_context = _visit_agents_context(request, db, property_item, company=visit_company)
     current_agent = agents_context["current_agent"]
+
+    # La ficha de la propiedad solo se abre si es de una empresa del usuario;
+    # si no, "Volver" lleva al selector de propiedad
+    property_in_scope = property_item.company_id in company_ids
 
     # Propiedad captada por otro agente: se avisa, pero no se bloquea
     is_foreign_property = (
@@ -299,6 +424,11 @@ async def new_visit(
             "property": property_item,
             "current_user": request.state.user,
             "is_foreign_property": is_foreign_property,
+            "visit_company": visit_company,
+            "property_in_scope": property_in_scope,
+            "street_visible": _street_visible(request, property_item),
+            "visit_company_choices": [(c.id, c.name) for c in visit_company_options(request)],
+            "visit_company_field": VISIT_COMPANY_FIELD,
             **agents_context
         }
     )
@@ -312,10 +442,16 @@ async def create_visit(
 ):
     from app.services.visit_audit_service import log_visit_event
 
-    property_item = get_property_in_company(db, property_id, get_active_company(request).id)
+    company_ids = get_company_ids(request)
+    property_item = get_visitable_property(db, property_id, company_ids)
 
-    if not property_item or not property_item.is_available:
-        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+    if not property_item:
+        response = RedirectResponse(url="/visits/select-property", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
+
+    if not property_item.is_available:
+        response = RedirectResponse(url=_property_back_url(property_item, company_ids), status_code=302)
         set_flash(response, "error", "No se pueden registrar visitas en una propiedad No disponible")
         return response
 
@@ -355,7 +491,12 @@ async def create_visit(
     purchase_fees = PropertyVisit.normalize_purchase_fees(purchase_fees)
 
     try:
-        agent_id, companion_agent_id = parse_visit_agents(form, request, db, property_item)
+        # La visita es de la empresa desde la que se registra; el principal
+        # se valida contra ella, no contra la de la propiedad
+        visit_company = resolve_visit_company(request, form)
+        agent_id, companion_agent_id = parse_visit_agents(
+            form, request, db, property_item, company=visit_company
+        )
     except VisitAgentsError as e:
         response = RedirectResponse(url=f"/visits/new/{property_id}", status_code=302)
         set_flash(response, "error", str(e))
@@ -365,6 +506,7 @@ async def create_visit(
         # Crear visita en estado 'draft' para seguir el nuevo flujo legal
         visit = PropertyVisit(
             property_id=property_id,
+            company_id=visit_company.id,
             visitor_name=visitor_name,
             dni=form.get("dni"),
             phone=phone,
@@ -421,14 +563,14 @@ async def create_visit(
             visit.visit_status = 'completed'  # Completar directamente sin flujo legal
             db.commit()
 
-            response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+            response = RedirectResponse(url=_property_back_url(property_item, company_ids), status_code=302)
             set_flash(response, "success", "Visita registrada")
             return response
 
     except Exception:
         db.rollback()
         logger.exception("Error registrando visita: property_id=%s", property_id)
-        response = RedirectResponse(url=f"/properties/{property_id}", status_code=302)
+        response = RedirectResponse(url=_property_back_url(property_item, company_ids), status_code=302)
         set_flash(response, "error", "Ocurrió un error al registrar la visita")
         return response
 
@@ -439,7 +581,9 @@ async def download_visit_sheet(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
+    # Lectura: también la empresa de la propiedad descarga la ficha de una
+    # visita que otra empresa registró a su propiedad (PLAN_VISITAS_OTRA_EMPRESA.md §5)
+    visit = get_visible_visit(db, visit_id, get_company_ids(request))
 
     if not visit or not visit.visit_sheet_filepath:
         response = RedirectResponse(url="/properties", status_code=302)
@@ -449,7 +593,7 @@ async def download_visit_sheet(
     filepath = Path(visit.visit_sheet_filepath)
 
     if not filepath.exists():
-        response = RedirectResponse(url=f"/properties/{visit.property_id}", status_code=302)
+        response = RedirectResponse(url=_property_back_url(visit.property, get_company_ids(request), fallback="/visits"), status_code=302)
         set_flash(response, "error", "Archivo de ficha de visita no existe")
         return response
 
@@ -466,7 +610,7 @@ async def send_visit_sheet_whatsapp(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
+    visit = get_visit_in_company(db, visit_id, get_company_ids(request))
 
     redirect_url = request.headers.get("referer") or "/visits"
 
@@ -612,7 +756,7 @@ async def preview_visit(
     """
     from app.services.visit_audit_service import log_visit_event
 
-    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
+    visit = get_visit_in_company(db, visit_id, get_company_ids(request))
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -630,7 +774,7 @@ async def preview_visit(
 
     # Verificar que la visita está en estado draft o preview
     if visit.visit_status not in ['draft', 'preview']:
-        response = RedirectResponse(url=f"/properties/{property_item.id}", status_code=302)
+        response = RedirectResponse(url=_property_back_url(property_item, get_company_ids(request), fallback="/visits"), status_code=302)
         set_flash(response, "warning", "Esta visita ya ha sido procesada")
         return response
 
@@ -648,10 +792,16 @@ async def preview_visit(
             event_data={'viewed_at': datetime.utcnow().isoformat()}
         )
 
-    # Identidad de la empresa propietaria del inmueble: el preview debe
-    # coincidir exactamente con el PDF que se firmará.
+    # Identidad de la empresa de la visita (la agencia del agente), con
+    # "Inmueble comercializado por {empresa}" si la propiedad es de otra
+    # (PLAN_VISITAS_OTRA_EMPRESA.md §5): el preview debe coincidir
+    # exactamente con el PDF que se firmará.
     from app.services.company_service import branding_for
-    brand = branding_for(property_item.company)
+    from app.services.visit_sheet_generator import marketed_by_name
+    from app.services.visit_sheet_generator import visit_brand_company
+    brand_company = visit_brand_company(visit, property_item)
+    brand = branding_for(brand_company)
+    marketed_by = marketed_by_name(brand_company, property_item)
 
     # Preparar datos para el template
     # Hora de España, igual que la ficha en PDF (PLAN_CEDER_COMPRADORES.md §4)
@@ -678,6 +828,7 @@ async def preview_visit(
             "companion_agent_name": companion_agent_name,
             "logo_exists": logo_exists,
             "brand": brand,
+            "marketed_by": marketed_by,
             "current_user": request.state.user
         }
     )
@@ -693,7 +844,7 @@ async def signature_visit(
     Muestra el canvas de firma digital.
     FASE 3 del nuevo flujo legal.
     """
-    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
+    visit = get_visit_in_company(db, visit_id, get_company_ids(request))
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -733,7 +884,7 @@ async def complete_visit_page(
     Página de confirmación que finaliza el proceso y genera el PDF.
     FASE 4 del nuevo flujo legal.
     """
-    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
+    visit = get_visit_in_company(db, visit_id, get_company_ids(request))
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -768,6 +919,8 @@ async def complete_visit_page(
             "request": request,
             "visit": visit,
             "property": property_item,
+            # "Volver a la propiedad" solo si su ficha es accesible (visita cruzada)
+            "property_url": _property_back_url(property_item, get_company_ids(request), fallback="/visits"),
             "current_user": request.state.user
         }
     )
@@ -784,8 +937,8 @@ async def agent_signatures_page(
     conjunta, tras la firma del cliente (PLAN_FIRMA_AGENTES_VISITA.md §3.2).
     Las visitas individuales no pasan por aquí.
     """
-    company_id = get_active_company(request).id
-    visit = get_visit_in_company(db, visit_id, company_id)
+    company_ids = get_company_ids(request)
+    visit = get_visit_in_company(db, visit_id, company_ids)
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -793,7 +946,7 @@ async def agent_signatures_page(
         return response
 
     if visit.visit_status == 'completed':
-        response = RedirectResponse(url=f"/properties/{visit.property_id}", status_code=302)
+        response = RedirectResponse(url=_property_back_url(visit.property, company_ids, fallback="/visits"), status_code=302)
         set_flash(response, "info", "Esta visita ya está finalizada")
         return response
 
@@ -817,7 +970,7 @@ async def agent_signatures_page(
             # El agente registra su propia firma; el admin, la de cualquiera
             # (upload_agent_signature), desde Agentes de su empresa activa
             "can_register": admin or (current_agent is not None and current_agent.id == agent.id),
-            "in_active_company": any(c.id == company_id for c in agent.companies),
+            "in_active_company": any(c.id in company_ids for c in agent.companies),
             "companies": ", ".join(c.name for c in agent.companies),
         }
 
@@ -857,7 +1010,7 @@ async def remove_companion(
     """
     from app.services.visit_audit_service import log_visit_event
 
-    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
+    visit = get_visit_in_company(db, visit_id, get_company_ids(request))
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -911,7 +1064,7 @@ async def edit_visit(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
+    visit = get_visit_in_company(db, visit_id, get_company_ids(request))
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -942,7 +1095,7 @@ async def update_visit(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
+    visit = get_visit_in_company(db, visit_id, get_company_ids(request))
 
     if not visit:
         response = RedirectResponse(url="/visits", status_code=302)
@@ -1109,7 +1262,7 @@ async def delete_visit(
 ):
     import os
 
-    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
+    visit = get_visit_in_company(db, visit_id, get_company_ids(request))
 
     response = RedirectResponse(url="/visits", status_code=302)
 
@@ -1141,7 +1294,7 @@ async def generate_visit_pdf(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    visit = get_visit_in_company(db, visit_id, get_active_company(request).id)
+    visit = get_visit_in_company(db, visit_id, get_company_ids(request))
 
     redirect_url = request.headers.get("referer") or "/visits"
 

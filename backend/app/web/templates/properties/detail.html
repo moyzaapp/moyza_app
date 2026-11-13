@@ -23,6 +23,8 @@ Detalle Propiedad
                 <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-800 break-words">
                     {{ property.title }}
                 </h1>
+                {# Vista unificada con varias empresas: de qué empresa es (fase D) #}
+                {% if show_company_badges %}<p class="mt-2">{{ ui.company_badge(property.company) }}</p>{% endif %}
 
                 <p class="text-sm sm:text-base text-gray-500 mt-1 break-words">
                     {{ (property.address | street) or 'Sin dirección' }}{% if property.city %} · {{ property.city }}{% endif %}
@@ -389,19 +391,14 @@ Detalle Propiedad
     </div>
 
     {# Enlace a la ficha en la web de la empresa (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2):
-       el pegado a mano o el automático de la referencia (app/services/property_link.py) #}
+       el de `properties.public_url` (ETL o a mano) o, si está vacío, el de la plantilla de la empresa. Sin enlace no se pinta nada #}
     {% set web_url = property | public_url %}
+    {% if web_url %}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 mb-4 border-b border-gray-100">
         <div class="min-w-0">
             <p class="text-xs text-gray-500">Enlace en la web</p>
-            {% if web_url %}
             <p class="text-sm text-gray-700 truncate" title="{{ web_url }}">{{ web_url }}</p>
-            <p class="text-xs text-gray-400">{{ "Manual" if (property | public_url_source) == "manual" else "Automático por referencia" }}</p>
-            {% else %}
-            <p class="text-sm text-gray-400">Sin enlace — añádelo al editar la propiedad</p>
-            {% endif %}
         </div>
-        {% if web_url %}
         <div class="flex gap-2 shrink-0">
             {% set open_attrs %}target="_blank" rel="noopener noreferrer"{% endset %}
             {% call ui.button("Abrir", "secondary", href=web_url, attrs=open_attrs, extra="whitespace-nowrap") %}
@@ -413,8 +410,8 @@ Detalle Propiedad
             {% endcall %}
             <span id="copyPublicUrlStatus" class="sr-only" aria-live="polite"></span>
         </div>
-        {% endif %}
     </div>
+    {% endif %}
 
     {% if features %}
     <div class="flex flex-wrap gap-2 pb-4 mb-4 border-b border-gray-100">
@@ -679,6 +676,9 @@ Detalle Propiedad
                 </thead>
                 <tbody>
                     {% for visit in visits_registered %}
+                    {# Visita registrada por otra empresa (PLAN_VISITAS_OTRA_EMPRESA.md §5): distintivo
+                       "Visita de {empresa}" y, si no es de una empresa del usuario, solo lectura (descargar) #}
+                    {% set visit_editable = visit.company_id in company_ids %}
                     <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                         <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700 whitespace-nowrap">
                             {{ visit.created_at | madrid_dt('%d/%m/%Y %H:%M') if visit.created_at else '-' }}
@@ -696,6 +696,12 @@ Detalle Propiedad
                                 {{ visit.creator.full_name }}
                             {% else %}
                                 -
+                            {% endif %}
+                            {% if visit.is_cross_company %}
+                            <div class="mt-1 flex flex-wrap items-center gap-1">
+                                <span class="text-xs text-gray-500">Visita de</span>
+                                {{ ui.company_badge(visit.company, extra="whitespace-nowrap", title="Visita registrada en " ~ visit.company.name ~ ("" if visit_editable else " (solo lectura)")) }}
+                            </div>
                             {% endif %}
                         </td>
                         <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm text-gray-700">
@@ -731,7 +737,7 @@ Detalle Propiedad
                         <td class="px-4 sm:px-6 py-3 sm:py-4 text-xs sm:text-sm">
                             <div class="flex items-center justify-center gap-2 whitespace-nowrap">
                                 {% if visit.visit_sheet_filepath %}
-                                    {% if visit_sheet_whatsapp_enabled %}
+                                    {% if visit_sheet_whatsapp_enabled and visit_editable %}
                                     <form action="/visits/{{ visit.id }}/send-whatsapp" method="POST" class="inline-block">
                                         <button
                                             type="submit"
@@ -755,6 +761,8 @@ Detalle Propiedad
                                         </svg>
                                         Descargar
                                     </a>
+                                {% elif not visit_editable %}
+                                    <span class="text-xs text-gray-500">Solo lectura</span>
                                 {% else %}
                                     <form action="/visits/{{ visit.id }}/generate-pdf" method="POST" class="inline-block">
                                         <button

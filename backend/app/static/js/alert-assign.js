@@ -8,6 +8,7 @@
  *   assign.setCurrent(12, 'Laura');                 // al abrir la reasignación o la cesión
  *   assign.clear();                                 // al quitar la propiedad
  *   assign.setSearch();                             // alta "Sin referencia" (búsqueda general)
+ *   assign.setCompany(2, 'MOES PREMIUM');           // cesión desde el listado unificado (tras setCurrent)
  *
  * Modo "create" (alta): el select parte del captador de la propiedad; si se
  * elige otro, aviso ámbar "La alerta irá a X y no a Y" y campo Motivo
@@ -161,6 +162,30 @@ window.AlertAssign = (function () {
                     });
                 }
                 show(root, true);
+                sync();
+            },
+            // Cesión desde el listado de la vista unificada (PLAN_VISTA_UNIFICADA_AGENTES.md):
+            // la empresa es la de la fila; solo se pueden elegir agentes de esa empresa.
+            // Llamar después de setCurrent (que rehabilita las opciones).
+            setCompany: function (id, name) {
+                if (!id) return;
+                companyId = String(id);
+                companyName = name || companyName;
+                if (select) {
+                    // Grupo de otra empresa (data-company-id): fuera entero; sin
+                    // marca de empresa, opción a opción por sus empresas
+                    Array.prototype.forEach.call(select.options, function (opt) {
+                        var group = opt.parentNode && opt.parentNode.tagName === 'OPTGROUP' ? opt.parentNode : null;
+                        var groupCompany = group ? group.dataset.companyId : '';
+                        var outside = groupCompany ? groupCompany !== companyId : !belongs(opt);
+                        if (opt.value !== '' && outside) opt.disabled = true;
+                    });
+                    Array.prototype.forEach.call(select.querySelectorAll('optgroup'), function (group) {
+                        var options = group.querySelectorAll('option');
+                        var anyEnabled = Array.prototype.some.call(options, function (opt) { return !opt.disabled; });
+                        group.hidden = !anyEnabled && options.length > 0;
+                    });
+                }
                 sync();
             },
             // Alta sin referencia: el admin elige agente (obligatorio); el agente no ve el bloque

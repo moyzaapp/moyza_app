@@ -113,17 +113,25 @@ def _owned_property(db, title, agent_id=None):
 
 
 def _agent_user_email(db, company_code):
-    """Email de un usuario no admin con agente en la empresa (rol agente)."""
+    """Email de un usuario no admin con agente en la empresa (rol agente).
+
+    Su empresa activa con esa cookie debe ser esa empresa: en la vista unificada
+    (PLAN_VISTA_UNIFICADA_AGENTES.md) la activa es la principal del usuario y
+    Propiedades sigue por empresa activa hasta la fase D.
+    """
     from app.models.agent import Agent
     from app.models.user import User
+    from app.web.dependencies.company import get_allowed_companies, resolve_company_scope
 
     company = _company(db, company_code)
-    for user in db.query(User).all():
+    for user in db.query(User).order_by(User.id).all():
         if user.role and user.role.name.lower() == "admin":
             continue
         agent = db.query(Agent).filter(Agent.email == user.email).first()
         if agent and agent.companies and any(c.id == company.id for c in agent.companies):
-            return user.email
+            scope = resolve_company_scope(user, get_allowed_companies(user, db), company_code)
+            if scope.company is not None and scope.company.id == company.id:
+                return user.email
     pytest.skip(f"No hay usuarios agente en {company_code}")
 
 

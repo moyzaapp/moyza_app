@@ -94,7 +94,39 @@
             <tr class="border-b border-gray-100 hover:bg-gray-50">
 
                 <td data-sort-value="{{ property.title or '' }}" class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
-                    {{ property.title }}
+                    {# "Registrar visita" y "Abrir en la web" junto al título, igual que en
+                       table_others.html: a mano sin desplazarse hasta Acciones #}
+                    {% set web_url = property | public_url %}
+                    <div class="flex items-center gap-2">
+                        <div class="flex flex-col min-w-0 flex-1">
+                            <span>{{ property.title }}</span>
+                            {# Vista unificada con varias empresas: de qué empresa es (fase D) #}
+                            {% if show_company_badges %}<div>{{ ui.company_badge(property.company, extra="mt-1 whitespace-nowrap") }}</div>{% endif %}
+                        </div>
+                        {# Las visitas solo se registran en propiedades disponibles #}
+                        {% if property.is_available %}
+                        <a
+                            href="/visits/new/{{ property.id }}"
+                            title="Registrar visita"
+                            aria-label="Registrar visita en {{ property.title }}"
+                            class="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+                        >
+                            <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5M12 12.75v4.5m2.25-2.25h-4.5"/></svg>
+                        </a>
+                        {% endif %}
+                        {% if web_url %}
+                        <a
+                            href="{{ web_url }}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Abrir en la web"
+                            aria-label="Abrir {{ property.title }} en la web"
+                            class="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+                        >
+                            <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
+                        </a>
+                        {% endif %}
+                    </div>
                 </td>
 
                 <td class="px-3 sm:px-6 py-3 sm:py-4 text-sm">
@@ -180,6 +212,7 @@
 
                     <button
                         data-id="{{ property.id }}"
+                        data-company-id="{{ property.company_id }}"
                         data-title="{{ (property.title or '')|e }}"
                         data-price="{{ property.price if property.price is not none else '' }}"
                         data-moneda="{{ (property.moneda or 'EUR')|e }}"
@@ -259,21 +292,6 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
                         </svg>
                     </a>
-
-                    {# Ficha en la web de la empresa (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2): solo con enlace #}
-                    {% set web_url = property | public_url %}
-                    {% if web_url %}
-                    <a
-                        href="{{ web_url }}"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Abrir en la web"
-                        aria-label="Abrir {{ property.title }} en la web"
-                        class="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
-                    >
-                        <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
-                    </a>
-                    {% endif %}
 
                     </div>
 

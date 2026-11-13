@@ -101,11 +101,12 @@ Visita Completada
 
     <!-- Botones de acción -->
     <div class="flex justify-center gap-4 mt-8">
+        {# Visita cruzada: si la ficha de la propiedad no es accesible, vuelve a Visitas #}
         <a
-            href="/properties/{{ property.id }}"
+            href="{{ property_url }}"
             class="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition-colors"
         >
-            ← Volver a la Propiedad
+            {{ '← Volver a Visitas' if property_url == '/visits' else '← Volver a la Propiedad' }}
         </a>
         <a
             href="/visits/select-property"

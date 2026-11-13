@@ -163,16 +163,16 @@ class TestApiProtection:
             return None  # la visita no está en la empresa activa
 
         monkeypatch.setattr(visits_api, "get_api_user", lambda request, db: user)
-        monkeypatch.setattr(visits_api, "resolve_company_for_api", lambda request, u, db: company)
+        monkeypatch.setattr(visits_api, "resolve_company_ids_for_api", lambda request, u, db: [company.id])
         monkeypatch.setattr(visits_api, "get_visit_in_company", fake_get_visit)
 
         response = _post(api_client, endpoint, body, visit_id=77)
         assert response.status_code == 404
-        assert seen["args"] == (77, 2)
+        assert seen["args"] == (77, [2])
 
     def test_usuario_sin_empresa_404(self, api_client, monkeypatch):
         monkeypatch.setattr(visits_api, "get_api_user", lambda request, db: SimpleNamespace(id=5))
-        monkeypatch.setattr(visits_api, "resolve_company_for_api", lambda request, u, db: None)
+        monkeypatch.setattr(visits_api, "resolve_company_ids_for_api", lambda request, u, db: [])
         response = _post(api_client, "accept-terms", {"accepted": True})
         assert response.status_code == 404
 
@@ -180,7 +180,7 @@ class TestApiProtection:
         """Con sesión y visita propia, el endpoint aplica sus reglas de siempre."""
         visit = SimpleNamespace(id=1, visit_status="draft")
         monkeypatch.setattr(visits_api, "get_api_user", lambda request, db: SimpleNamespace(id=5))
-        monkeypatch.setattr(visits_api, "resolve_company_for_api", lambda request, u, db: SimpleNamespace(id=1))
+        monkeypatch.setattr(visits_api, "resolve_company_ids_for_api", lambda request, u, db: [1])
         monkeypatch.setattr(visits_api, "get_visit_in_company", lambda db, visit_id, company_id: visit)
 
         response = _post(api_client, "accept-terms", {"accepted": True})
@@ -225,7 +225,7 @@ def confirm_client(monkeypatch):
     app.include_router(visits_api.router, prefix="/api/v1/visits")
     app.dependency_overrides[get_db] = lambda: state["db"]
     monkeypatch.setattr(visits_api, "get_api_user", lambda request, db: SimpleNamespace(id=5))
-    monkeypatch.setattr(visits_api, "resolve_company_for_api", lambda request, u, db: SimpleNamespace(id=1))
+    monkeypatch.setattr(visits_api, "resolve_company_ids_for_api", lambda request, u, db: [1])
     monkeypatch.setattr(visits_api, "get_visit_in_company", lambda db, visit_id, company_id: state["visit"])
     monkeypatch.setattr(visits_api, "log_visit_event",
                         lambda **kwargs: state["events"].append(kwargs))

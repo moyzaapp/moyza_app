@@ -9,36 +9,43 @@ from app.models.alert_reminder_log import AlertReminderLog
 from app.models.report_job_log import ReportJobLog
 from app.models.visit_whatsapp_log import VisitWhatsappLog
 from app.models.property import Property
+from app.models.property_visit import PropertyVisit
 from app.models.report import Report
 from app.services.report_job_service import ReportJobService
-from app.services.company_scope import scope_properties, scope_agents
+from app.services.company_scope import company_match, scope_properties, scope_agents
 from app.models.agent import Agent
-from app.web.dependencies.company import get_active_company
 from app.web.dependencies.company import get_api_user
-from app.web.dependencies.company import resolve_company_for_api
+from app.web.dependencies.company import get_company_ids
+from app.web.dependencies.company import resolve_company_ids_for_api
 
 router = APIRouter()
 
+# Lectura por las empresas de trabajo (`company_ids`): la activa para el admin
+# (la pantalla es suya) y todas las del usuario en la vista unificada
+# (PLAN_VISTA_UNIFICADA_AGENTES.md, fase D). Un id o una lista.
 
-def _scope_report_logs(query, company_id: int):
-    return query.filter(ReportJobLog.property.has(Property.company_id == company_id))
+
+def _scope_report_logs(query, company_id):
+    return query.filter(ReportJobLog.property.has(company_match(Property.company_id, company_id)))
 
 
-def _scope_reminder_logs(query, company_id: int):
+def _scope_reminder_logs(query, company_id):
     agent_ids = scope_agents(query.session.query(Agent.id), company_id).subquery()
     return query.filter(AlertReminderLog.agent_id.in_(agent_ids))
 
 
-def _scope_visit_whatsapp_logs(query, company_id: int):
-    return query.filter(VisitWhatsappLog.property.has(Property.company_id == company_id))
+def _scope_visit_whatsapp_logs(query, company_id):
+    # Envíos de la ficha: de la empresa de la visita, que es la que la emite
+    # (PLAN_VISITAS_OTRA_EMPRESA.md); puede no ser la de la propiedad
+    return query.filter(VisitWhatsappLog.visit.has(company_match(PropertyVisit.company_id, company_id)))
 
 
-def _api_company(request: Request, db: Session):
-    """Empresa activa para los endpoints /api (sin AuthMiddleware). None si no hay sesión."""
+def _api_company_ids(request: Request, db: Session):
+    """`company_ids` para los endpoints /api (sin AuthMiddleware). None si no hay sesión."""
     user = get_api_user(request, db)
     if not user:
         return None
-    return resolve_company_for_api(request, user, db)
+    return resolve_company_ids_for_api(request, user, db) or None
 
 
 
@@ -53,28 +60,28 @@ async def report_logs_page(
     visit_whatsapp_status: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    company = get_active_company(request)
+    company_ids = get_company_ids(request)
 
-    query = _scope_report_logs(db.query(ReportJobLog), company.id)
+    query = _scope_report_logs(db.query(ReportJobLog), company_ids)
     if status:
         query = query.filter(ReportJobLog.status == status)
     if property_id:
         query = query.filter(ReportJobLog.property_id == property_id)
     logs = query.order_by(ReportJobLog.job_run_at.desc()).limit(limit).all()
 
-    reminder_query = _scope_reminder_logs(db.query(AlertReminderLog), company.id)
+    reminder_query = _scope_reminder_logs(db.query(AlertReminderLog), company_ids)
     if reminder_status:
         reminder_query = reminder_query.filter(AlertReminderLog.status == reminder_status)
     reminder_logs = reminder_query.order_by(AlertReminderLog.executed_at.desc()).limit(limit).all()
 
-    visit_whatsapp_query = _scope_visit_whatsapp_logs(db.query(VisitWhatsappLog), company.id)
+    visit_whatsapp_query = _scope_visit_whatsapp_logs(db.query(VisitWhatsappLog), company_ids)
     if visit_whatsapp_status:
         visit_whatsapp_query = visit_whatsapp_query.filter(VisitWhatsappLog.status == visit_whatsapp_status)
     visit_whatsapp_logs = visit_whatsapp_query.order_by(VisitWhatsappLog.attempted_at.desc()).limit(limit).all()
 
     properties = scope_properties(
         db.query(Property).filter(Property.auto_send_report == True),
-        company.id
+        company_ids
     ).all()
 
     return templates.TemplateResponse(
@@ -107,11 +114,11 @@ async def get_report_logs_api(
     """
     API endpoint para obtener logs de reportes en formato JSON (empresa activa).
     """
-    company = _api_company(request, db)
-    if company is None:
+    company_ids = _api_company_ids(request, db)
+    if company_ids is None:
         return JSONResponse(status_code=401, content={"logs": [], "total": 0})
 
-    query = _scope_report_logs(db.query(ReportJobLog), company.id)
+    query = _scope_report_logs(db.query(ReportJobLog), company_ids)
 
     if status:
         query = query.filter(ReportJobLog.status == status)
@@ -167,11 +174,11 @@ async def get_reminder_logs_api(
     limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
-    company = _api_company(request, db)
-    if company is None:
+    company_ids = _api_company_ids(request, db)
+    if company_ids is None:
         return JSONResponse(status_code=401, content={"logs": [], "total": 0})
 
-    query = _scope_reminder_logs(db.query(AlertReminderLog), company.id)
+    query = _scope_reminder_logs(db.query(AlertReminderLog), company_ids)
     if status:
         query = query.filter(AlertReminderLog.status == status)
     logs = query.order_by(AlertReminderLog.executed_at.desc()).limit(limit).all()
@@ -199,11 +206,11 @@ async def get_report_stats(request: Request, db: Session = Depends(get_db)):
     """
     Endpoint para obtener estadísticas de los reportes de la empresa activa.
     """
-    company = _api_company(request, db)
-    if company is None:
+    company_ids = _api_company_ids(request, db)
+    if company_ids is None:
         return JSONResponse(status_code=401, content={"error": "No autenticado"})
 
-    base = _scope_report_logs(db.query(ReportJobLog), company.id)
+    base = _scope_report_logs(db.query(ReportJobLog), company_ids)
 
     total_logs = base.count()
     success_count = base.filter(ReportJobLog.status == "success").count()

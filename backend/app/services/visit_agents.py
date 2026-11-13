@@ -2,7 +2,10 @@
 
 Reglas (PLAN_VISITAS_AGENTES.md §2.3 y decisiones §4):
 
-- `agent_id` (principal) es obligatorio y debe pertenecer a la empresa activa.
+- `agent_id` (principal) es obligatorio y debe pertenecer a la empresa de la
+  visita (`visit.company_id`: la activa, o la elegida por un agente en vista
+  unificada; no la de la propiedad, que puede ser otra,
+  PLAN_VISITAS_OTRA_EMPRESA.md).
 - Un usuario agente no puede elegir el principal: en el alta es él mismo y
   en la edición se conserva el que ya tenía la visita. Solo el admin lo elige.
 - `companion_agent_id` es opcional, distinto del principal y puede ser de
@@ -54,16 +57,19 @@ def resolve_visit_agents(
     lookup_agent,
     lookup_any_agent,
     fixed_agent_id=None,
+    company_name=None,
 ):
     """Valida los agentes enviados en el form y devuelve (agent_id, companion_agent_id).
 
     - `current_agent`: ficha de agente del usuario logueado (o None).
     - `lookup_agent(agent_id)`: devuelve el agente si pertenece a la empresa
-      activa, o None. Valida al principal.
+      de la visita, o None. Valida al principal.
     - `lookup_any_agent(agent_id)`: devuelve el agente si existe en alguna
       empresa activa, sin filtrar por la activa, o None. Valida al acompañante.
     - `fixed_agent_id`: principal que un usuario no admin no puede cambiar
       (el de la visita en edición). Si es None, el principal es su agente.
+    - `company_name`: nombre de la empresa de la visita para el mensaje de
+      error del principal (sin él, "la empresa activa").
 
     Lanza VisitAgentsError con el mensaje para el usuario.
     """
@@ -83,7 +89,9 @@ def resolve_visit_agents(
         agent_id = current_agent.id
 
     if lookup_agent(agent_id) is None:
-        raise VisitAgentsError("El agente de la visita no pertenece a la empresa activa")
+        raise VisitAgentsError(
+            f"El agente de la visita no pertenece a {company_name or 'la empresa activa'}"
+        )
 
     companion_agent_id = None
     if (form.get("visit_mode") or VISIT_MODE_SOLO) == VISIT_MODE_ACCOMPANIED:
@@ -98,19 +106,21 @@ def resolve_visit_agents(
     return agent_id, companion_agent_id
 
 
-def parse_visit_agents(form, request, db, property_item, visit=None, locked=False):
+def parse_visit_agents(form, request, db, property_item, visit=None, locked=False, company=None):
     """Agentes de la visita a partir del form, con el contexto de la petición.
 
-    `property_item` se recibe para mantener la firma del plan y por si la
-    validación necesita la propiedad; la empresa se toma de la activa, que
-    ya coincide con la de la propiedad (se carga con get_property_in_company).
+    `property_item` se recibe para mantener la firma del plan; el principal
+    se valida contra la empresa de la visita (`company`; por defecto la de
+    `visit` o, en el alta, la activa), que puede no ser la de la propiedad.
     Si `locked`, devuelve los agentes actuales de la visita sin leer el form.
     """
     if locked and visit is not None:
         return visit.agent_id, visit.companion_agent_id
 
     user = request.state.user
-    company_id = get_active_company(request).id
+    if company is None:
+        company = visit.company if visit is not None and visit.company is not None else get_active_company(request)
+    company_id = company.id
 
     def lookup_agent(agent_id):
         return get_agent_in_company(db, agent_id, company_id)
@@ -130,6 +140,7 @@ def parse_visit_agents(form, request, db, property_item, visit=None, locked=Fals
         lookup_agent=lookup_agent,
         lookup_any_agent=lookup_any_agent,
         fixed_agent_id=visit.agent_id if visit is not None else None,
+        company_name=company.name,
     )
 
 
@@ -182,6 +193,7 @@ def companion_agent_groups(db: Session, active_company_id: int) -> list[dict]:
         key = tuple(sorted(c.id for c in agent.companies if c.id in names))
         groups.setdefault(key, []).append(agent)
 
+    # `active_company_id`: la empresa de la visita (sus agentes, primero)
     ordered = sorted(groups, key=lambda ids: (active_company_id not in ids, len(ids), ids))
     return [
         {"label": ", ".join(names[i] for i in ids), "agents": groups[ids]}
