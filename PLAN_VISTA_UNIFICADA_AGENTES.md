@@ -60,7 +60,7 @@ una sola sección sin cambiar de empresa.
 | Recordatorios por email | Un correo por agente y empresa | Sin cambio (ya son por empresa, con la marca correcta). |
 | Propiedades | Mis / Resto de propiedades / Propiedades de {otra} | Mis propiedades (todas sus empresas, con distintivo) / Resto por empresa (una pestaña por empresa, como ahora). La ficha `/properties/{id}` se abre si la propiedad es de alguna de sus empresas. Alta: select de empresa si está en dos. |
 | Visitas | Empresa activa | Sus visitas de todas sus empresas (se diseña junto con PLAN_VISITAS_OTRA_EMPRESA.md: `company_id` en la visita = empresa principal o la elegida). |
-| Resultados Comerciales (vista del agente) | Empresa activa | Ver pregunta 3: pestaña por empresa (recomendado) o suma. |
+| Resultados Comerciales (vista del agente) | Empresa activa | Ver pregunta 3: pestaña por empresa (recomendado) o suma. **Revisado en la fase F**: no existe vista del agente (Resultados es solo del admin); la suma está en su Inicio. |
 | Clientes, Informes | Empresa activa | Todas sus empresas con distintivo; alta con select de empresa si está en dos. |
 | Sidebar | Logo y nombre de la empresa activa + selector | Logo y nombre de la empresa principal; sin selector (salvo opción por usuario). |
 
@@ -120,7 +120,7 @@ una sola sección sin cambiar de empresa.
 
 ## 6. Estado
 
-En ejecución con agentes Opus 5.5 high, un commit por fase.
+Terminado (2026-11-12), con agentes Opus 5.5 high, un commit por fase.
 
 - **Fase A — hecha** (`8eed19f`): migración `f2u3v4i5e6w7` (`users.company_switch_enabled`,
   `users.primary_company_id`), `request.state.company_ids` / `unified_view`, `scope_*` con
@@ -143,7 +143,21 @@ En ejecución con agentes Opus 5.5 high, un commit por fase.
   ficha con la marca de la visita; solo lectura para la empresa de la propiedad; hojas de
   visita por la empresa de la visita). Decisiones en su §6. MULTIEMPRESA_MOYZA_MOES.md §1,
   §2, §6, §16 y §22 actualizados (las visitas ya cruzan).
-- Pendiente: fase F (Resultados del agente; el resto de docs de MULTIEMPRESA_MOYZA_MOES.md).
+- **Fase F — hecha** (commit "fix(inicio): fase F - Resultados sigue solo del admin, regresión
+  y docs de la vista unificada", el siguiente a `af55e97`): Resultados Comerciales no tiene
+  vista del agente (solo admin desde PLAN_RESULTADOS_COMERCIALES.md); sus resultados sumados
+  son los del Inicio (fase C). Enlace "Ver histórico y año" del Inicio solo para el admin,
+  `tests/test_unified_view_results.py`, regresión del admin y MULTIEMPRESA_MOYZA_MOES.md §2,
+  §7, §8, §16 y §22 (Resultados del agente y despliegue completo de la tanda).
+
+**Estado final.** Plan `15eb096` (con PLAN_VISITAS_OTRA_EMPRESA.md). Fase A `8eed19f`, fase B
+`c479b73`, fase C `f55c8d5`, fase D `3aeb951`, fase E (visitas) `b4cdaf2`, `7bea969`,
+`d7bb384`, `65f48f8` y el arreglo `af55e97`, fase F el commit siguiente a `af55e97`.
+Migraciones `f2u3v4i5e6w7` (fase A) y `g3v4i5s6c7o8` (fase E); sin CSS nuevo ni variables de
+entorno. Despliegue y aviso al equipo en MULTIEMPRESA_MOYZA_MOES.md §22. Tests:
+`test_unified_view_alerts.py`, `test_unified_view_dashboard.py`,
+`test_unified_view_properties.py`, `test_unified_view_results.py`, `test_visit_company.py` y
+`test_visits_cross_company.py`.
 
 ### 6.1 Decisiones de implementación (donde el plan no era explícito)
 
@@ -267,3 +281,28 @@ En ejecución con agentes Opus 5.5 high, un commit por fase.
   previa, la firma, la edición, el borrado y la API del flujo legal cargan la visita por
   `company_ids` (la empresa de la visita); la empresa de la propiedad la ve en solo
   lectura (`scope_visible_visits`). Resto en PLAN_VISITAS_OTRA_EMPRESA.md §6.1.
+
+**Fase F**
+
+- **Resultados Comerciales no tenía vista del agente.** El plan (§2.2, §5-3) daba por hecho
+  que el agente veía su propio rendimiento ahí, pero la sección es solo del admin desde que se
+  creó (PLAN_RESULTADOS_COMERCIALES.md: sidebar "solo admin"; `commercial_results.py` redirige
+  a `/alerts` a cualquier otro rol) y la lupa también (PLAN_TRAZABILIDAD_INDICADORES.md: "nada
+  para agentes", con nombres de compradores en las filas). Abrirla a los agentes sería un
+  cambio de permisos que el usuario no ha pedido, así que no se hace: la suma de §5-3 ya está
+  en el Inicio del agente (fase C: KPIs, objetivos, observaciones, puesto). Si se quiere una
+  vista anual o histórica del agente, es una decisión nueva; se haría con
+  `PerformanceReportService` por empresa y `sum_metrics` / `sum_targets`, como el Inicio.
+- **Enlace "Ver histórico y año" del Inicio**: solo para el admin. Al agente lo llevaba a
+  Resultados y de ahí a `/alerts` con "Solo administradores…" (fallo previo, de
+  PLAN_INICIO_SEMANA_MES.md D2, que lo pensó para el admin).
+- **Tests nuevos** (`test_unified_view_results.py`): el agente unificado no entra en
+  Resultados (pestañas, lupa, CSV, objetivos, observaciones); Inicio sin el enlace y admin con
+  él; snapshot congelado de MOYZA más vivo de MOES sumados (también el delta del Inicio);
+  observaciones de las dos empresas unidas; admin con Rendimiento, lupa y CSV por empresa
+  activa, sin mezclar ni columna "Empresa". Ningún test existente cambia.
+- **Regresión del admin** (fetch_page, MOYZA y MOES): Inicio, Compradores y su pestaña de
+  compradores, Propiedades (todas las pestañas), Visitas (listado, selector, alta, vista
+  previa, edición), Resultados (las cuatro pestañas, lupa y CSV), Notificaciones, Clientes,
+  Informes, Usuarios, Agentes y Logs de reportes: 200 con el selector en el sidebar y sin
+  textos de la vista unificada; los detalles de la otra empresa siguen dando "no encontrado".
