@@ -391,7 +391,7 @@ Detalle Propiedad
     </div>
 
     {# Enlace a la ficha en la web de la empresa (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2):
-       el de `properties.public_url` (ETL o a mano) o, si está vacío, el de la plantilla de la empresa. Sin enlace no se pinta nada #}
+       el de `properties.public_url` (ETL o a mano). Sin enlace no se pinta nada #}
     {% set web_url = property | public_url %}
     {% if web_url %}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 mb-4 border-b border-gray-100">
