@@ -1,30 +1,17 @@
 """Enlace público de una propiedad y mensaje para enviarla al comprador.
 
-PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.1 y §4.3. Único punto de verdad del
-enlace a la ficha en la web de la inmobiliaria:
-
-1. `Property.public_url`, si alguien lo pegó a mano (manda siempre: cubre las
-   excepciones del patrón y las empresas sin plantilla, como MOES hoy).
-2. La plantilla de la empresa **de la propiedad** (no la activa: las
-   sugerencias mezclan las dos), `Company.property_url_template`, con el
-   marcador `{referencia}` sustituido por la referencia recortada y
-   codificada con `urllib.parse.quote`.
-3. None: no se puede saber.
-
-No se comprueba en vivo contra la web (lento y frágil; además responde 200
-también cuando el inmueble no existe): el agente puede abrir el enlace antes
-de enviarlo.
+PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.1 y §4.3. El enlace a la ficha en la web
+de la inmobiliaria es `Property.public_url`: lo trae la ETL del CRM y se puede
+corregir en el formulario. La app no lo calcula: si la columna está vacía no
+hay enlace (ni botón de enviar). El patrón por referencia que se usó al
+principio se retiró porque fallaba en parte de los inmuebles de MOYZA.
 
 `property_public_url` se registra como filtro Jinja (`{{ prop | public_url }}`)
 en app/web/template_env.py.
 """
-from urllib.parse import quote
 from urllib.parse import urlparse
 
 from app.core.numbers import format_es_decimal
-
-# Marcador de la plantilla de la empresa
-REFERENCE_PLACEHOLDER = "{referencia}"
 
 # Longitud máxima del enlace manual (columna String(500))
 PUBLIC_URL_MAX_LENGTH = 500
@@ -32,44 +19,11 @@ PUBLIC_URL_MAX_LENGTH = 500
 PUBLIC_URL_ERROR = "El enlace en la web debe empezar por http:// o https://"
 PUBLIC_URL_LENGTH_ERROR = f"El enlace en la web no puede tener más de {PUBLIC_URL_MAX_LENGTH} caracteres"
 
-# Origen del enlace (nota discreta en el detalle de la propiedad)
-SOURCE_MANUAL = "manual"
-SOURCE_TEMPLATE = "template"
-
-
-def build_public_url(manual_url, referencia, template) -> str | None:
-    """Regla del módulo a partir de los datos sueltos (filas de solo lectura
-    que no cargan el modelo). Ver `property_public_url`."""
-    manual = (manual_url or "").strip()
-    if manual:
-        return manual
-    reference = str(referencia or "").strip()
-    if not template or not reference or REFERENCE_PLACEHOLDER not in template:
-        return None
-    return template.replace(REFERENCE_PLACEHOLDER, quote(reference, safe=""))
-
 
 def property_public_url(prop) -> str | None:
-    """Enlace público de la propiedad o None si no se puede saber.
-
-    1. prop.public_url si está relleno.
-    2. Plantilla de su empresa (prop.company.property_url_template) con la
-       referencia recortada, si hay plantilla y referencia.
-    3. None.
-    """
-    if prop is None:
-        return None
-    company = getattr(prop, "company", None)
-    template = getattr(company, "property_url_template", None) if company is not None else None
-    return build_public_url(getattr(prop, "public_url", None), getattr(prop, "referencia", None), template)
-
-
-def public_url_source(prop) -> str | None:
-    """SOURCE_MANUAL si el enlace es el pegado a mano, SOURCE_TEMPLATE si sale
-    de la plantilla de la empresa, None si no hay enlace."""
-    if (getattr(prop, "public_url", None) or "").strip():
-        return SOURCE_MANUAL
-    return SOURCE_TEMPLATE if property_public_url(prop) else None
+    """Enlace público de la propiedad (`prop.public_url` recortado) o None si
+    no tiene."""
+    return (getattr(prop, "public_url", None) or "").strip() or None
 
 
 def clean_public_url(value) -> str | None:

@@ -81,13 +81,6 @@ class Company(Base):
     email_sender_name = Column(String, nullable=True)  # "Sistema Moyza"
     whatsapp_phone = Column(String, nullable=True)
 
-    # Enlace público de las propiedades en la web de la empresa
-    # (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.1): plantilla con el marcador
-    # `{referencia}`. Enlace de reserva cuando `Property.public_url` está
-    # vacío. Ojo: el de MOYZA (sufijo "00") falla en parte de los inmuebles;
-    # el bueno lo trae la ETL. Se lee con app/services/property_link.py.
-    property_url_template = Column(String(500), nullable=True)
-
     is_active = Column(Boolean, default=True, nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)

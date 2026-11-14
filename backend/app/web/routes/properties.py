@@ -49,7 +49,7 @@ from app.services.company_scope import (
 )
 from app.services.phone_lookup_service import lookup_properties_by_phone
 from app.services.property_metrics import PropertyMetricsService
-from app.services.property_link import build_public_url, clean_public_url
+from app.services.property_link import clean_public_url
 from app.web.dependencies.company import get_active_company
 from app.web.dependencies.company import get_allowed_companies_from_request
 from app.web.dependencies.company import get_company_ids
@@ -184,7 +184,6 @@ def _readonly_property_rows(query, search: str, include_address: bool = True) ->
     query = (
         query
         .outerjoin(Agent, Agent.id == Property.agent_id)
-        .outerjoin(Company, Company.id == Property.company_id)
     )
 
     if search:
@@ -218,11 +217,9 @@ def _readonly_property_rows(query, search: str, include_address: bool = True) ->
             Property.num_dormitorios,
             Property.num_banos_aseos,
             Agent.name.label("agent_name"),
-            # Enlace a la web (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2): el manual
-            # o la plantilla de la empresa de la propiedad con su referencia
-            Property.public_url.label("manual_public_url"),
+            # Enlace a la web (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.2)
+            Property.public_url,
             Property.referencia,
-            Company.property_url_template,
         )
         .order_by(Property.price.desc().nullslast(), Property.title.asc())
         .all()
@@ -230,9 +227,7 @@ def _readonly_property_rows(query, search: str, include_address: bool = True) ->
     result = []
     for row in rows:
         data = dict(row._mapping)
-        data["public_url"] = build_public_url(
-            data.pop("manual_public_url"), data.get("referencia"), data.pop("property_url_template"),
-        )
+        data["public_url"] = (data.get("public_url") or "").strip() or None
         result.append(data)
     return result
 

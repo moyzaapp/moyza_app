@@ -27,9 +27,6 @@ from app.web.utils.flash import FLASH_COOKIE_NAME, decode_flash
 
 
 T0 = datetime(2026, 10, 1, 9, 0)
-MOYZA_TEMPLATE = (
-    "https://www.inmobiliariamoyza.com/recursos/nficham06.php?cod_inmueble=9834998349{referencia}00"
-)
 URL_1933 = "https://www.inmobiliariamoyza.com/recursos/nficham06.php?cod_inmueble=9834998349193300"
 SENT = FollowUpActionType.PROPIEDAD_ENVIADA
 
@@ -40,11 +37,11 @@ SENT = FollowUpActionType.PROPIEDAD_ENVIADA
 
 @pytest.fixture
 def env():
-    """MOYZA (con plantilla de enlace) y MOES (sin plantilla); admin; Ana y Bea
+    """MOYZA y MOES; admin; Ana y Bea
     (agentes de MOYZA con usuario); comprador Juan (34600111222, de Ana).
 
-    Propiedades: Piso Centro (MOYZA, de Ana, ref 1933), Piso Bea (MOYZA, de
-    Bea, sin referencia), Piso MOES (MOES, ref 55, sin enlace).
+    Propiedades: Piso Centro (MOYZA, de Ana, ref 1933, con enlace), Piso Bea
+    (MOYZA, de Bea, sin enlace), Piso MOES (MOES, ref 55, sin enlace).
     """
     import app.db.base as db_base
     from app.models.agent import Agent
@@ -58,7 +55,7 @@ def env():
     db_base.Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine, autoflush=False)()
 
-    moyza = Company(code="MOYZA", name="MOYZA", primary_color="#000000", property_url_template=MOYZA_TEMPLATE)
+    moyza = Company(code="MOYZA", name="MOYZA", primary_color="#000000")
     moes = Company(code="MOES", name="MOES PREMIUM", primary_color="#8A6D1F")
     admin_role, agent_role = Role(name="admin"), Role(name="agent")
     admin = User(email="admin@example.com", full_name="Admin Uno", hashed_password="x", role=admin_role)
@@ -73,14 +70,14 @@ def env():
     db.add_all([moyza, moes, admin, *users.values(), *agents.values()])
     db.flush()
 
-    def prop(title, company, agent, referencia=None):
+    def prop(title, company, agent, referencia=None, public_url=None):
         return Property(title=title, address=f"Calle {title} 1, 3ºA", city="Jaen", zona="Centro",
                         property_type="Piso", business_type="Venta", price=120000, status="Activa",
                         num_dormitorios=2, num_banos_aseos=1, referencia=referencia,
-                        company_id=company.id, agent_id=agent.id)
+                        public_url=public_url, company_id=company.id, agent_id=agent.id)
 
     props = {
-        "ana": prop("Piso Centro", moyza, agents["ana"], "1933"),
+        "ana": prop("Piso Centro", moyza, agents["ana"], "1933", URL_1933),
         "bea": prop("Piso Bea", moyza, agents["bea"]),
         "moes": prop("Piso MOES", moes, agents["ana"], "55"),
     }
@@ -547,10 +544,10 @@ def test_ficha_errores_vuelven_a_la_ficha(env):
 
 def _card(**kwargs):
     from app.web.template_env import templates
-    company = SimpleNamespace(name="MOYZA", primary_color="#000000", property_url_template=MOYZA_TEMPLATE)
+    company = SimpleNamespace(name="MOYZA", primary_color="#000000")
     prop = SimpleNamespace(id=7, title="Piso Centro", business_type="Venta", company_id=1, company=company,
                            address="Calle Secreta 1", city="Jaén", zona="Centro", num_dormitorios=2,
-                           num_banos_aseos=1, price=120000, agent=None, referencia="1933", public_url=None)
+                           num_banos_aseos=1, price=120000, agent=None, referencia="1933", public_url=URL_1933)
     for key in ("referencia", "public_url"):
         if key in kwargs:
             setattr(prop, key, kwargs.pop(key))
@@ -584,7 +581,7 @@ def test_tarjeta_con_sent_at():
 
 
 def test_tarjeta_sin_enlace():
-    html = _card(send_action="/x", buyer_phone="600111222", referencia=None)
+    html = _card(send_action="/x", buyer_phone="600111222", public_url=None)
     assert "Sin enlace" not in html
     assert "Enviar por WhatsApp</button>" not in html and "Ver en la web" not in html
 
@@ -649,7 +646,7 @@ def test_editar_rechaza_un_enlace_no_web(env):
     assert _flash(response)["category"] == "error"
     assert "http" in _flash(response)["message"]
     env.db.expire_all()
-    assert env.db.get(Property, prop.id).public_url is None
+    assert env.db.get(Property, prop.id).public_url == URL_1933   # el enlace que tenía no se toca
 
 
 def test_filas_de_solo_lectura_llevan_el_enlace(env):

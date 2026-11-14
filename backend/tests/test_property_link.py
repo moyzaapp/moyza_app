@@ -13,28 +13,21 @@ import pytest
 
 from app.core.phone import whatsapp_url
 from app.services.property_link import (
-    SOURCE_MANUAL,
-    SOURCE_TEMPLATE,
-    build_public_url,
     clean_public_url,
     property_public_url,
-    public_url_source,
     share_message,
 )
 
-MOYZA_TEMPLATE = (
-    "https://www.inmobiliariamoyza.com/recursos/nficham06.php?cod_inmueble=9834998349{referencia}00"
-)
 # Comprobada a mano contra la web real el 2026-11-12 (§3)
 VERIFIED_1933 = "https://www.inmobiliariamoyza.com/recursos/nficham06.php?cod_inmueble=9834998349193300"
 
-MOYZA = SimpleNamespace(name="MOYZA", property_url_template=MOYZA_TEMPLATE)
-MOES = SimpleNamespace(name="MOES PREMIUM", property_url_template=None)
+MOYZA = SimpleNamespace(name="MOYZA")
+MOES = SimpleNamespace(name="MOES PREMIUM")
 
 
 def _prop(**fields):
     data = dict(
-        referencia="1933", public_url=None, company=MOYZA, title="Piso Centro",
+        referencia="1933", public_url=VERIFIED_1933, company=MOYZA, title="Piso Centro",
         property_type="Piso", zona="Bulevar", city="Jaén", num_dormitorios=3,
         price=Decimal("120000"), address="Calle Secreta 7, 2ºB",
         client=SimpleNamespace(name="Propietario Pérez", phone="34611222333"),
@@ -44,51 +37,21 @@ def _prop(**fields):
 
 
 # ---------------------------------------------------------------------------
-# property_public_url
+# property_public_url: solo la columna, nunca calculado
 # ---------------------------------------------------------------------------
 
-def test_moyza_con_referencia_da_la_url_verificada():
+def test_el_enlace_es_el_de_la_columna_recortado():
     assert property_public_url(_prop()) == VERIFIED_1933
-    assert public_url_source(_prop()) == SOURCE_TEMPLATE
+    assert property_public_url(_prop(public_url=f"  {VERIFIED_1933} ")) == VERIFIED_1933
 
 
-def test_la_referencia_se_recorta():
-    assert property_public_url(_prop(referencia="  1933 ")) == VERIFIED_1933
+def test_sin_columna_no_hay_enlace_aunque_haya_referencia():
+    for value in (None, "", "   "):
+        assert property_public_url(_prop(public_url=value)) is None
+    assert property_public_url(_prop(public_url=None, company=MOES, referencia="1525")) is None
 
 
-def test_el_manual_gana_a_la_plantilla():
-    manual = "https://www.inmobiliariamoyza.com/recursos/nficham06.php?cod_inmueble=9834998349193301"
-    prop = _prop(public_url=manual)
-    assert property_public_url(prop) == manual
-    assert public_url_source(prop) == SOURCE_MANUAL
-
-
-def test_sin_referencia_ni_manual_no_hay_enlace():
-    for referencia in (None, "", "   "):
-        prop = _prop(referencia=referencia)
-        assert property_public_url(prop) is None
-        assert public_url_source(prop) is None
-
-
-def test_moes_sin_plantilla_no_hay_enlace_salvo_el_manual():
-    assert property_public_url(_prop(company=MOES)) is None
-    manual = "https://moes.example/ficha/77"
-    assert property_public_url(_prop(company=MOES, public_url=manual)) == manual
-
-
-def test_se_usa_la_empresa_de_la_propiedad():
-    """La plantilla es la de `prop.company`, no la de la empresa activa."""
-    assert property_public_url(_prop(company=MOES)) is None
-    assert property_public_url(_prop(company=MOYZA)) == VERIFIED_1933
-
-
-def test_referencia_de_texto_libre_se_codifica():
-    assert build_public_url(None, "A 1/2", "https://x.example/f?c={referencia}") == "https://x.example/f?c=A%201%2F2"
-
-
-def test_plantilla_sin_marcador_o_sin_empresa():
-    assert build_public_url(None, "1933", "https://x.example/sin-marcador") is None
-    assert property_public_url(_prop(company=None)) is None
+def test_sin_propiedad_no_hay_enlace():
     assert property_public_url(None) is None
 
 

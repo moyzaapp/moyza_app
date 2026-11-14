@@ -10,7 +10,7 @@ from app.core.address import street_only
 from app.core.config import settings
 from app.core.constants import AlertOrigin, BusinessType, ElevatorPreference, PhoneCountryCodes
 from app.core.phone import phone_display, split_phone, tel_href, whatsapp_url
-from app.services.property_link import property_public_url, public_url_source
+from app.services.property_link import property_public_url
 
 logger = logging.getLogger(__name__)
 
@@ -119,11 +119,9 @@ templates = Jinja2Templates(
 templates.env.filters["madrid_dt"] = madrid_dt
 # Enlace wa.me del teléfono (None si no es utilizable): {{ phone | whatsapp_url }}
 templates.env.filters["whatsapp_url"] = whatsapp_url
-# Enlace a la ficha en la web de la empresa (None si no se puede saber) y su
-# origen ("manual" / "template"): {{ prop | public_url }}
+# Enlace a la ficha en la web de la empresa (None si no tiene): {{ prop | public_url }}
 # (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.1)
 templates.env.filters["public_url"] = property_public_url
-templates.env.filters["public_url_source"] = public_url_source
 # Teléfono para mostrar ('+34 600 112 233'), enlace tel: y (código, local) del
 # selector de país (PLAN_TELEFONO_COMPRADOR.md)
 templates.env.filters["phone_display"] = phone_display

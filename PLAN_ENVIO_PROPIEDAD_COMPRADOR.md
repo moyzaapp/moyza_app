@@ -276,3 +276,14 @@ la ficha; el botón también en la tarjeta de la propiedad asociada; `{zona o ci
   `https://www.inmobiliariamoyza.com/recursos/nficham06.php?cod_inmueble=<código interno del CRM>`.
   Que solo escriba la columna cuando tenga enlace (no vaciarla), para no borrar uno corregido
   a mano en el formulario.
+
+## Cambio del 2026-11-13 (2): la app ya no calcula el enlace
+
+- La ETL ya escribe el enlace en `properties.public_url`. Decisión del usuario: la app deja de
+  generar el enlace con la plantilla. `property_public_url` devuelve solo la columna; vacía =
+  sin enlace, sin botón de enviar y sin aviso.
+- Migración `i5p6u7b8l9c0`: elimina `companies.property_url_template` (el downgrade la recrea
+  con las dos plantillas). Se retiran `build_public_url`, `public_url_source` y el filtro
+  Jinja `public_url_source`.
+- El campo "Enlace en la web" del formulario se conserva para corregir un enlace a mano; la
+  ETL no debería vaciar la columna cuando no tenga enlace.
