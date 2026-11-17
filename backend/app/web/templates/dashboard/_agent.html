@@ -151,8 +151,8 @@
         </ul>
         {% endif %}
         {% if home.pending_buyers %}
-        {# Compradores que requieren atención en horas hábiles: volver a llamar y sin gestión
-           (PLAN_RECORDATORIO_SIN_RESPUESTA.md) #}
+        {# Compradores que requieren atención en horas hábiles: volver a llamar y sin gestionar
+           (nunca gestionados); los parados tras una gestión no salen aquí (PLAN_RUIDO_CAMPANA.md D1) #}
         <div class="px-4 sm:px-6 py-3 border-t border-gray-200">
             <button type="button" data-modal-open="pendingBuyersModal" class="text-sm font-medium text-red-700 hover:text-red-800 hover:underline underline-offset-2">
                 {{ home.pending_buyers | length }} {{ 'comprador requiere' if home.pending_buyers | length == 1 else 'compradores requieren' }} atención
@@ -241,7 +241,7 @@
 {% if home.pending_buyers %}
 {% set n = home.pending_buyers | length %}
 {% call ui.modal("pendingBuyersModal", "Compradores que requieren atención", size="lg",
-                 subtitle=(home.pending_summary ~ " · en horas hábiles")) %}
+                 subtitle=(home.pending_summary ~ " · sin gestionar desde la asignación o pendientes de volver a llamar, en horas hábiles")) %}
 <div data-auto-open-on-login>
     <div class="p-4 sm:p-6">
     <ul class="divide-y divide-gray-100 -my-2">

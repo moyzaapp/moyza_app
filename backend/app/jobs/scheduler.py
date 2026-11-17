@@ -179,24 +179,6 @@ def freeze_yearly_reports(now: datetime = None):
     return _freeze_previous_period(PeriodType.YEARLY, now)
 
 
-def notify_follow_ups_due(now: datetime = None):
-    """Cada día a las 08:00 (Madrid): aviso in-app de seguimientos de hoy o vencidos.
-
-    Uno por alerta y día (deduplicación de 24 h). Solo in-app: sin email ni WhatsApp.
-    """
-    from app.services.notification_service import run_follow_up_due
-
-    db = SessionLocal()
-    try:
-        created = run_follow_up_due(db, now=now)
-        logger.info(f"Avisos de seguimiento creados: {created}")
-        return created
-    except Exception as e:
-        logger.error(f"Error en notify_follow_ups_due: {e}", exc_info=True)
-    finally:
-        db.close()
-
-
 def cleanup_read_notifications(now: datetime = None):
     """Cada día: borra las notificaciones leídas hace más de 90 días."""
     from app.services.notification_service import cleanup_read
@@ -340,15 +322,9 @@ def start_scheduler():
     )
 
     # Avisos in-app de seguimientos: 08:00 hora de Madrid
-    scheduler.add_job(
-        notify_follow_ups_due,
-        "cron",
-        hour=8,
-        minute=0,
-        timezone="Europe/Madrid",
-        id="notify_follow_ups_due",
-        replace_existing=True
-    )
+    # El aviso diario "Seguimiento vencido / para hoy" (follow_up_due) se retiró
+    # (PLAN_RUIDO_CAMPANA.md D3): el 97 % no se leía. "Hoy y pendiente" del
+    # Inicio del agente sigue mostrando las próximas acciones vencidas.
 
     # Limpieza de notificaciones leídas (retención 90 días)
     scheduler.add_job(

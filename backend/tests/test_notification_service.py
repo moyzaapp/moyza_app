@@ -226,28 +226,3 @@ def test_observacion_del_admin(ctx):
     assert created[0].url == f"/dashboard?period_type=WEEKLY&period_start={period.start_str}"
 
 
-def test_job_de_seguimientos_uno_por_alerta_y_dia(ctx):
-    from app.models.alert_follow_up import AlertFollowUp
-    from app.models.property_alert import PropertyAlert
-
-    prop = _prop(ctx, ctx.moyza, ctx.laura_agent)
-    alert = PropertyAlert(property_id=prop.id, agent_id=ctx.laura_agent.id, lead_name="PYTEST COMPRADOR",
-                          created_by=ctx.admin.id, status="IN_PROGRESS")
-    closed = PropertyAlert(property_id=prop.id, agent_id=ctx.laura_agent.id, lead_name="PYTEST CERRADA",
-                           created_by=ctx.admin.id, status="COMPLETED")
-    ctx.db.add_all([alert, closed])
-    ctx.db.flush()
-    for a in (alert, closed):
-        ctx.db.add(AlertFollowUp(alert_id=a.id, action_type="CONTACTADO", created_by=ctx.admin.id,
-                                 created_at=NOW - timedelta(days=2), next_action_date=NOW - timedelta(days=1)))
-    ctx.db.flush()
-
-    ns.run_follow_up_due(ctx.db, now=NOW)
-    ns.run_follow_up_due(ctx.db, now=NOW + timedelta(hours=1))   # mismo día: no repite
-
-    mine = ctx.db.query(Notification).filter(
-        Notification.user_id == ctx.laura.id, Notification.kind == NotificationKind.FOLLOW_UP_DUE
-    ).all()
-    assert len(mine) == 1
-    assert mine[0].entity_id == alert.id
-    assert mine[0].title == "Seguimiento vencido · PYTEST COMPRADOR"

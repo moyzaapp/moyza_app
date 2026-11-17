@@ -383,7 +383,6 @@ def test_alerta_sin_gestion_sigue_en_contactar(env):
 def test_tras_el_envio_no_hay_actividad_ni_cambia_la_agenda(env):
     from app.models.alert_follow_up import AlertFollowUp
     from app.services.dashboard_service import DashboardService
-    from app.services.notification_service import run_follow_up_due
     alert = _alert(env)
     service = DashboardService(env.db, env.moyza.id)
     assert env.agents["ana"].id not in service.last_activity_by_agent([env.agents["ana"].id])
@@ -402,7 +401,6 @@ def test_tras_el_envio_no_hay_actividad_ni_cambia_la_agenda(env):
     agenda = service.agenda(env.agents["ana"], now=now)
     assert [row["alert_id"] for row in agenda["due"]] == [other.id]
     assert agenda["due"][0]["action_label"] == "Contactado"
-    assert run_follow_up_due(env.db, now=now) == 1
 
 
 def test_duplicados_no_cuentan_el_envio(env):

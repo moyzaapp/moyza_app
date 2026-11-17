@@ -54,6 +54,10 @@ def test_cadencia_al_cruzar_y_cada_dos_dias_habiles():
     # Con lunes festivo por medio (2/11/2026): del viernes al martes es 1 día hábil
     assert not ns.buyer_reminder_due(L(2026, 10, 30, 8, 0), L(2026, 11, 3, 8, 0), 2)
     assert ns.buyer_reminder_due(L(2026, 10, 30, 8, 0), L(2026, 11, 4, 8, 0), 2)
+    # Sin repetición (0, el valor por defecto desde PLAN_RUIDO_CAMPANA.md D5): solo al cruzar
+    assert ns.buyer_reminder_due(None, L(2026, 10, 16, 8, 0), 0)
+    assert not ns.buyer_reminder_due(last, L(2026, 10, 20, 8, 0), 0)
+    assert not ns.buyer_reminder_due(last, L(2026, 11, 20, 8, 0), 0)
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +149,53 @@ def test_notifica_al_cruzar_y_cada_dos_dias_habiles(ctx):
     assert len(notes) == 3
     assert [n.read_at is None for n in notes] == [False, False, True]
     assert ns.unread_count(ctx.db, ctx.user.id, ctx.moyza.id) == 1
+
+
+def test_por_defecto_un_aviso_por_vencimiento_sin_repeticion(ctx):
+    """PLAN_RUIDO_CAMPANA.md D5: con el valor por defecto (0) R1 avisa al cruzar
+    y no se repite; tras una gestión y un nuevo vencimiento vuelve a avisar una vez."""
+    def run(now):
+        return ns.run_buyer_attention(ctx.db, _items(ctx, now), now=now)   # repeat por defecto (settings)
+
+    assert run(L(2026, 10, 16, 8, 0)) == 1          # viernes: cruza el umbral
+    assert run(L(2026, 10, 20, 8, 0)) == 0          # martes: 2 días hábiles después, no repite
+    assert run(L(2026, 10, 30, 8, 0)) == 0          # dos semanas después, tampoco
+    assert len(_mine(ctx, NotificationKind.BUYER_NO_ACTION)) == 1
+    # Gestión real: se resuelve; 48 h hábiles sin nada -> nuevo vencimiento -> un aviso más
+    _follow_up(ctx, "CONTACTADO", L(2026, 10, 30, 9, 0))
+    assert run(L(2026, 10, 30, 10, 0)) == 0
+    assert run(L(2026, 11, 4, 10, 0)) == 1          # mié 4/11 (lunes 2/11 festivo): venció el martes 9:00
+    assert run(L(2026, 11, 10, 10, 0)) == 0
+    assert len(_mine(ctx, NotificationKind.BUYER_NO_ACTION)) == 2
+
+
+def test_ventana_del_agente_excluye_sin_actividad(ctx):
+    """PLAN_RUIDO_CAMPANA.md D1: la ventana de inicio del agente muestra solo
+    «sin gestionar» (nunca gestionado) y «volver a llamar»; un comprador parado
+    tras una gestión (R1 «sin actividad») no sale, aunque siga en el email."""
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.models.property_alert import PropertyAlert
+    from app.services.buyer_reminder_service import get_pending_buyers_by_agent
+    from app.services.dashboard_service import DashboardService
+
+    stalled = PropertyAlert(company_id=ctx.moyza.id, agent_id=ctx.agent.id, lead_name="PYTEST-CANAL Parado",
+                            status=AlertStatus.IN_PROGRESS, created_by=ctx.admin.id,
+                            created_at=L(2026, 10, 13, 9, 0), assigned_at=L(2026, 10, 13, 9, 0), origin="search")
+    ctx.db.add(stalled)
+    ctx.db.flush()
+    ctx.db.add(AlertFollowUp(alert_id=stalled.id, action_type="CONTACTADO",
+                             created_at=L(2026, 10, 13, 12, 0), created_by=ctx.user.id))
+    ctx.db.flush()
+    now = L(2026, 10, 16, 12, 30)
+
+    raw = get_pending_buyers_by_agent(ctx.db, 48, now=now, company_id=ctx.moyza.id, agent_id=ctx.agent.id)
+    raw_names = {b["buyer_name"]: b for b in raw.get((ctx.agent.id, ctx.moyza.id), [])}
+    assert raw_names["PYTEST-CANAL Parado"]["rule"] == "no_action" and not raw_names["PYTEST-CANAL Parado"]["never_managed"]
+
+    rows = DashboardService(ctx.db, ctx.moyza.id).pending_buyers_for_agent(ctx.agent.id, now=now)
+    names = {r["buyer_name"] for r in rows}
+    assert "PYTEST-CANAL Comprador" in names          # nunca gestionado: sí
+    assert "PYTEST-CANAL Parado" not in names          # parado tras una gestión: no
 
 
 def test_sin_respuesta_resuelve_r1_y_otra_gestion_resuelve_r3(ctx):

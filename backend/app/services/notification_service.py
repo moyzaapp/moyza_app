@@ -17,7 +17,6 @@ PLAN_ASIGNACION_ALERTAS.md §2.4 (lo emite `alert_assignment_service`).
 """
 import logging
 from datetime import datetime
-from datetime import time
 from datetime import timedelta
 from typing import Iterable
 from typing import Optional
@@ -25,10 +24,7 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.constants import AlertStatus
-from app.core.constants import FollowUpActionType
 from app.models.agent import Agent
-from app.models.alert_follow_up import AlertFollowUp
 from app.models.company import Company
 from app.models.notification import Notification
 from app.models.property_alert import PropertyAlert
@@ -377,67 +373,6 @@ def notify_alert_ceded(db: Session, alert, from_agent, to_agent, *, reason=None,
 
 
 # ---------------------------------------------------------------------------
-# Job diario: seguimientos que tocan hoy o vencidos
-# ---------------------------------------------------------------------------
-
-def run_follow_up_due(db: Session, now: Optional[datetime] = None) -> int:
-    """Una notificación por alerta abierta cuyo último seguimiento tiene la
-    próxima acción hoy o vencida. Devuelve cuántas se crearon.
-
-    `next_action_date` guarda la hora local que el agente escribe, así que se
-    compara con el final del día de hoy en Madrid.
-    """
-    from app.services.dashboard_service import madrid_now
-
-    local_now = madrid_now(now)
-    end_of_today = datetime.combine(local_now.date(), time(23, 59, 59))
-    start_of_today = datetime.combine(local_now.date(), time.min)
-    labels = FollowUpActionType.labels()
-
-    latest = (
-        db.query(AlertFollowUp.alert_id.label("alert_id"), func.max(AlertFollowUp.id).label("follow_up_id"))
-        .filter(AlertFollowUp.action_type.notin_(FollowUpActionType.SYSTEM_ACTIONS))
-        .group_by(AlertFollowUp.alert_id)
-        .subquery()
-    )
-    # Empresa de la propia alerta: las búsquedas sin propiedad también avisan
-    # (PLAN_ALERTA_SIN_REFERENCIA.md)
-    rows = (
-        db.query(PropertyAlert, AlertFollowUp, PropertyAlert.company_id)
-        .join(latest, latest.c.alert_id == PropertyAlert.id)
-        .join(AlertFollowUp, AlertFollowUp.id == latest.c.follow_up_id)
-        .filter(
-            PropertyAlert.status.in_([AlertStatus.PENDING, AlertStatus.IN_PROGRESS]),
-            PropertyAlert.agent_id.isnot(None),
-            AlertFollowUp.next_action_date.isnot(None),
-            AlertFollowUp.next_action_date <= end_of_today,
-        )
-        .all()
-    )
-
-    created = 0
-    for alert, follow_up, company_id in rows:
-        overdue = follow_up.next_action_date < start_of_today
-        when = follow_up.next_action_date.strftime("%d/%m %H:%M")
-        try:
-            created += len(notify(
-                db,
-                users=users_for_agent(db, alert.agent),
-                company_id=company_id,
-                kind=NotificationKind.FOLLOW_UP_DUE,
-                title=f"Seguimiento {'vencido' if overdue else 'para hoy'} · {alert.lead_name or 'Comprador'}",
-                body=f"Tras «{labels.get(follow_up.action_type, follow_up.action_type)}» · próxima acción {when}",
-                url=f"/alerts/{alert.id}",
-                entity=("alert", alert.id),
-                now=now,
-            ))
-        except Exception:
-            logger.exception("Error notificando seguimiento de la alerta %s", alert.id)
-    db.commit()
-    return created
-
-
-# ---------------------------------------------------------------------------
 # Job diario: compradores que requieren atención (horas hábiles)
 # ---------------------------------------------------------------------------
 
@@ -458,14 +393,17 @@ def buyer_reminder_due(last_created_at: Optional[datetime], now: datetime, repea
 
     `last_created_at`: el último aviso de esa alerta y regla **del vencimiento
     en curso** (creado desde `due_at`), o None si aún no hay ninguno. Se
-    avisa al cruzar el umbral y luego cuando han pasado al menos
-    `repeat_business_days` días hábiles desde el último aviso.
+    avisa al cruzar el umbral; con `repeat_business_days` > 0 se repite cuando
+    han pasado al menos esos días hábiles desde el último aviso, y con 0 (por
+    defecto, PLAN_RUIDO_CAMPANA.md D5) no se repite: un aviso por vencimiento.
     """
     from app.core.business_calendar import business_hours_between
 
     if last_created_at is None:
         return True
-    return business_hours_between(last_created_at, now) >= max(repeat_business_days, 1) * 24
+    if repeat_business_days <= 0:
+        return False
+    return business_hours_between(last_created_at, now) >= repeat_business_days * 24
 
 
 def _buyer_notification_text(item) -> tuple[str, str]:
@@ -494,10 +432,11 @@ def run_buyer_attention(db: Session, items: Iterable, now: Optional[datetime] = 
     - R1 «sin gestión» (`buyer_no_action`): deduplicación por alerta +
       vencimiento (`due_at`): solo cuentan los avisos creados desde `due_at`
       (los de un ciclo anterior, antes de una gestión o una reasignación, no).
-      Se avisa al cruzar el umbral y otra vez cuando han pasado
-      `repeat_business_days` días hábiles desde el último aviso, lo haya leído
-      o no. Al repetir, el aviso anterior que siga sin leer se marca leído para
-      que no se acumulen.
+      Se avisa al cruzar el umbral y, solo si `repeat_business_days` > 0,
+      otra vez cuando han pasado esos días hábiles desde el último aviso, lo
+      haya leído o no (por defecto 0: un aviso por vencimiento,
+      PLAN_RUIDO_CAMPANA.md D5). Al repetir, el aviso anterior que siga sin
+      leer se marca leído para que no se acumulen.
 
     Como una alerta solo cae en una regla, nunca recibe dos avisos distintos a
     la vez. Devuelve cuántas se crearon. Solo in-app: sin email ni WhatsApp.
