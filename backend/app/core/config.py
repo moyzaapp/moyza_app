@@ -62,8 +62,12 @@ class Settings:
     # app/core/business_calendar.py): 48 = dos días hábiles completos.
     # R1 "sin gestión": horas hábiles desde la última gestión real o la asignación
     BUYER_REMINDER_HOURS: int = int(os.getenv("BUYER_REMINDER_HOURS", "48"))
-    # R1, aviso in-app: al cruzar el umbral y de nuevo cada N días hábiles mientras siga igual
-    BUYER_REMINDER_REPEAT_BUSINESS_DAYS: int = int(os.getenv("BUYER_REMINDER_REPEAT_BUSINESS_DAYS", "2"))
+    # R1, aviso in-app: al cruzar el umbral y, si N > 0, de nuevo cada N días
+    # hábiles mientras siga igual. 0 (por defecto desde PLAN_RUIDO_CAMPANA.md D5)
+    # = un solo aviso por vencimiento; la ventana de inicio y el email ya
+    # recuerdan lo que sigue pendiente. Vuelve a avisar si vuelve a vencer
+    # (nueva asignación o gestión y otra vez 48 h hábiles sin nada).
+    BUYER_REMINDER_REPEAT_BUSINESS_DAYS: int = int(os.getenv("BUYER_REMINDER_REPEAT_BUSINESS_DAYS", "0"))
     # R3 "volver a llamar": horas hábiles tras un seguimiento «Sin respuesta»
     # (un aviso por intento, sin repetición) y número máximo de intentos que
     # avisan; el último pide cerrar la alerta. La antigua R2 "sin avance"

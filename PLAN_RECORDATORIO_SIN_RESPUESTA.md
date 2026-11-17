@@ -13,7 +13,8 @@ Fecha: 2026-10-19 · Rama `63-agregar-moes` · Ajusta las reglas de `PLAN_ALERTA
 
 Avisos que **no** cambian: comprador asignado/reasignado (campana), seguimiento con fecha de próxima acción
 vencida (`follow_up_due`, la fecha la pone el propio agente), y los de visitas. Si el usuario también quiere
-quitar `follow_up_due`, es una línea en el scheduler.
+quitar `follow_up_due`, es una línea en el scheduler. **Retirado el 2026-11-17 (PLAN_RUIDO_CAMPANA.md D3):
+el 97 % no se leía; "Hoy y pendiente" lo sigue mostrando. R1 pasa a un aviso por vencimiento (D5).**
 
 ## 2. Cómo queda hoy (para saber qué se quita)
 

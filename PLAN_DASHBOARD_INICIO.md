@@ -180,7 +180,7 @@ que borra leídas con más de 90 días (se añade al scheduler existente).
 | `visit_completed` | Agente principal y acompañante | `finalize_visit` (ficha firmada y enviada) |
 | `visit_sheet_send_failed` | Agente principal + admins | `finalize_visit` / `send_visit_sheet_whatsapp` cuando el log queda en `ERROR` |
 | `alert_assigned` | Agente asignado | Alta de alerta de comprador con `agent_id` (ya tiene badge propio; aquí solo aparece en el feed, sin duplicar el badge de compradores) |
-| `follow_up_due` | Agente de la alerta | Job diario a las 08:00 Madrid: seguimientos con `next_action_date` = hoy o vencidos (uno por alerta y día) |
+| `follow_up_due` | Agente de la alerta | Job diario a las 08:00 Madrid: seguimientos con `next_action_date` = hoy o vencidos (uno por alerta y día). **Retirado el 2026-11-17 (PLAN_RUIDO_CAMPANA.md D3)**; el tipo se conserva solo para pintar el historial. |
 | `target_reached` | Agente | Al calcular métricas en el Inicio, si una métrica alcanza el 100 % y no existe ya la notificación para ese período |
 | `period_closed` | Agente | Al congelar el período (`freeze_report`), con resumen "4 de 5 objetivos cumplidos" |
 | `admin_note_added` | Agente | `save_notes` en `/performance-reports` |

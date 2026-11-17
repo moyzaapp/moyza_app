@@ -600,13 +600,18 @@ class DashboardService:
         }
 
     def pending_buyers_for_agent(self, agent_id: int, now: Optional[datetime] = None) -> list:
-        """Compradores que requieren atención (misma regla que el email diario).
+        """Compradores que requieren atención en la ventana de inicio del agente.
 
-        PLAN_RECORDATORIO_SIN_RESPUESTA.md: R3 "volver a llamar" (intento N de
-        3) y R1 "sin gestión", en horas hábiles; una fila por alerta. Cada fila
-        trae `rule`, `text`, `tone`, `due_label`, `since_label`…
-        Con varias empresas, las filas de todas, cada una con su `company`
-        (distintivo); sin varias, `company` es None.
+        PLAN_RUIDO_CAMPANA.md D1: solo R3 "volver a llamar" (intento N de 3) y
+        R1 **sin gestionar** (ningún seguimiento real desde la asignación,
+        `never_managed`). Las R1 "sin actividad" (hubo gestión y luego nada) no
+        salen en la ventana: el agente ya actuó y las percibía como ruido;
+        siguen contando para la campana, el email y el listado. Mismo criterio
+        que la ventana del admin (PLAN_VENTANA_SIN_GESTION.md).
+
+        Horas hábiles; una fila por alerta. Cada fila trae `rule`, `text`,
+        `tone`, `due_label`, `since_label`… Con varias empresas, las filas de
+        todas, cada una con su `company` (distintivo); sin varias, `company` es None.
         """
         if not self.is_multi:
             pending = get_pending_buyers_by_agent(
@@ -625,6 +630,7 @@ class DashboardService:
                 if row_agent_id == agent_id and company_id in companies
                 for b in rows
             ]
+        buyers = [b for b in buyers if b["never_managed"] or b["rule"] == RULE_CALLBACK]
         return sorted(buyers, key=lambda b: b["hours_elapsed"], reverse=True)
 
     # ------------------------------------------------------------------

@@ -577,6 +577,21 @@ downgrade útil (las notificaciones marcadas leídas se quedan leídas). Los
 seguimientos "Perfil guardado" creados mientras tanto se verían con su código
 en crudo en el código anterior.
 
+### Menos ruido en la campana (PLAN_RUIDO_CAMPANA.md, 2026-11-17)
+
+```bash
+docker exec moyza_backend alembic upgrade head      # j6q7v8c9m0d1: marca leídas las follow_up_due
+docker restart moyza_backend
+```
+
+- Desaparece el job `notify_follow_ups_due` (aviso diario "Seguimiento vencido / para hoy").
+  La migración marca leídas las que queden sin leer; `cleanup_read` las borra a los 90 días.
+- `BUYER_REMINDER_REPEAT_BUSINESS_DAYS`: el valor por defecto pasa de 2 a **0** (un solo
+  aviso R1 por vencimiento, sin repetición). Si está fijada en el `.env` en producción,
+  quitarla o ponerla a 0 para que aplique el nuevo comportamiento.
+- La ventana de inicio del agente solo muestra "sin gestionar" (nunca gestionado) y
+  "volver a llamar"; sin cambios en el email ni en la ventana del admin.
+
 ```bash
 # Tests (servicio y canales con base de datos; rutas en SQLite en memoria o contra la app levantada)
 docker exec moyza_backend python -m pytest tests/test_buyer_attention_service.py tests/test_buyer_attention_channels.py tests/test_alert_search.py -q

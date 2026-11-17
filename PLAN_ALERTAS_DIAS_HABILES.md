@@ -164,7 +164,7 @@ Un commit por fase: `feat(compradores): fase N - avisos en horas hábiles …`. 
 | 4 | Alertas ya abiertas (`IN_PROGRESS`) | El usuario pide **que no se llene de avisos y que solo se reclame lo que de verdad requiere gestión**. Decisión: **sí se vigilan las abiertas** (si no, abrir la alerta la silencia para siempre y justo eso es lo que hoy falla), pero con estas limitaciones de ruido: (a) una sola fila por comprador con la causa más grave; (b) la campana avisa al cruzar el umbral y luego solo cada 2 días hábiles; (c) un único email diario, en días hábiles; (d) registrar **cualquier gestión real** (incluido "Sin respuesta") silencia R1; (e) R2 solo en Primera llamada (decisión 5). Nada de avisos por el mero hecho de estar abierta. |
 | 5 | Regla "sin avance" (R2) | **Solo para la primera etapa**: aplica cuando la alerta no tiene ningún seguimiento de etapa o su última etapa es `PRIMERA_LLAMADA`. Texto: "N días hábiles sin pasar de Primera llamada". Mismo umbral de 48 h hábiles (`BUYER_STAGE_STALL_HOURS`). Las etapas siguientes quedan fuera por ahora. |
 | 6 | Canal de R2 | **In-app + Inicio + sección en el email diario existente.** Sin correo nuevo. |
-| 7 | Cadencia in-app | **Al cruzar el umbral y cada 2 días hábiles** mientras siga igual. |
+| 7 | Cadencia in-app | **Al cruzar el umbral y cada 2 días hábiles** mientras siga igual. **Revisado el 2026-11-17 (PLAN_RUIDO_CAMPANA.md D5): un solo aviso por vencimiento, sin repetición** (`BUYER_REMINDER_REPEAT_BUSINESS_DAYS=0` por defecto). |
 | 8 | Email solo en días hábiles a las 08:00 Madrid | **Sí** (recomendación aceptada por defecto). |
 | 9 | Admin | **Solo Inicio** ("Requiere atención"). Sin email para el admin. |
 
