@@ -14,7 +14,8 @@
  * elige otro, aviso ámbar "La alerta irá a X y no a Y" y campo Motivo
  * (opcional). Modo "reassign": el agente actual no se puede elegir y el
  * motivo está siempre visible. En los dos, si el agente elegido no pertenece
- * a la empresa activa, se avisa de que se le dará acceso (decisión §4-1 B).
+ * a la empresa de la alerta, se avisa de que la llevará sin cambiar sus
+ * empresas (PLAN_LISTAS_AGENTES_POR_EMPRESA.md: ya no se le da de alta).
  *
  * Modo "cede" (el agente cede su comprador, PLAN_CEDER_COMPRADORES.md §5):
  * select solo con agentes de la empresa de la alerta, motivo obligatorio y
@@ -110,7 +111,7 @@ window.AlertAssign = (function () {
             }
 
             warnCompany.textContent = noAccess
-                ? name + ' no pertenece a ' + companyName + '; al asignarle se le dará acceso a ' + companyName + '.'
+                ? name + ' no pertenece a ' + companyName + ': llevará la alerta y le contará en su rendimiento, sin cambiar sus empresas.'
                 : '';
             show(warnCompany, noAccess);
             show(warn, (!searchMode && mode === 'create' && differs && !!ownerId) || noAccess);

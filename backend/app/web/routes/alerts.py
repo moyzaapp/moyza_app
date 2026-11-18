@@ -2111,7 +2111,7 @@ async def create_alert(
         )
 
         db.add(alert)
-        result = assignment.assign(
+        assignment.assign(
             db,
             alert,
             assignee,
@@ -2129,10 +2129,7 @@ async def create_alert(
         # avisarle de la asignación.
         what = "Búsqueda general creada" if is_search else "Alerta creada"
         if admin_view:
-            message = f"{what} para {buyer.name} y asignada a {assignee.name}"
-            if result.granted_company is not None:
-                message += f". {assignee.name} ahora tiene acceso a {result.granted_company.name}"
-            set_flash(response, "success", message)
+            set_flash(response, "success", f"{what} para {buyer.name} y asignada a {assignee.name}")
         elif is_search:
             set_flash(response, "success", f"{what} para {buyer.name}. Ábrela para tomar su perfil de búsqueda")
         else:
@@ -2877,7 +2874,7 @@ async def reassign_alerts_bulk(
     }
     reason = reason if reason not in (None, "") else assignment_reason
 
-    done, failed, granted = [], [], None
+    done, failed = [], []
     for alert_id in ids:
         alert = found.get(alert_id)
         if alert is None:
@@ -2886,9 +2883,8 @@ async def reassign_alerts_bulk(
         name = alert.lead_name or "Comprador"
         try:
             with db.begin_nested():
-                result = _reassign(db, alert, agent, current_user, reason)
+                _reassign(db, alert, agent, current_user, reason)
             done.append(alert.id)
-            granted = granted or result.granted_company
         except AlertAssignmentError as error:
             message = str(error)
             failed.append((name, message[:1].lower() + message[1:]))
@@ -2913,8 +2909,6 @@ async def reassign_alerts_bulk(
     if done:
         text = (f"{len(done)} {'comprador reasignado' if len(done) == 1 else 'compradores reasignados'} "
                 f"a {agent.name}")
-        if granted is not None:
-            text += f". {agent.name} ahora tiene acceso a {granted.name}"
         messages.append(("success", text))
     if failed:
         messages.append(("error", "No se pudieron reasignar: " + ", ".join(f"{n} ({why})" for n, why in failed)))
@@ -2934,8 +2928,8 @@ async def reassign_alert(
 ):
     """Reasigna una alerta abierta a otro agente (solo admin).
 
-    PLAN_ASIGNACION_ALERTAS.md §2.2: cualquier agente de cualquier empresa (si
-    no pertenece a la de la propiedad se le da acceso), motivo opcional. La
+    PLAN_ASIGNACION_ALERTAS.md §2.2: cualquier agente de cualquier empresa
+    (sus empresas no cambian, PLAN_LISTAS_AGENTES_POR_EMPRESA.md), motivo opcional. La
     alerta vuelve a pendiente y sin leer, conserva sus seguimientos, queda en
     el historial con una nota automática y el nuevo agente recibe un aviso
     in-app. Vuelve a `next` (listado o detalle).
@@ -2978,8 +2972,6 @@ async def reassign_alert(
 
     previous_name = result.previous_agent.name if result.previous_agent is not None else "sin agente"
     message = f"Alerta de {alert.lead_name} reasignada de {previous_name} a {agent.name}"
-    if result.granted_company is not None:
-        message += f". {agent.name} ahora tiene acceso a {result.granted_company.name}"
     response = RedirectResponse(url=back_url, status_code=302)
     set_flash(response, "success", message)
     return response

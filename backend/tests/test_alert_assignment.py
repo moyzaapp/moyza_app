@@ -5,7 +5,8 @@ Asignación de alertas de comprador a un agente (PLAN_ASIGNACION_ALERTAS.md).
   `clean_reason` y `FollowUpActionType.REASIGNADA`.
 - Servicio con base de datos, dentro de una transacción que se deshace al
   terminar: alta con el captador o con otro agente, reasignación (estado,
-  historial, nota, aviso) y alta automática en la empresa (§4-1 B).
+  historial, nota, aviso) y agente de otra empresa sin ampliar su ficha
+  (PLAN_LISTAS_AGENTES_POR_EMPRESA.md, retira §4-1 B).
 
     docker exec moyza_backend python -m pytest tests/test_alert_assignment.py -q
 """
@@ -262,7 +263,6 @@ def test_alta_con_otro_agente_notifica_solo_al_nuevo(ctx):
     alert, result = _new_alert(ctx, ctx.bea, reason="  Carga de trabajo ")
     assert alert.agent_id == ctx.bea.id
     assert alert.assignment_reason == "Carga de trabajo"
-    assert result.granted_company is None
     notes = _notifications(ctx, ctx.users["bea"])
     assert len(notes) == 1
     assert notes[0].company_id == ctx.moyza.id
@@ -317,15 +317,16 @@ def test_reasignar_al_captador_tambien_notifica(ctx):
     assert note.notes.endswith("por Admin")  # sin motivo, sin ":"
 
 
-def test_agente_de_otra_empresa_gana_acceso(ctx):
+def test_agente_de_otra_empresa_no_cambia_de_empresas_pero_ve_la_alerta(ctx):
     from app.models.user import User
     from app.web.dependencies.company import get_allowed_companies
 
     alert, result = _new_alert(ctx, ctx.carla)
-    assert result.granted_company.id == ctx.moyza.id
-    assert {c.code for c in ctx.carla.companies} == {"MOYZA", "MOES"}
-    # El usuario vinculado por email ve ya la empresa (no hace falta user_companies):
-    # la ficha de agente vuelve a contar (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1)
+    # PLAN_LISTAS_AGENTES_POR_EMPRESA.md: asignar ya no amplía la ficha
+    assert not hasattr(result, "granted_company")
+    assert {c.code for c in ctx.carla.companies} == {"MOES"}
+    # El usuario vinculado por email ve la empresa de la alerta (para trabajarla)
+    # sin tocar user_companies ni la ficha: cuentan las alertas que lleva
     carla_user = ctx.db.query(User).filter_by(email="pytest.asig.carla@example.com").one()
     assert carla_user.companies == []
     assert {c.code for c in get_allowed_companies(carla_user, ctx.db)} == {"MOYZA", "MOES"}

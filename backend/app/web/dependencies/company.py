@@ -14,11 +14,13 @@ app lee ese resultado desde `request.state`:
 
 Regla de resolución (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1):
 1. Empresas permitidas. Admin: todas las activas. Resto: las marcadas en su
-   usuario (`user_companies`) más las de su ficha de agente
-   (`agent_companies`, enlazada por email). Así una alerta asignada desde la
-   otra empresa (que añade esa empresa a la ficha,
-   `alert_assignment_service.assign`) se ve sin que el admin toque el usuario.
-   Un usuario sin ninguna cae a MOYZA.
+   usuario (`user_companies`), las de su ficha de agente (`agent_companies`,
+   enlazada por email; igual a las del usuario desde
+   PLAN_LISTAS_AGENTES_POR_EMPRESA.md) y las de las alertas que lleva
+   (`property_alerts.agent_id`). Así una alerta asignada desde la otra
+   empresa se ve y se trabaja sin tocar ni el usuario ni la ficha (asignar
+   ya no amplía la ficha: las listas de agentes siguen la configuración del
+   usuario). Un usuario sin ninguna cae a MOYZA.
 2. Admin, o usuario con `company_switch_enabled`: vista por empresa, como
    siempre. Si la cookie `active_company` apunta a una empresa permitida, esa
    es la activa; si no, la primera permitida (MOYZA por defecto).
@@ -46,6 +48,7 @@ from sqlalchemy.orm import joinedload
 from app.core.constants import CompanyCode
 from app.models.agent import Agent
 from app.models.company import Company
+from app.models.property_alert import PropertyAlert
 from app.models.user import User
 
 ACTIVE_COMPANY_COOKIE = "active_company"
@@ -70,7 +73,7 @@ def get_allowed_companies(user: User, db: Session) -> list[Company]:
     if _is_admin(user):
         return active
 
-    # Las del usuario más las de su ficha de agente (ver cabecera)
+    # Las del usuario, las de su ficha de agente y las de sus alertas (ver cabecera)
     allowed_ids = {c.id for c in user.companies}
 
     agent = (
@@ -81,6 +84,12 @@ def get_allowed_companies(user: User, db: Session) -> list[Company]:
     )
     if agent:
         allowed_ids.update(c.id for c in agent.companies)
+        allowed_ids.update(
+            company_id
+            for (company_id,) in db.query(PropertyAlert.company_id)
+            .filter(PropertyAlert.agent_id == agent.id, PropertyAlert.company_id.isnot(None))
+            .distinct()
+        )
 
     allowed = [c for c in active if c.id in allowed_ids]
 
