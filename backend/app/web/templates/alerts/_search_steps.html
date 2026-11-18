@@ -25,6 +25,11 @@
   empresa (`ui.company_badge`), la cabecera el desglose (`suggestions_by_company`) y un
   enlace "Solo {empresa activa}" (`?company=active`, `only_active_company`). Una
   propiedad de la otra empresa no enlaza a su ficha.
+
+  Varias propiedades (PLAN_ALERTA_VARIAS_PROPIEDADES.md): "Su lista" (`interest_properties`)
+  con Quitar; en las sugerencias, casilla «Le interesa» (form="interestForm") y un único
+  botón "Añadir a su lista (N)" → POST /alerts/{id}/interest-properties. El buscador
+  manual añade una a la lista por la misma ruta.
 #}
 {% import "components/ui_macros.html" as ui %}
 {% from "components/search_profile_form.html" import search_profile_fields %}
@@ -163,17 +168,23 @@
         </div>
         {% else %}
         <div class="space-y-5">
+            {# Aviso de duplicado al añadir (PLAN_ALERTA_VARIAS_PROPIEDADES.md): el lote entero
+               (`link_duplicate.property_ids`) se reenvía con la confirmación #}
             {% if link_duplicate %}
-            {% set dup = link_duplicate.alerts[0] %}
-            {% set dup_text = "Alerta #" ~ dup.id ~ " del " ~ (dup.created_at | madrid_dt('%d/%m/%Y')) ~ ((" · " ~ dup.agent.name) if dup.agent else "") ~ ". Si la asocias igualmente, quedará anotado en esta alerta." %}
-            {% call ui.banner(alert.lead_name ~ " ya tiene una alerta abierta sobre " ~ link_duplicate.property.title, tone="amber", text=dup_text) %}
-                {% if is_admin or dup.agent_id == own_agent_id %}
-                {{ ui.button("Ver alerta #" ~ dup.id, "secondary", href="/alerts/" ~ dup.id, extra="px-3 py-2 text-xs border-amber-300 text-amber-800") }}
+            {% set dup_items = link_duplicate['items'] %}
+            {% set dup_titles = dup_items | map(attribute="property") | map(attribute="title") | join(", ") %}
+            {% set dup_lines = [] %}
+            {% for item in dup_items %}{% set d = item.alerts[0] %}{% set _ = dup_lines.append(item.property.title ~ ": alerta #" ~ d.id ~ " del " ~ (d.created_at | madrid_dt('%d/%m/%Y')) ~ ((" · " ~ d.agent.name) if d.agent else "")) %}{% endfor %}
+            {% call ui.banner(alert.lead_name ~ " ya tiene una alerta abierta sobre " ~ dup_titles, tone="amber", text=(dup_lines | join("; ")) ~ ". Si las añades igualmente, quedará anotado en esta alerta.") %}
+                {% for item in dup_items %}{% set d = item.alerts[0] %}
+                {% if is_admin or d.agent_id == own_agent_id %}
+                {{ ui.button("Ver alerta #" ~ d.id, "secondary", href="/alerts/" ~ d.id, extra="px-3 py-2 text-xs border-amber-300 text-amber-800") }}
                 {% endif %}
-                <form method="POST" action="/alerts/{{ alert.id }}/link-property" data-once>
-                    <input type="hidden" name="property_id" value="{{ link_duplicate.property.id }}">
+                {% endfor %}
+                <form method="POST" action="/alerts/{{ alert.id }}/interest-properties" data-once>
+                    {% for pid in link_duplicate.property_ids %}<input type="hidden" name="property_ids" value="{{ pid }}">{% endfor %}
                     <input type="hidden" name="confirm_duplicate" value="1">
-                    {{ ui.button("Asociar de todas formas", "warning", type="submit", extra="px-3 py-2 text-xs") }}
+                    {{ ui.button("Añadir de todas formas", "warning", type="submit", extra="px-3 py-2 text-xs") }}
                 </form>
             {% endcall %}
             {% endif %}
@@ -181,11 +192,28 @@
             {{ operation_warning() }}
             {{ profile_status() }}
 
-            {# Propiedad actual (p. ej. la de una alerta con referencia) que no sale entre las sugeridas #}
-            {% if alert.property and not current_in_suggestions %}
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {{ property_card(alert.property, show_link=property_link_allowed, current=True, active_company_id=active_company_id, link_company_ids=link_company_ids, switch_hint=not unified_view,
-                                 send_action=send_action, sent_at=sent_dates.get(alert.property.id), buyer_phone=alert.lead_phone) }}
+            {# Su lista (PLAN_ALERTA_VARIAS_PROPIEDADES.md): las propiedades que le interesan al
+               comprador, de cualquier empresa y agente. Cada una se puede enviar por WhatsApp
+               o quitar (la única no: se cambia añadiendo otra) #}
+            {% if interest_properties %}
+            <div class="space-y-3" id="suLista">
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-900">Su lista ({{ interest_properties | length }})</h3>
+                    <p class="text-xs text-gray-500 mt-1">Propiedades que le interesan a {{ alert.lead_name }}. Cada cambio queda en el seguimiento.</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {% for prop in interest_properties %}
+                    {% call property_card(prop, show_link=(is_admin or prop.agent_id == own_agent_id), current=True, active_company_id=active_company_id, link_company_ids=link_company_ids, switch_hint=not unified_view,
+                                          send_action=send_action, sent_at=sent_dates.get(prop.id), buyer_phone=alert.lead_phone) %}
+                        {% if interest_properties | length > 1 %}
+                        <form method="POST" action="/alerts/{{ alert.id }}/interest-properties/{{ prop.id }}/remove" data-once data-loading-text="Quitando…">
+                            {% set remove_attrs %}aria-label="Quitar de su lista: {{ prop.title }}"{% endset %}
+                            {{ ui.button("Quitar de su lista", "secondary", type="submit", extra="w-full", attrs=remove_attrs) }}
+                        </form>
+                        {% endif %}
+                    {% endcall %}
+                    {% endfor %}
+                </div>
             </div>
             {% endif %}
 
@@ -211,21 +239,31 @@
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {% for prop in suggestions %}
-                {% set is_current = alert.property_id == prop.id %}
+                {% set is_current = prop.id in interest_ids %}
                 {# Sin enlace "Ver" a la ficha de una propiedad de otro agente (datos del propietario)
                    ni de la otra empresa (la tarjeta lo resuelve con active_company_id) #}
-                {# Enviar por WhatsApp (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): independiente de asociar #}
+                {# Enviar por WhatsApp (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): independiente de la lista #}
+                {# Casilla «Le interesa» (PLAN_ALERTA_VARIAS_PROPIEDADES.md): va con form="interestForm"
+                   porque la tarjeta ya lleva el formulario de envío (no se anidan formularios) #}
                 {% call property_card(prop, show_link=(is_admin or prop.agent_id == own_agent_id), current=is_current, active_company_id=active_company_id, link_company_ids=link_company_ids, switch_hint=not unified_view,
                                       send_action=send_action, sent_at=sent_dates.get(prop.id), buyer_phone=alert.lead_phone) %}
                     {% if not is_current %}
-                    <form method="POST" action="/alerts/{{ alert.id }}/link-property" data-once data-loading-text="Asociando…">
-                        <input type="hidden" name="property_id" value="{{ prop.id }}">
-                        {{ ui.button("Asociar a esta alerta", "primary", type="submit", extra="w-full") }}
-                    </form>
+                    <label for="interest{{ prop.id }}" class="flex items-center gap-3 min-h-10 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 cursor-pointer select-none hover:bg-gray-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50 has-[:checked]:text-blue-800">
+                        <input type="checkbox" id="interest{{ prop.id }}" name="property_ids" value="{{ prop.id }}" form="interestForm" data-interest-check
+                               class="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                        Le interesa
+                    </label>
                     {% endif %}
                 {% endcall %}
                 {% endfor %}
             </div>
+            {# Una sola acción primaria: añade a su lista todas las marcadas. Fija abajo para que
+               se vea al recorrer las tarjetas en el móvil #}
+            <form id="interestForm" method="POST" action="/alerts/{{ alert.id }}/interest-properties" data-once data-loading-text="Añadiendo…"
+                  class="sticky bottom-0 z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                <p class="text-sm text-gray-600" data-interest-count aria-live="polite">Marca las que le interesan y añádelas a su lista</p>
+                {{ ui.button("Añadir a su lista", "primary", type="submit", attrs="data-interest-submit", full_mobile=True) }}
+            </form>
             {% elif only_active_company %}
             <div class="rounded-2xl border border-gray-200">
                 {% call ui.empty_state("No hay propiedades de " ~ active_name ~ " que encajen con su perfil", "Las de las otras empresas siguen disponibles.") %}
@@ -249,7 +287,7 @@
                 <h3 class="text-sm font-semibold text-gray-900">{{ "¿No está en la lista?" if with_suggestions else "Buscar una propiedad" }}</h3>
                 <p class="text-xs text-gray-500 mt-1">Busca por título o dirección entre todas las propiedades disponibles de las dos empresas.</p>
                 <div class="relative mt-3">
-                    <label for="linkPropertySearch" class="sr-only">Buscar propiedad para asociar</label>
+                    <label for="linkPropertySearch" class="sr-only">Buscar propiedad para añadir a su lista</label>
                     <input type="search" id="linkPropertySearch" autocomplete="off"
                         role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="linkPropertyResults"
                         placeholder="Buscar propiedad…" class="{{ ui.input_class }}">
@@ -257,10 +295,10 @@
                         class="hidden absolute z-10 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-72 overflow-y-auto"></ul>
                 </div>
 
-                <!-- Propiedad elegida en el buscador: confirmación explícita antes de asociar -->
-                <form id="linkPropertyForm" method="POST" action="/alerts/{{ alert.id }}/link-property" data-once data-loading-text="Asociando…"
+                <!-- Propiedad elegida en el buscador: confirmación explícita antes de añadirla a su lista -->
+                <form id="linkPropertyForm" method="POST" action="/alerts/{{ alert.id }}/interest-properties" data-once data-loading-text="Añadiendo…"
                       class="hidden mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
-                    <input type="hidden" name="property_id" id="linkPropertyId">
+                    <input type="hidden" name="property_ids" id="linkPropertyId">
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0 text-sm">
                             <p class="font-medium text-gray-900" id="linkPropertyTitle"></p>
@@ -273,13 +311,33 @@
                         </button>
                     </div>
                     <div class="mt-3">
-                        {{ ui.button("Asociar a esta alerta", "primary", type="submit", full_mobile=True) }}
+                        {{ ui.button("Añadir a su lista", "secondary", type="submit", full_mobile=True) }}
                     </div>
                 </form>
             </div>
         </div>
 
         <script>
+        // Casillas «Le interesa» (PLAN_ALERTA_VARIAS_PROPIEDADES.md): cuenta las marcadas,
+        // pone el número en el botón y lo deja desactivado sin ninguna
+        (function () {
+            var form = document.getElementById('interestForm');
+            if (!form) return;
+            var button = form.querySelector('[data-interest-submit]');
+            var count = form.querySelector('[data-interest-count]');
+            var idle = count.textContent;
+            function update() {
+                var n = document.querySelectorAll('[data-interest-check]:checked').length;
+                button.disabled = n === 0;
+                button.textContent = n ? 'Añadir a su lista (' + n + ')' : 'Añadir a su lista';
+                count.textContent = n ? (n === 1 ? '1 propiedad marcada' : n + ' propiedades marcadas') : idle;
+            }
+            document.addEventListener('change', function (e) {
+                if (e.target.matches && e.target.matches('[data-interest-check]')) update();
+            });
+            update();
+        })();
+
         // Buscador "¿No está en la lista?": /alerts/search-properties con alert_id
         // devuelve todas las disponibles de las dos empresas para esta búsqueda,
         // cada una con su empresa (`company`: name, color, active) para el

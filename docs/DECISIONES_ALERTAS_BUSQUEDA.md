@@ -271,3 +271,31 @@ informe que agrupe por la empresa de la **propiedad** de las alertas verá
 alertas de la otra empresa: para "dónde se captó al comprador" usar siempre
 `property_alerts.company_id`. Las alertas con propiedad ya no cumplen siempre
 `alert.company_id == property.company_id`.
+
+## 9. 2026-11-18: varias propiedades de interés por alerta
+
+Plan: `PLAN_ALERTA_VARIAS_PROPIEDADES.md`. Sustituye la decisión 1 en lo de
+"una sola propiedad": el agente marca en la Propuesta **varias** propiedades
+(casilla «Le interesa», de las dos empresas y de cualquier agente) y se añaden
+a la **lista de la alerta** con un solo seguimiento `PROPIEDAD_ASOCIADA`
+(«Propiedades de interés: A, B (MOES PREMIUM)»). Sigue siendo una alerta:
+no se crean alertas hijas (la alternativa del §2 sigue descartada).
+
+Modelo: `property_alerts.property_id` es la **primera** de la lista y la
+tabla `alert_properties` guarda las demás (migración `k7r8w9x0y1z2`). Lista
+completa: `PropertyAlert.interest_properties`. Quitar una deja «Quitada de su
+lista: A»; si es la primera, la siguiente ocupa su lugar; la única no se
+quita. `alert.agent_id` y `alert.company_id` no cambian y al captador no se
+le avisa. `/link-property` (cambiar la principal) se conserva pero la
+interfaz ya no lo usa.
+
+Duplicados: `find_duplicate_alerts` mira también las propiedades adicionales
+(también en el alta con referencia). Al añadir un lote con alguna duplicada no
+se añade nada hasta confirmar el lote entero.
+
+Implicaciones para analítica: lo que cuenta alertas por propiedad usando
+`property_alerts.property_id` solo ve la primera de cada lista. A 2026-11-18
+ningún informe al propietario ni métrica por propiedad lee las alertas
+(trazabilidad de Resultados muestra la primera); si se añade uno, debe unir
+`alert_properties` para contar todas (decisión del usuario: cuentan todas).
+

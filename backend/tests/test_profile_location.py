@@ -469,7 +469,7 @@ def test_propuesta_avisa_si_la_propiedad_es_de_otra_operacion(env):
     assert response.context["operation_mismatch"] == {"property": "Venta", "wanted": "Alquiler"}
     assert "La propiedad asociada es de Venta y el comprador busca Alquiler" in html
     assert "cambia la operación en el perfil" not in html              # en alquiler no hay perfil
-    assert "Asociada ahora" in html                                    # la propiedad se mantiene
+    assert "En su lista" in html                                    # la propiedad se mantiene
 
     # Si la alerta vuelve a Venta el aviso desaparece (en Alquiler ya no hay
     # formulario de perfil desde el que cambiarla: se cambia en la alerta)

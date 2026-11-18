@@ -13,7 +13,8 @@
 
   - show_link: el rol permite ver la ficha (admin, o el agente sobre las suyas:
     la ficha incluye datos del propietario).
-  - current: la propiedad ya asociada a la alerta ("Asociada ahora").
+  - current: la propiedad ya está en la lista de interés de la alerta ("En su lista",
+    PLAN_ALERTA_VARIAS_PROPIEDADES.md).
   - active_company_id (PLAN_SUGERENCIAS_MULTIEMPRESA.md): las sugerencias salen de
     las dos empresas. Con él, la tarjeta lleva el distintivo de su empresa
     (`ui.company_badge`, necesita `prop.company` cargado) y el enlace "Ver" solo sale
@@ -53,7 +54,7 @@
         {% if current or active_company_id is not none %}
         <p class="flex flex-wrap items-center gap-2">
             {% if active_company_id is not none %}{{ ui.company_badge(prop.company) }}{% endif %}
-            {% if current %}{{ ui.badge("Asociada ahora", "blue", dot=True) }}{% endif %}
+            {% if current %}{{ ui.badge("En su lista", "blue", dot=True) }}{% endif %}
         </p>
         {% endif %}
 

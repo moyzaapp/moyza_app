@@ -318,6 +318,9 @@
                                             {# Propiedad de otra empresa que la de la alerta, asociada desde la Propuesta
                                                (PLAN_SUGERENCIAS_MULTIEMPRESA.md). Para el admin la alerta es de la activa #}
                                             {% if alert.property.company_id != alert.company_id %}{{ ui.company_badge(alert.property.company, extra="mt-1") }}{% endif %}
+                                            {# Más propiedades en su lista (PLAN_ALERTA_VARIAS_PROPIEDADES.md) #}
+                                            {% set extra_count = alert.extra_properties_count %}
+                                            {% if extra_count %}{{ ui.badge("+" ~ extra_count ~ " más", "blue", extra="mt-1") }}{% endif %}
                                         </div>
                                         {% else %}
                                         {# Alerta sin referencia (búsqueda general) aún sin propiedad (PLAN_ALERTA_SIN_REFERENCIA.md) #}

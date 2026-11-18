@@ -20,12 +20,13 @@ import re
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.constants import AlertOrigin, AlertStatus, AlertType
 from app.core.constants import FollowUpActionType
 from app.core.phone import phone_display
+from app.models.alert_property import AlertProperty
 from app.models.buyer import Buyer
 from app.models.property_alert import PropertyAlert
 from app.models.user import User
@@ -98,17 +99,21 @@ def find_duplicate_alerts(
 ) -> Dict[str, List[PropertyAlert]]:
     """Alertas del mismo comprador y propiedad, en la empresa indicada.
 
+    La propiedad cuenta tanto si es la de la alerta como si está entre sus
+    propiedades de interés adicionales (PLAN_ALERTA_VARIAS_PROPIEDADES.md).
+
     Devuelve ``{"open": [...], "recent_closed": [...]}`` ordenadas de la más
     reciente a la más antigua.
     """
     now = now or datetime.utcnow()
     since = now - timedelta(days=RECENT_CLOSED_DAYS)
 
+    in_extras = select(AlertProperty.alert_id).where(AlertProperty.property_id == property_id)
     candidates = (
         scope_alerts(db.query(PropertyAlert), company_id)
         .filter(
             PropertyAlert.buyer_id == buyer_id,
-            PropertyAlert.property_id == property_id,
+            or_(PropertyAlert.property_id == property_id, PropertyAlert.id.in_(in_extras)),
             or_(
                 PropertyAlert.status.in_(OPEN_STATUSES),
                 PropertyAlert.completed_at >= since,

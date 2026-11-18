@@ -212,7 +212,7 @@ def test_duplicado_con_propiedad_de_la_otra_empresa(env):
 
     # El detalle encuentra la propiedad de la otra empresa para el aviso
     _, html = _detail(env, env.users["ana"], second, step="proposal", confirm_property=str(env.props["moes"].id))
-    assert "ya tiene una alerta abierta sobre Piso MOES" in html and "Asociar de todas formas" in html
+    assert "ya tiene una alerta abierta sobre Piso MOES" in html and "Añadir de todas formas" in html
 
     response = _link(env, env.users["ana"], second, "moes", confirm="1")
     assert _flash(response)["category"] == "success"
@@ -284,7 +284,7 @@ def test_propuesta_con_sugerencias_de_la_otra_empresa(env):
     assert "Cambia de empresa para ver la ficha" in html
     assert f'href="/properties/{env.props["ana"].id}"' in html          # la suya de MOYZA, sí
     # Se puede asociar la de MOES
-    assert f'name="property_id" value="{env.props["moes"].id}"' in html
+    assert f'name="property_ids" value="{env.props["moes"].id}"' in html
     # El buscador manual explica que busca en las dos
     assert "disponibles de las dos empresas" in html
 
@@ -330,9 +330,9 @@ def test_tras_asociar_una_de_moes_badge_en_detalle_listado_y_ficha(env):
     _, html = _detail(env, env.admin, alert)
     assert f'href="/properties/{env.props["moes"].id}"' not in html and MOES_COLOR_STYLE in html
 
-    # Propuesta: la asociada (de MOES) sale marcada "Asociada ahora" con su distintivo
+    # Propuesta: la asociada (de MOES) sale marcada "En su lista" con su distintivo
     response, html = _proposal(env, env.users["ana"], alert)
-    assert response.context["current_in_suggestions"] is True and "Asociada ahora" in html
+    assert response.context["current_in_suggestions"] is True and "En su lista" in html
 
     # Listado /alerts: distintivo solo en la de la otra empresa
     html = _list_html(env, env.admin)

@@ -245,6 +245,30 @@ class PropertyAlert(Base):
         cascade="all, delete-orphan"
     )
 
+    # Propiedades de interés adicionales a `property` (PLAN_ALERTA_VARIAS_PROPIEDADES.md),
+    # en el orden en que se añadieron
+    extra_properties = relationship(
+        "AlertProperty",
+        back_populates="alert",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="AlertProperty.added_at, AlertProperty.id"
+    )
+
+    @builtins.property
+    def interest_properties(self) -> list:
+        """Lista completa de propiedades de interés: la de la alerta y después las adicionales."""
+        items = [self.property] if self.property is not None else []
+        for link in self.extra_properties:
+            if link.property is not None and link.property_id != self.property_id:
+                items.append(link.property)
+        return items
+
+    @builtins.property
+    def extra_properties_count(self) -> int:
+        """Cuántas propiedades de interés hay además de la de la alerta (el «+N más»)."""
+        return sum(1 for link in self.extra_properties if link.property_id != self.property_id)
+
     # ------------------------------------------------------------------
     # Búsqueda general (PLAN_ALERTA_SIN_REFERENCIA.md)
     # ------------------------------------------------------------------

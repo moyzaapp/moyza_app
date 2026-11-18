@@ -309,6 +309,9 @@
                                             <span class="text-xs text-gray-500">{{ alert.property.address | street }}</span>
                                             {# Propiedad de la otra empresa (PLAN_SUGERENCIAS_MULTIEMPRESA.md) #}
                                             {% if alert.property.company_id != active_company_id %}{{ ui.company_badge(alert.property.company, extra="mt-1") }}{% endif %}
+                                            {# Más propiedades en su lista (PLAN_ALERTA_VARIAS_PROPIEDADES.md) #}
+                                            {% set extra_count = alert.extra_properties_count %}
+                                            {% if extra_count %}{{ ui.badge("+" ~ extra_count ~ " más", "blue", extra="mt-1") }}{% endif %}
                                         </div>
                                         {% else %}
                                         {# Alerta sin referencia (búsqueda general) aún sin propiedad #}
