@@ -126,6 +126,7 @@ def _create(env, user, **form):
         buyer_phone_number=None, buyer_phone=None, buyer_email=None, source="Llamada",
         alert_type="LEAD_INTERES", message=None, priority="NORMAL", business_type="Venta",
         confirm_duplicate=None, confirm_new_buyer=None, agent_id=None, assignment_reason=None,
+        return_to=None,
     )
     data.update(form)
     return asyncio.run(create_alert(_request(env, user, "/alerts/create", "POST"), db=env.db, **data))

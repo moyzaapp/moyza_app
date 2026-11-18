@@ -344,10 +344,12 @@ def test_tras_asociar_una_de_moes_badge_en_detalle_listado_y_ficha(env):
     assert 'title="Propiedad de MOES PREMIUM"' in html
     titles = [p.title for p in response.context["matching_properties"]]
     assert titles == ["Piso Centro", "Piso MOES", "Piso Bea"]
-    # En compatibles, la de MOES sin "Crear alerta" (el alta con referencia sigue limitada)
-    assert f'data-prop-id="{env.props["moes"].id}"' not in html
-    assert f'data-prop-id="{env.props["ana"].id}"' in html
-    assert "De otra empresa: para proponerla, asóciala desde la alerta del comprador" in html
+    # En compatibles (PLAN_FICHA_COMPRADOR_CONSULTA.md): la asociada de MOES sale «En su lista»
+    # y las demás llevan la casilla «Le interesa» hacia la lista de la alerta, sea de la empresa que sea
+    assert "En su lista" in html and "De otra empresa" not in html and "Crear alerta" not in html
+    assert f'value="{env.props["moes"].id}" form="interestForm"' not in html
+    assert f'value="{env.props["bea"].id}" form="interestForm"' in html
+    assert f'action="/alerts/{alert.id}/interest-properties"' in html
 
 
 def test_alerta_de_moes_ve_las_de_moyza_con_su_distintivo(env):

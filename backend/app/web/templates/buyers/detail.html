@@ -91,6 +91,23 @@
             </div>
         </div>
 
+        {# Dónde se trabaja al comprador (PLAN_FICHA_COMPRADOR_CONSULTA.md): la ficha es de
+           consulta; perfil, propuesta y seguimientos van en su alerta abierta. Sin ella, se crea
+           la búsqueda desde aquí y se sigue en la alerta #}
+        <div class="mb-6">
+            {% if work_alert %}
+            {% call ui.banner("La gestión de " ~ buyer.name ~ " se hace desde su alerta #" ~ work_alert.id, "blue",
+                              text="Contactar, perfil, propuesta y seguimientos quedan registrados en la alerta. Lo que guardes aquí va a esa alerta.") %}
+                {{ ui.button("Ir a la alerta", "secondary", href="/alerts/" ~ work_alert.id, extra="px-3 py-2 text-xs border-blue-300 text-blue-800") }}
+            {% endcall %}
+            {% else %}
+            {% call ui.banner("Sin alerta abierta", "amber",
+                              text=("Para contactarle, tomar su perfil y proponerle propiedades, crea su búsqueda: así entra en la cola y todo queda en el seguimiento." if not is_admin else "Para que un agente le contacte, tome su perfil y le proponga propiedades, crea su búsqueda y asígnala.")) %}
+                {{ ui.button("Crear búsqueda", "secondary", attrs='data-modal-open="createSearchModal"', extra="px-3 py-2 text-xs border-amber-300 text-amber-800") }}
+            {% endcall %}
+            {% endif %}
+        </div>
+
         <!-- Tabs -->
         <div class="border-b border-gray-200 mb-6">
             <nav class="-mb-px flex gap-6" id="detailTabNav">
@@ -139,42 +156,59 @@
         {# Panel: Perfil de búsqueda (partial compartido con el detalle de la alerta; sin m²) #}
         {% if profile_shown %}
         <div id="panel-criteria" class="{% if tab != 'criteria' and tab %}hidden{% endif %}">
-            <form method="POST" action="/buyers/{{ buyer.id }}/search-criteria" data-once>
+            {% if work_alert %}
+            {# Con alerta abierta: el mismo formulario que el paso Perfil de la alerta, enviado a
+               ella (registra «Contactado» / «Perfil guardado» y lleva a su Propuesta;
+               PLAN_FICHA_COMPRADOR_CONSULTA.md). El responsable del perfil es el agente de la alerta #}
+            <form method="POST" action="/alerts/{{ work_alert.id }}/search-profile" data-once data-loading-text="Guardando…">
                 <section class="bg-white rounded-2xl border border-gray-200">
                     <header class="px-4 sm:px-6 py-4 border-b border-gray-200">
                         <h2 class="text-lg font-bold text-gray-900">Perfil de búsqueda</h2>
                         <p class="text-sm text-gray-500 mt-1">Ubicación, tipo, habitaciones, baños, precio e imprescindibles</p>
                     </header>
                     <div class="p-4 sm:p-6">
-                        {# Mismos mínimos que en la alerta (PLAN_PERFIL_UBICACION.md); aquí no se registra seguimiento.
-                           Solo obligatorios con las operaciones que lo exigen (Venta; PLAN_PERFIL_SOLO_VENTA.md):
-                           al cambiar la operación el JS pone o quita los asteriscos #}
+                        {# Mismos mínimos que en la alerta (PLAN_PERFIL_UBICACION.md). Solo obligatorios con las
+                           operaciones que lo exigen (Venta; PLAN_PERFIL_SOLO_VENTA.md): al cambiar la operación
+                           el JS pone o quita los asteriscos #}
                         <p class="text-sm font-medium text-gray-900">Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)</p>
                         {% set optional_operations = BusinessType.values() | reject("in", profile_required_operations) | list %}
-                        <p class="text-sm text-gray-500 mb-4">Obligatorios en {{ profile_required_operations | join(" y ") | lower }}{% if optional_operations %}; en {{ optional_operations | join(" y ") | lower }}, opcionales{% endif %}.</p>
-                        {% call search_profile_fields(criteria, location, property_types, prefix="bc",
-                                                      required_operations=profile_required_operations) %}
+                        <p class="text-sm text-gray-500">Obligatorios en {{ profile_required_operations | join(" y ") | lower }}{% if optional_operations %}; en {{ optional_operations | join(" y ") | lower }}, opcionales{% endif %}.</p>
+                        <p class="text-sm text-gray-500 mb-4">Al guardar queda registrado en la alerta #{{ work_alert.id }} («Contactado» la primera vez, «Perfil guardado» después) y pasas a su Propuesta.</p>
+                        {% call search_profile_fields(criteria, location, property_types, alert_operation=(work_alert.business_type or ""), prefix="bc",
+                                                      required_operations=profile_required_operations, minimums_if_filled=True) %}
                         <div class="sm:max-w-sm">
-                            {% if is_admin %}
-                            {% set agent_options = [] %}
-                            {% for agent in agents %}{% set _ = agent_options.append((agent.id, agent.name ~ (" (baja)" if agent.is_active is false else ""))) %}{% endfor %}
-                            {{ ui.select("agent_id", "Agente responsable", agent_options,
-                                         value=(criteria.agent_id if criteria else none), empty="Sin asignar", id="bcAgent") }}
-                            {% else %}
-                            {# El agente queda siempre como responsable; el backend lo fuerza #}
                             <p class="block text-sm font-medium text-gray-700 mb-1">Agente responsable</p>
                             <p class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700">
-                                {{ own_agent.name if own_agent else '—' }}
+                                {{ work_alert.agent.name if work_alert.agent else '—' }} <span class="text-gray-500">· agente de la alerta</span>
                             </p>
-                            {% endif %}
                         </div>
                         {% endcall %}
                     </div>
                     <footer class="px-4 sm:px-6 py-4 border-t border-gray-200 flex justify-end">
-                        {{ ui.button("Guardar perfil y ver compatibles", "primary", type="submit", full_mobile=True) }}
+                        {{ ui.button("Guardar perfil y ver propiedades", "primary", type="submit", full_mobile=True) }}
                     </footer>
                 </section>
             </form>
+            {% else %}
+            {# Sin alerta abierta: solo lectura. El perfil se registra o cambia desde la alerta #}
+            <section class="bg-white rounded-2xl border border-gray-200">
+                <header class="px-4 sm:px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-bold text-gray-900">Perfil de búsqueda</h2>
+                    <p class="text-sm text-gray-500 mt-1">{% if criteria %}Perfil guardado{% if criteria.agent %} · responsable: {{ criteria.agent.name }}{% endif %}{% else %}Aún sin definir{% endif %}</p>
+                </header>
+                <div class="p-4 sm:p-6 space-y-4">
+                    {% if criteria_parts %}
+                    <div class="flex flex-wrap items-center gap-2">
+                        {% for part in criteria_parts %}
+                        <span class="rounded-lg bg-gray-100 px-2.5 py-1 text-xs text-gray-700">{{ part }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    <p class="text-sm text-gray-600">Para {{ "cambiar" if criteria else "registrar" }} el perfil, crea su búsqueda: se toma en la alerta, al contactar con el comprador.</p>
+                    {{ ui.button("Crear búsqueda", "primary", attrs='data-modal-open="createSearchModal"', full_mobile=True) }}
+                </div>
+            </section>
+            {% endif %}
         </div>
 
         <!-- Panel: Propiedades compatibles -->
@@ -186,10 +220,7 @@
                 </svg>
                 <p class="text-amber-800 font-medium">No hay perfil de búsqueda definido</p>
                 <p class="text-amber-600 text-sm mt-1">Define los criterios en la pestaña "Perfil de búsqueda" para ver las propiedades compatibles.</p>
-                <button onclick="switchDetailTab('criteria')"
-                    class="mt-4 bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 text-sm font-medium transition-colors">
-                    Ir a Perfil de búsqueda
-                </button>
+                {{ ui.button("Ir a Perfil de búsqueda", "secondary", attrs='onclick="switchDetailTab(\'criteria\')"', extra="mt-4 border-amber-300 text-amber-800") }}
             </div>
             {% elif not matching_properties %}
             <div class="bg-white rounded-2xl border border-gray-200 p-8 text-center shadow-sm">
@@ -198,10 +229,7 @@
                 </svg>
                 <p class="text-gray-600 font-medium">Sin propiedades compatibles</p>
                 <p class="text-gray-400 text-sm mt-1">Ninguna propiedad activa cumple los criterios actuales. Prueba a ampliar el perfil de búsqueda.</p>
-                <button onclick="switchDetailTab('criteria')"
-                    class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors">
-                    Ajustar criterios
-                </button>
+                {{ ui.button("Ajustar criterios", "secondary", attrs='onclick="switchDetailTab(\'criteria\')"', extra="mt-4") }}
             </div>
             {% else %}
 
@@ -217,45 +245,42 @@
                 {% if criteria.min_bedrooms is not none %}<span class="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full">≥ {{ criteria.min_bedrooms }} dorm.</span>{% endif %}
             </div>
 
+            {% if not work_alert %}
+            <p class="text-sm text-gray-600 mb-4">Para proponérselas, <button type="button" data-modal-open="createSearchModal" class="font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">crea su búsqueda</button>: las marcarás en su lista desde la alerta.</p>
+            {% endif %}
+
             <!-- Grid de propiedades (tarjeta compartida con el paso "Propuesta" de la alerta) -->
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {% for prop in matching_properties %}
                 {% set own_property = is_admin or (own_agent and prop.agent_id == own_agent.id) %}
-                {% set other_company = prop.company_id != active_company_id %}
+                {% set in_list = prop.id in work_interest_ids %}
                 {# El detalle incluye datos del propietario: el agente solo enlaza a sus propias propiedades.
                    De las dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md): distintivo en cada tarjeta y,
                    si es de la otra, sin "Ver" (la tarjeta lo resuelve con active_company_id) #}
                 {# Enviar por WhatsApp (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md): solo con una alerta
-                   del comprador donde registrarlo (send_action); independiente de "Crear alerta" #}
-                {% call property_card(prop, show_link=own_property, active_company_id=active_company_id, link_company_ids=link_company_ids, switch_hint=not unified_view,
+                   del comprador donde registrarlo (send_action) #}
+                {# Con alerta abierta (PLAN_FICHA_COMPRADOR_CONSULTA.md): casilla «Le interesa» que va a
+                   la lista de la alerta (PLAN_ALERTA_VARIAS_PROPIEDADES.md); las de la lista, «En su lista» #}
+                {% call property_card(prop, show_link=own_property, current=in_list, active_company_id=active_company_id, link_company_ids=link_company_ids, switch_hint=not unified_view,
                                       send_action=send_action, sent_at=sent_dates.get(prop.id), buyer_phone=buyer.phone) %}
-                    {# Crear alerta: admin sobre cualquier propiedad; el agente solo sobre las suyas
-                       (el backend lo exige también). Una de la otra empresa no: el alta con
-                       referencia sigue limitada a la empresa activa; se asocia desde la alerta #}
-                    {% if other_company %}
-                    <p class="w-full rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-500 text-center">
-                        De otra empresa: para proponerla, asóciala desde la alerta del comprador
-                    </p>
-                    {% elif own_property %}
-                    <button type="button"
-                        data-prop-id="{{ prop.id }}"
-                        data-prop-agent-id="{{ prop.agent_id or '' }}"
-                        data-prop-agent-name="{{ prop.agent.name if prop.agent else '' }}"
-                        data-prop-title="{{ prop.title | e }}"
-                        data-prop-meta="{{ [prop.address | street, prop.city, prop.zona] | select | join(' · ') | e }}"
-                        onclick="openQuickAlertModal(this)"
-                        class="w-full inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20">
-                        <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
-                        Crear alerta
-                    </button>
-                    {% else %}
-                    <p class="w-full rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-500 text-center">
-                        Solo el agente de la propiedad puede crear la alerta
-                    </p>
+                    {% if work_alert and not in_list %}
+                    <label for="interest{{ prop.id }}" class="flex items-center gap-3 min-h-10 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 cursor-pointer select-none hover:bg-gray-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50 has-[:checked]:text-blue-800">
+                        <input type="checkbox" id="interest{{ prop.id }}" name="property_ids" value="{{ prop.id }}" form="interestForm" data-interest-check
+                               class="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500/40">
+                        Le interesa
+                    </label>
                     {% endif %}
                 {% endcall %}
                 {% endfor %}
             </div>
+            {% if work_alert %}
+            {# Una sola acción primaria: añade a la lista de la alerta las marcadas y lleva a su Propuesta #}
+            <form id="interestForm" method="POST" action="/alerts/{{ work_alert.id }}/interest-properties" data-once data-loading-text="Añadiendo…" data-interest-form
+                  class="sticky bottom-0 z-10 mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                <p class="text-sm text-gray-600" data-interest-count aria-live="polite">Marca las que le interesan y añádelas a la lista de la alerta #{{ work_alert.id }}</p>
+                {{ ui.button("Añadir a su lista", "primary", type="submit", attrs="data-interest-submit", full_mobile=True) }}
+            </form>
+            {% endif %}
             {% endif %}
         </div>
         {% endif %}
@@ -376,95 +401,44 @@
     </div>
 </div>
 
-<!-- Modal: Crear alerta rápida desde propiedad compatible -->
-{% call ui.modal("quickAlertModal", "Crear alerta de comprador", size="lg", subtitle=buyer.name) %}
-        <form method="POST" action="/alerts/create" id="quickAlertForm" data-once>
+{# Modal «Crear búsqueda» (alerta sin referencia) para este comprador (PLAN_FICHA_COMPRADOR_CONSULTA.md):
+   solo sin alerta abierta. Al crearla se abre la alerta: ahí se contacta, se toma el perfil y se
+   proponen propiedades #}
+{% if not work_alert %}
+{% call ui.modal("createSearchModal", "Crear búsqueda", size="md", subtitle=buyer.name) %}
+        <form method="POST" action="/alerts/create" id="createSearchForm" data-once data-loading-text="Creando…">
             <input type="hidden" name="buyer_id" value="{{ buyer.id }}">
-            <input type="hidden" name="property_id" id="qaPropertyId">
-            <input type="hidden" name="confirm_duplicate" id="qaConfirmDuplicate">
-
+            <input type="hidden" name="return_to" value="buyer">
             <div class="p-6 space-y-4">
+                <p class="text-sm text-gray-600">Se crea una alerta sin referencia para {{ buyer.name }}{% if not is_admin %} a tu nombre{% endif %} y se abre para contactarle, tomar su perfil y proponerle propiedades.</p>
 
-                <!-- Aviso: ya existe una alerta para este comprador y esta propiedad -->
-                <div id="qaDupBanner" class="hidden"></div>
-
-                <!-- Comprador (solo lectura) -->
-                <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3">
-                    <svg class="w-5 h-5 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
-                    </svg>
-                    <div>
-                        <p class="text-xs text-blue-500 font-medium">Comprador</p>
-                        <p class="text-sm font-semibold text-blue-900">{{ buyer.name }}{% if buyer.phone %} · {{ buyer.phone | phone_display }}{% endif %}</p>
-                    </div>
-                </div>
-
-                <!-- Propiedad (solo lectura) -->
-                <div class="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 flex items-center gap-3">
-                    <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
-                    </svg>
-                    <div>
-                        <p class="text-xs text-gray-500 font-medium">Propiedad</p>
-                        <p class="text-sm font-semibold text-gray-800" id="qaPropertyTitle"></p>
-                        <p class="text-xs text-gray-500" id="qaPropertyMeta"></p>
-                    </div>
-                </div>
-
-                <!-- Agente asignado (el admin puede cambiarlo; el agente solo lo ve) -->
-                {{ assign_fields("qa", groups=assignable_groups, is_admin=is_admin) }}
-
-                <!-- Origen -->
+                {# Operación: la del perfil guardado si lo hay #}
+                {% set cs_business_type = criteria.business_type if criteria else none %}
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Origen / Portal</label>
-                    <input type="text" name="source" id="qaSource" placeholder="Ej: Idealista, Fotocasa, Web, Llamada"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
-                </div>
-
-                <div>
-                    <label for="qaBusinessType" class="block text-sm font-medium text-gray-700 mb-1">
+                    <label for="csBusinessType" class="block text-sm font-medium text-gray-700 mb-1">
                         Operación <span class="text-red-500" aria-hidden="true">*</span>
                     </label>
-                    {% set qa_business_type = criteria.business_type if criteria else none %}
-                    <select name="business_type" id="qaBusinessType" required
-                        class="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500">
-                        <option value="" disabled {% if qa_business_type not in BusinessType.values() %}selected{% endif %}>Selecciona…</option>
+                    <select name="business_type" id="csBusinessType" required class="{{ ui.input_class }}">
+                        <option value="" disabled {% if cs_business_type not in BusinessType.values() %}selected{% endif %}>Selecciona…</option>
                         {% for bt in BusinessType.values() %}
-                        <option value="{{ bt }}" {% if qa_business_type == bt %}selected{% endif %}>{{ bt }}</option>
+                        <option value="{{ bt }}" {% if cs_business_type == bt %}selected{% endif %}>{{ bt }}</option>
                         {% endfor %}
                     </select>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
-                        <select name="alert_type" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
-                            <option value="LEAD_INTERES">Lead Interesado</option>
-                            <option value="VISITA_SOLICITADA">Visita Solicitada</option>
-                            <option value="CAMBIO_PRECIO">Cambio de Precio</option>
-                            <option value="OTRO">Otro</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Prioridad</label>
-                        <select name="priority" id="qaPriority" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
-                            <option value="NORMAL">Normal</option>
-                            <option value="ALTA">Alta</option>
-                            <option value="BAJA">Baja</option>
-                        </select>
-                    </div>
-                </div>
+                {# Agente: el admin elige (obligatorio, sin propiedad de la que deducirlo); el agente queda él #}
+                {{ assign_fields("cs", groups=assignable_groups, is_admin=is_admin) }}
 
+                {{ ui.field("source", "Origen / Portal", placeholder="Ej: Idealista, Fotocasa, Web, Llamada", id="csSource") }}
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Notas</label>
-                    <textarea name="message" id="qaMessage" rows="3"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm resize-none"></textarea>
+                    <label for="csMessage" class="block text-sm font-medium text-gray-700 mb-1">Notas</label>
+                    <textarea name="message" id="csMessage" rows="3" class="{{ ui.input_class }} resize-none"></textarea>
                 </div>
             </div>
-
-            {{ ui.modal_footer(submit_label="Crear alerta", submit_id="qaSubmit") }}
+            {{ ui.modal_footer(submit_label="Crear búsqueda") }}
         </form>
 {% endcall %}
+{% endif %}
 
 <!-- Modal: Editar datos de contacto del comprador -->
 {% call ui.modal("editContactModal", "Editar datos de contacto", size="md", subtitle="Nombre, teléfono y correo del comprador") %}
@@ -480,50 +454,15 @@
 </form>
 {% endcall %}
 
-<script src="{{ static_url('/static/js/alert-duplicates.js') }}"></script>
 <script src="{{ static_url('/static/js/alert-assign.js') }}"></script>
 <script src="{{ static_url('/static/js/phone-field.js') }}"></script>
 <script src="{{ static_url('/static/js/search-profile.js') }}"></script>
 <script>
-var qaDupRequest = 0;
-var qaAssign = window.AlertAssign ? AlertAssign.init('qa') : null;
-
-function openQuickAlertModal(btn) {
-    var propertyId = btn.dataset.propId;
-    document.getElementById('qaPropertyId').value = propertyId;
-    document.getElementById('qaPropertyTitle').textContent = btn.dataset.propTitle;
-    document.getElementById('qaPropertyMeta').textContent = btn.dataset.propMeta;
-    if (qaAssign) qaAssign.setOwner(btn.dataset.propAgentId, btn.dataset.propAgentName);
-
-    // Estado limpio y consulta de alertas ya registradas para este comprador y propiedad
-    var banner = document.getElementById('qaDupBanner');
-    var submitBtn = document.getElementById('qaSubmit');
-    var confirmInput = document.getElementById('qaConfirmDuplicate');
-    AlertDuplicates.renderAlertBanner(banner, null);
-    AlertDuplicates.setForceMode(submitBtn, confirmInput, false);
-
-    var requestId = ++qaDupRequest;
-    AlertDuplicates.checkAlerts({{ buyer.id }}, propertyId).then(function (data) {
-        if (requestId !== qaDupRequest) return;
-        var hasOpen = AlertDuplicates.renderAlertBanner(banner, data, {
-            forceLabel: 'Crear de todas formas',
-            getContactPayload: function () {
-                return {
-                    source: document.getElementById('qaSource').value,
-                    notes: document.getElementById('qaMessage').value,
-                    priority: document.getElementById('qaPriority').value
-                };
-            }
-        });
-        AlertDuplicates.setForceMode(submitBtn, confirmInput, hasOpen, 'Crear de todas formas');
-    });
-
-    UI.openModal('quickAlertModal', btn);
-}
-
-function closeQuickAlertModal() {
-    UI.closeModal('quickAlertModal');
-}
+// Alta sin referencia desde la ficha (el admin elige agente; el agente no ve el bloque)
+(function () {
+    if (!document.getElementById('createSearchForm') || !window.AlertAssign) return;
+    AlertAssign.init('cs').setSearch();
+})();
 
 function switchDetailTab(tab) {
     var panels = {

@@ -259,7 +259,7 @@
             </div>
             {# Una sola acción primaria: añade a su lista todas las marcadas. Fija abajo para que
                se vea al recorrer las tarjetas en el móvil #}
-            <form id="interestForm" method="POST" action="/alerts/{{ alert.id }}/interest-properties" data-once data-loading-text="Añadiendo…"
+            <form id="interestForm" method="POST" action="/alerts/{{ alert.id }}/interest-properties" data-once data-loading-text="Añadiendo…" data-interest-form
                   class="sticky bottom-0 z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
                 <p class="text-sm text-gray-600" data-interest-count aria-live="polite">Marca las que le interesan y añádelas a su lista</p>
                 {{ ui.button("Añadir a su lista", "primary", type="submit", attrs="data-interest-submit", full_mobile=True) }}
@@ -318,25 +318,8 @@
         </div>
 
         <script>
-        // Casillas «Le interesa» (PLAN_ALERTA_VARIAS_PROPIEDADES.md): cuenta las marcadas,
-        // pone el número en el botón y lo deja desactivado sin ninguna
-        (function () {
-            var form = document.getElementById('interestForm');
-            if (!form) return;
-            var button = form.querySelector('[data-interest-submit]');
-            var count = form.querySelector('[data-interest-count]');
-            var idle = count.textContent;
-            function update() {
-                var n = document.querySelectorAll('[data-interest-check]:checked').length;
-                button.disabled = n === 0;
-                button.textContent = n ? 'Añadir a su lista (' + n + ')' : 'Añadir a su lista';
-                count.textContent = n ? (n === 1 ? '1 propiedad marcada' : n + ' propiedades marcadas') : idle;
-            }
-            document.addEventListener('change', function (e) {
-                if (e.target.matches && e.target.matches('[data-interest-check]')) update();
-            });
-            update();
-        })();
+        // Las casillas «Le interesa» y el botón "Añadir a su lista (N)" los lleva ui.js
+        // ([data-interest-form]; PLAN_ALERTA_VARIAS_PROPIEDADES.md)
 
         // Buscador "¿No está en la lista?": /alerts/search-properties con alert_id
         // devuelve todas las disponibles de las dos empresas para esta búsqueda,

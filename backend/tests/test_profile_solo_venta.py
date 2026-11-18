@@ -401,16 +401,19 @@ def test_ficha_render_minimos_segun_operacion(env):
     def html():
         return _buyer_page(env)[1]
 
+    # PLAN_FICHA_COMPRADOR_CONSULTA.md: el formulario es el de la alerta abierta (Venta):
+    # se pinta con la operación de la alerta y los mínimos "si se rellena", como en su paso Perfil
     _complete_profile(env, business_type="Alquiler", max_price=None)
     page = html()
-    assert 'data-required-operations="[&#34;Venta&#34;]"' in page and "data-minimums-if-filled" not in page
+    assert 'data-required-operations="[&#34;Venta&#34;]"' in page and "data-minimums-if-filled" in page
     assert "Obligatorios en venta; en alquiler, opcionales." in page
-    assert 'id="bcPropertyType" name="property_type" required' not in page   # Alquiler al pintar
+    assert 'id="bcPropertyType" name="property_type" required' in page       # la alerta es de Venta
+    assert "Si la cambias, cambia la operación de la alerta" in page
 
     criteria = _criteria(env)
     criteria.business_type = "Venta"
     env.db.commit()
-    assert 'id="bcPropertyType" name="property_type" required' in html()     # Venta al pintar
+    assert 'id="bcPropertyType" name="property_type" required' in html()
 
 
 # ---------------------------------------------------------------------------

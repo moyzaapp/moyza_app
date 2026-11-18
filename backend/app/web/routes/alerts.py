@@ -1853,9 +1853,16 @@ async def create_alert(
     agent_id: str = Form(None),
     assignment_reason: str = Form(None),
     company_id: str = Form(None),
+    return_to: str = Form(None),
     db: Session = Depends(get_db)
 ):
     """Crear nueva alerta con comprador existente o nuevo (admin y agentes).
+
+    PLAN_FICHA_COMPRADOR_CONSULTA.md: `return_to="buyer"` (botón «Crear
+    búsqueda» de la ficha del comprador, siempre con `buyer_id` y sin
+    propiedad) lleva al detalle de la alerta recién creada en vez de al
+    listado; el aviso de búsqueda duplicada y el error de agente vuelven a la
+    ficha.
 
     Empresa de la alerta (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1): con
     propiedad, la de la propiedad (de cualquiera de las empresas del usuario;
@@ -1892,6 +1899,9 @@ async def create_alert(
 
     company_ids = get_company_ids(request)
     is_search = property_id is None
+    # Desde la ficha del comprador (PLAN_FICHA_COMPRADOR_CONSULTA.md)
+    from_buyer = return_to == "buyer" and bool(buyer_id)
+    buyer_url = f"/buyers/{buyer_id}" if buyer_id else "/alerts"
 
     # Operación obligatoria: solo Venta o Alquiler (no se guarda nada si falta).
     # El formulario rápido de la ficha del comprador vuelve a esa ficha.
@@ -2005,7 +2015,7 @@ async def create_alert(
             )
         except AlertAssignmentError as error:
             db.rollback()
-            response = RedirectResponse(url="/alerts", status_code=302)
+            response = RedirectResponse(url=buyer_url if from_buyer else "/alerts", status_code=302)
             set_flash(response, "error", str(error))
             return response
 
@@ -2017,7 +2027,8 @@ async def create_alert(
                 if not confirm_duplicate:
                     db.rollback()
                     fecha = existing.created_at.strftime("%d/%m/%Y") if existing.created_at else ""
-                    response = RedirectResponse(url="/alerts", status_code=302)
+                    response = RedirectResponse(url=f"{buyer_url}?tab=alerts" if from_buyer else "/alerts",
+                                                status_code=302)
                     set_flash(
                         response,
                         "warning",
@@ -2111,7 +2122,8 @@ async def create_alert(
         )
         db.commit()
 
-        response = RedirectResponse(url="/alerts", status_code=302)
+        # Desde la ficha del comprador, a la alerta nueva (ahí se trabaja)
+        response = RedirectResponse(url=f"/alerts/{alert.id}" if from_buyer else "/alerts", status_code=302)
         # Un agente solo crea alertas sobre sus propiedades (o búsquedas a su
         # nombre), así que la alerta siempre queda a su nombre y no hace falta
         # avisarle de la asignación.
@@ -3583,6 +3595,20 @@ def _buyer_send_alert(db: Session, buyer: Buyer, current_user) -> Optional[Prope
     return latest_open or query.order_by(*order).first()
 
 
+def _buyer_work_alert(db: Session, buyer: Buyer, current_user) -> Optional[PropertyAlert]:
+    """Alerta ABIERTA desde la que el usuario trabaja a este comprador, o None.
+
+    PLAN_FICHA_COMPRADOR_CONSULTA.md: la ficha no deja trabajar fuera de la
+    alerta. El perfil se guarda en ella, las compatibles se añaden a su lista
+    y el aviso de cabecera enlaza a ella. Misma elección que
+    `_buyer_send_alert` pero solo abiertas (agente: las suyas; admin:
+    cualquiera; la más reciente por asignación). Sin ella, la ficha ofrece
+    crear la búsqueda.
+    """
+    alert = _buyer_send_alert(db, buyer, current_user)
+    return alert if alert is not None and alert.status in OPEN_ALERT_STATUSES else None
+
+
 @router.get("/buyers/{buyer_id}", response_class=HTMLResponse)
 async def buyer_detail(
     buyer_id: int,
@@ -3692,6 +3718,10 @@ async def buyer_detail(
     # del comprador donde registrarlo. "Enviada el …" con los envíos de las
     # alertas que ve en la pestaña Alertas.
     send_alert = _buyer_send_alert(db, buyer, current_user) if matching_properties else None
+    # Alerta abierta desde la que se trabaja (PLAN_FICHA_COMPRADOR_CONSULTA.md)
+    # y su lista de interés, para marcar «En su lista» en las compatibles
+    work_alert = _buyer_work_alert(db, buyer, current_user)
+    work_interest_ids = {p.id for p in work_alert.interest_properties} if work_alert is not None else set()
     buyer_sent_dates = {}
     if send_alert is not None and buyer_alerts:
         buyer_sent_dates = sent_dates(
@@ -3739,6 +3769,8 @@ async def buyer_detail(
             "profile_applies": buyer_matching.profile_applies,
             "send_action": f"/buyers/{buyer.id}/send-property" if send_alert is not None else None,
             "sent_dates": buyer_sent_dates,
+            "work_alert": work_alert,
+            "work_interest_ids": work_interest_ids,
             "tab": tab,
             "AlertStatus": AlertStatus,
             "AlertPriority": AlertPriority,
@@ -3913,7 +3945,12 @@ async def save_search_criteria(
     PLAN_PERFIL_SOLO_VENTA.md: los mínimos solo se exigen si la operación
     enviada es la que los requiere
     (`buyer_matching.profile_required_for_business_type`: Venta). En Alquiler
-    se guarda lo que llegue."""
+    se guarda lo que llegue.
+
+    PLAN_FICHA_COMPRADOR_CONSULTA.md: la ficha ya no envía aquí. Con alerta
+    abierta el formulario va a `/alerts/{id}/search-profile` (deja
+    seguimiento) y sin ella es de solo lectura. La ruta se conserva por
+    compatibilidad."""
 
     current_user = request.state.user
 
