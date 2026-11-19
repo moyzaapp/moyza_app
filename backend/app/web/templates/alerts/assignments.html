@@ -26,10 +26,21 @@
                 <select id="hAgent" name="agent_id" class="{{ ui.input_class }}" aria-describedby="hAgentHelp">
                     <option value="">Todos</option>
                     {% for agent in agents %}
-                    <option value="{{ agent.id }}" {% if agent.id == selected_agent_id %}selected{% endif %}>{{ agent.name }}{% if agent.is_active is false %} (baja){% endif %}</option>
+                    <option value="{{ agent.id }}" {% if agent.id == selected_agent_id %}selected{% endif %}>{{ agent.name }}</option>
                     {% endfor %}
                 </select>
                 <p id="hAgentHelp" class="text-xs text-gray-500 mt-1">Cede o recibe</p>
+                {# Agente fuera de la lista (dado de baja o de otra empresa,
+                   PLAN_LISTAS_AGENTES_POR_EMPRESA.md): el enlace sigue filtrando #}
+                {% if filtered_agent %}
+                {% set agent_keep = request.query_params.multi_items() | rejectattr("0", "in", ["agent_id", "page"]) | list %}
+                <a href="/alerts/assignments{{ ('?' ~ (agent_keep | urlencode)) if agent_keep else '' }}"
+                   class="mt-2 inline-flex items-center gap-1.5 min-h-[2.25rem] max-w-full rounded-lg bg-gray-100 hover:bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors"
+                   aria-label="Quitar el filtro del agente {{ filtered_agent.name }}">
+                    <span class="truncate min-w-0 max-w-xs" title="{{ filtered_agent.name }}{% if filtered_agent.note %} · {{ filtered_agent.note }}{% endif %}">{{ filtered_agent.name }}{% if filtered_agent.note %} · {{ filtered_agent.note }}{% endif %}</span>
+                    <svg class="w-3.5 h-3.5 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+                </a>
+                {% endif %}
             </div>
             <div>
                 <label for="hKind" class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>

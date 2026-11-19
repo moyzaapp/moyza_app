@@ -43,7 +43,6 @@ from app.models.buyer_search_criteria import BuyerSearchCriteria
 
 from app.services.company_scope import (
     scope_alerts,
-    scope_agents,
     scope_active_agents,
     scope_buyers,
     scope_properties,
@@ -764,15 +763,20 @@ async def alerts_page(
         .all()
     )
 
-    # `agents`: filtro "Agente" del listado (solo admin). Es una consulta: incluye
-    # a los dados de baja, con "(baja)" en la opción, para ver sus alertas
-    # cerradas (PLAN_BAJA_USUARIOS.md §4.4). Las propiedades no se precargan:
-    # el formulario de alta las busca por /alerts/search-properties.
+    # `agents`: filtro "Agente" del listado (solo admin): agentes activos de la
+    # empresa activa según su usuario (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-1 y
+    # §3-3; ya no salen los dados de baja). Un `agent_id` de fuera de la lista
+    # (dado de baja o de otra empresa, p. ej. desde la ventana "sin gestionar")
+    # sigue filtrando y se ve como chip (`filtered_agent`). Las propiedades no
+    # se precargan: el formulario de alta las busca por /alerts/search-properties.
     agents = []
     assignable_groups = []
+    filtered_agent = None
     if admin_view:
-        agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
-        # "Agente asignado" del alta y de la reasignación: todas las empresas (§4-1 B)
+        agents = scope_active_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
+        if agent_id_int and agent_id_int not in {a.id for a in agents}:
+            filtered_agent = _filtered_agent_chip(db, agent_id_int, company.id)
+        # "Agente asignado" del alta y de la reasignación: todas las empresas (§4-1)
         assignable_groups = assignment.assignable_agents(db, company.id)
 
     # Compradores visibles: el título "Compradores (N)" y el desglose por
@@ -972,6 +976,7 @@ async def alerts_page(
             "q": q,
             "status_filter": valid_status_filters,
             "selected_agent_id": agent_id_int,
+            "filtered_agent": filtered_agent,
             "attention_filter": UNMANAGED_FILTER if unmanaged_view else None,
             # Casillas y "Reasignar" de varias (PLAN_VENTANA_SIN_GESTION.md fase C)
             "bulk_reassign": unmanaged_view,
@@ -1591,6 +1596,25 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
     return ctx
 
 
+def _filtered_agent_chip(db: Session, agent_id: int, company_id: int) -> dict:
+    """Chip del filtro de agente cuando el agente no sale en el select.
+
+    PLAN_LISTAS_AGENTES_POR_EMPRESA.md: los filtros solo listan a los agentes
+    activos de la empresa, pero un enlace con `agent_id` de un dado de baja o
+    de un agente de otra empresa (que lleva alertas de esta) sigue filtrando.
+    """
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        return {"id": agent_id, "name": f"Agente #{agent_id}", "note": "no encontrado"}
+    if agent.is_active is False:
+        note = "dado de baja"
+    elif not any(c.id == company_id for c in agent.companies):
+        note = "de " + ", ".join(c.name for c in sorted(agent.companies, key=lambda c: c.id))
+    else:
+        note = None
+    return {"id": agent.id, "name": agent.name, "note": note}
+
+
 def _parse_day(value: Optional[str]) -> Optional[date]:
     """'aaaa-mm-dd' del input date, o None si falta o no es válida."""
     try:
@@ -1655,6 +1679,12 @@ async def alert_assignments_page(
     )
 
     filters_active = bool(agent_id_int or kind_value or date_from or date_to)
+    # Filtro de agentes: activos de la empresa (PLAN_LISTAS_AGENTES_POR_EMPRESA.md);
+    # un agent_id de fuera de la lista sigue filtrando y se ve como chip
+    history_agents = scope_active_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
+    filtered_agent = None
+    if agent_id_int and agent_id_int not in {a.id for a in history_agents}:
+        filtered_agent = _filtered_agent_chip(db, agent_id_int, company.id)
 
     return templates.TemplateResponse(
         request=request,
@@ -1666,7 +1696,8 @@ async def alert_assignments_page(
             "logs": logs,
             "pagination": pagination,
             "summary": assignment.cession_summary(db, company.id, start=start, end=end),
-            "agents": scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all(),
+            "agents": history_agents,
+            "filtered_agent": filtered_agent,
             "kind_labels": assignment.KIND_LABELS,
             "selected_agent_id": agent_id_int,
             "selected_kind": kind_value,

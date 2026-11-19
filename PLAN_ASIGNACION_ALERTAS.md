@@ -181,7 +181,7 @@ Un commit por fase: `feat(alertas): fase N - …`. Usar el skill `moyza-ui-ux-pr
 
 | # | Pregunta | Decisión |
 |---|---|---|
-| 1 | Agente de la otra empresa | **B.** Cualquier agente; si no pertenece a la empresa de la propiedad, al asignarle se le añade a esa empresa (`add_to_company`). Aviso en el formulario antes de confirmar y banner "compradores asignados en otra empresa" en `/alerts`. |
+| 1 | Agente de la otra empresa | **B.** Cualquier agente; si no pertenece a la empresa de la propiedad, al asignarle se le añade a esa empresa (`add_to_company`). Aviso en el formulario antes de confirmar y banner "compradores asignados en otra empresa" en `/alerts`. **Retirada (2026-11-18, PLAN_LISTAS_AGENTES_POR_EMPRESA.md):** se sigue pudiendo elegir cualquier agente activo, pero asignar ya no amplía su ficha (la ficha sigue a su usuario y las listas de agentes salen de esa configuración); el agente ve la alerta porque `get_allowed_companies` suma las empresas de las alertas que lleva y la vista unificada se la enseña. La migración `l8s9x0y1z2a3` deshizo las ampliaciones. |
 | 2 | Quién elige el agente al crear | **Solo el admin.** El agente sigue viendo "Se asignará a {captador}" como texto. |
 | 3 | Reasignar alertas ya creadas | **Sí**, desde el detalle y desde el listado; solo admin y solo abiertas. |
 | 4 | Reasignación en lote | **Después.** No entra en esta versión. |

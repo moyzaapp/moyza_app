@@ -673,8 +673,10 @@ def test_metricas_por_agente_cuentan_busquedas_sin_propiedad(env):
     # El seguimiento «Cerrado» ya no es un cierre: los cierres se registran a mano
     # (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1)
     assert closings == {}
-    # En MOES no cuenta nada de MOYZA
-    assert PerformanceReportService(env.db, env.moes.id).grouped_counts("contactos", start, end, agents) == {}
+    # Contactos es por agente, de sus alertas de cualquier empresa
+    # (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2): en MOES salen los mismos;
+    # los cierres siguen siendo de la empresa del cierre
+    assert PerformanceReportService(env.db, env.moes.id).grouped_counts("contactos", start, end, agents) == contacts
 
 
 # ---------------------------------------------------------------------------

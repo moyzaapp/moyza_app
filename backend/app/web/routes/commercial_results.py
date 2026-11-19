@@ -47,7 +47,6 @@ from app.services import closing_service
 from app.services.closing_service import ClosingError
 from app.services.company_scope import get_agent_in_company
 from app.services.company_scope import scope_active_agents
-from app.services.company_scope import scope_agents
 from app.services.company_scope import scope_alerts
 from app.services.company_scope import scope_properties
 from app.services.notification_service import notify_admin_note
@@ -100,7 +99,14 @@ def _forbidden_redirect(message: str = "Solo administradores pueden acceder a Re
 
 
 def _company_agents(db: Session, company_id: int):
-    return scope_agents(db.query(Agent), company_id).order_by(Agent.name.asc()).all()
+    """Agentes activos de la empresa según su ficha (igual a su usuario).
+
+    PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-1 y §3-3: las listas de agentes de
+    Resultados siguen la configuración del usuario y no muestran a los dados
+    de baja (Evolución y Compradores; Rendimiento usa `period_agents`, que
+    conserva su fila en los períodos congelados).
+    """
+    return scope_active_agents(db.query(Agent), company_id).order_by(Agent.name.asc()).all()
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +123,9 @@ def _assigned(alert):
 
 
 def buyers_context(db: Session, company_id: int) -> dict:
+    """Pestaña Compradores: totales con todas las alertas de la empresa (también
+    las que lleva un agente de fuera) y una fila por agente activo de la
+    empresa con alertas (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2)."""
     all_alerts = scope_alerts(db.query(PropertyAlert), company_id).all()
 
     seven_days_ago = datetime.utcnow() - timedelta(days=7)
@@ -132,7 +141,7 @@ def buyers_context(db: Session, company_id: int) -> dict:
     avg_response_time = sum(response_times) / len(response_times) if response_times else 0
 
     agents_data = []
-    for agent in scope_agents(db.query(Agent), company_id).all():
+    for agent in _company_agents(db, company_id):
         agent_alerts = [a for a in all_alerts if a.agent_id == agent.id]
         if not agent_alerts:
             continue
@@ -303,7 +312,8 @@ async def commercial_results(
 
     if tab == TAB_PERFORMANCE:
         period = svc.period(period_type, period_start)
-        agents = _company_agents(db, company.id)
+        # Activos de la empresa; en un período pasado, también los dados de baja con dato
+        agents = svc.period_agents(period)
         context.update({
             "period": period,
             "objective_keys": svc.objective_keys(period.period_type),
@@ -387,6 +397,9 @@ METRIC_CSV_COLUMNS = {
         ("Propiedad", _csv_property),
         ("Ciudad", lambda r: r["property_city"] or ""),
         ("Tipo", lambda r: KIND_LABELS[r["kind"]]),
+        # Empresa de la alerta: los contactos son de cualquier empresa
+        # (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2)
+        ("Empresa", lambda r: r["company_name"]),
         ("Origen", lambda r: r["source"] or ""),
         ("Estado", lambda r: ALERT_STATUS_LABELS.get(r["status"], r["status"] or "")),
         ("Alerta", lambda r: f"/alerts/{r['alert_id']}"),

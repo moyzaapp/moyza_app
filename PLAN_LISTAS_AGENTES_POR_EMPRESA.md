@@ -88,4 +88,57 @@ del usuario".
 
 ## 5. Estado
 
-En ejecución con un agente Opus 5.5 high, un commit por fase.
+Terminado (2026-11-18), con un agente Opus 5.5 high, un commit por fase.
+
+- **Fase A — hecha** (`2947674`, "feat(agentes): la ficha de agente sigue a su usuario;
+  asignar una alerta ya no amplía sus empresas"): `assign` sin `add_to_company` ni
+  `granted_company`; flashes y aviso del formulario sin "acceso"; migración de datos
+  `l8s9x0y1z2a3_agent_companies_follow_user` (solo SQL, función `sync_agent_companies(conn)`
+  probada cargando el módulo de la migración, como `b1c2d3e4f5a6`); downgrade no-op.
+  En local cambió las fichas 6 (solo el texto `company`), 12 (MOYZA + MOES → MOYZA), 15
+  (MOYZA + MOES → MOES PREMIUM) y la de demostración 26569; la 1 (sin usuario), intacta.
+- **Fase B — hecha** (el commit siguiente a `2947674`, "feat(listas): agentes de la empresa
+  según su usuario, sin dados de baja; contactos por agente sin filtrar por empresa de la
+  alerta"): listas, contactos por agente, migración `m9t0y1z2a3b4`, docs y tests.
+
+Decisiones de implementación (donde el plan no era explícito):
+
+1. **Ver la alerta sin ampliar la ficha.** El plan daba por hecho que la vista unificada ya
+   enseñaba al agente una alerta de otra empresa, pero `company_ids` salía de usuario +
+   ficha: sin la ampliación, un agente de MOES con una alerta de MOYZA dejaba de verla (en
+   local, la ficha 12 tenía alertas abiertas de MOES). `get_allowed_companies` suma ahora
+   las empresas de las alertas que lleva (todas, abiertas o cerradas, como hacía la ficha).
+   Es el mismo acceso que daba la ampliación, sin tocar la ficha ni las listas.
+2. **Contactos una sola vez en el Inicio del agente.** "Contactos" es el único indicador
+   que sale de alertas (`AGENT_WIDE_INDICATORS`); en vivo ya no filtra por empresa, así
+   que calcular por empresa y sumar lo duplicaba. `team_metrics` con varias empresas usa
+   `sum_company_metrics`: suma todo salvo los contactos, que se toman una vez. Para los
+   snapshots, que no se recalculan, la columna `agent_performance_reports.contacts_all_companies`
+   (False en los existentes, True al congelar desde ahora) dice si ya traen los de todas
+   las empresas: si alguna parte es un snapshot nuevo, manda (el mayor); si no, el vivo;
+   si todas son antiguas, se suman como antes. La tendencia semanal es una sola consulta
+   por agente (sin duplicar). Cubierto en `tests/test_agent_lists_by_company.py`.
+3. **Rendimiento en un período pasado**: activos de la empresa más los dados de baja de la
+   empresa con snapshot congelado **o** con algún dato de ese período (un agente dado de
+   baja a mitad de mes no tiene snapshot y su actividad desaparecería). Período en curso:
+   solo activos. Evolución: solo activos (el plan la lista entre los selects sin bajas).
+4. **Agente fuera del select**: un `agent_id` de un dado de baja o de un agente de otra
+   empresa sigue filtrando en Alertas y en el historial y se ve como chip quitable con
+   "· dado de baja" o "· de {empresas}"; enviar el formulario de filtros lo quita.
+5. **Ventana "sin gestionar"**: lista alertas de la empresa por agente; un agente activo de
+   otra empresa con alertas de esta sale con su nombre y "Agente de {empresas}" (antes,
+   "Sin agente"), porque las alertas son de la empresa y hay que poder reasignarlas; los
+   dados de baja, fuera. La reasignación ofrece todos los activos de las dos empresas.
+6. **"Última actividad"** del Inicio del admin (aviso de agentes sin actividad): los
+   seguimientos y lecturas cuentan en sus alertas de cualquier empresa; las visitas, por
+   empresa de la visita.
+7. **Lupa de contactos**: una alerta de otra empresa lleva `ui.company_badge` ("Alerta de
+   {empresa}") y no enlaza (no se abre desde la empresa activa); su propiedad tampoco. CSV
+   con la columna "Empresa" en todas las filas.
+8. **Compradores** muestra las filas de agentes activos de la empresa; un agente de otra
+   empresa con alertas de esta suma en los totales, no en las filas. Cierres no cambia
+   (su select ya era de activos; los registros conservan "(de baja)").
+
+Pendiente o fuera de alcance: la pantalla Agentes sigue permitiendo marcar empresas en la
+ficha a mano (puede volver a separarse del usuario hasta que se guarde el usuario); el
+filtro de agentes de los logs de informes (`routes/report_logs.py`) sigue con todos.

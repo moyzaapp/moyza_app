@@ -55,6 +55,13 @@ class AgentPerformanceReport(Base):
     cierres_venta = Column(Integer, nullable=True)
     cierres_alquiler = Column(Integer, nullable=True)
 
+    # Contactos de las alertas del agente de cualquier empresa
+    # (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2). False en los snapshots
+    # anteriores, que solo contaban las alertas de esta empresa: la suma de
+    # empresas del Inicio del agente (`sum_company_metrics`) los suma; los
+    # nuevos ya llevan todos sus contactos y cuentan una sola vez.
+    contacts_all_companies = Column(Boolean, nullable=False, default=False, server_default="false")
+
     # Congelamiento: True cuando el período cerró y las métricas son finales
     is_locked = Column(Boolean, default=False)
     locked_at = Column(DateTime, nullable=True)

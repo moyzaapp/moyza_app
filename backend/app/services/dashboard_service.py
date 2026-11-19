@@ -15,8 +15,12 @@ Reglas:
   acepta un id o una lista: el Inicio del agente en la vista unificada
   (PLAN_VISTA_UNIFICADA_AGENTES.md, fase C) recibe todas sus empresas y
   muestra la **suma** (§5-3): métricas y objetivos se calculan por empresa
-  (vivo o snapshot, cada una con los suyos) y se suman (`sum_metrics`,
+  (vivo o snapshot, cada una con los suyos) y se suman (`sum_company_metrics`,
   `sum_targets`); agenda, compradores, cartera y tendencia leen de todas.
+- "Contactos" es por agente, de sus alertas de cualquier empresa
+  (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2): el equipo de una empresa suma
+  los de sus agentes estén donde estén las alertas, y la suma de empresas
+  del agente los cuenta una sola vez (`sum_company_metrics`).
   El Inicio del admin es siempre de una empresa (`admin_home` usa
   `company_id`, la primera y única de la lista).
 - Las métricas salen de `PerformanceReportService` (misma fórmula que
@@ -68,7 +72,8 @@ from app.services.performance_report_service import MONTH_ABBR
 from app.services.performance_report_service import Period
 from app.services.performance_report_service import PerformanceReportService
 from app.services.performance_report_service import business_kind
-from app.services.performance_report_service import sum_metrics
+from app.services.performance_report_service import metrics_source
+from app.services.performance_report_service import sum_company_metrics
 from app.services.performance_report_service import sum_targets
 
 
@@ -298,27 +303,38 @@ class DashboardService:
 
         Mismo criterio que `PerformanceReportService.metrics_for_period`, con
         una consulta agrupada por indicador en lugar de una por agente. Con
-        varias empresas, cada una con su criterio (snapshot o vivo) y sumadas.
+        varias empresas, cada una con su criterio (snapshot o vivo) y sumadas
+        con `sum_company_metrics`: los contactos, que ya son de cualquier
+        empresa en cada parte, cuentan una sola vez
+        (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2).
         """
         agent_ids = list(agent_ids)
-        result = {}
         if not agent_ids:
-            return result
+            return {}
 
         if self.is_multi:
-            per_company = [svc.team_metrics(agent_ids, period) for svc in self._per_company()]
+            per_company = [svc._team_metrics_parts(agent_ids, period) for svc in self._per_company()]
             return {
-                agent_id: sum_metrics([metrics[agent_id] for metrics in per_company])
+                agent_id: sum_company_metrics([parts[agent_id] for parts in per_company])
                 for agent_id in agent_ids
             }
 
+        return {agent_id: metrics for agent_id, (metrics, _source) in self._team_metrics_parts(agent_ids, period).items()}
+
+    def _team_metrics_parts(self, agent_ids, period: Period) -> dict:
+        """{agent_id: (métricas, origen)} en la empresa del servicio (una sola).
+
+        Origen según `metrics_source`: vivo, snapshot nuevo o snapshot antiguo
+        (contactos solo de esta empresa), para sumar empresas sin duplicar.
+        """
+        result = {}
         if not period.is_current:
             for report in self.perf._reports_query(agent_ids).filter(
                 AgentPerformanceReport.period_type == period.period_type,
                 AgentPerformanceReport.period_start == period.start,
                 AgentPerformanceReport.is_locked.is_(True),
             ):
-                result[report.agent_id] = self.perf.report_metrics(report)
+                result[report.agent_id] = (self.perf.report_metrics(report), metrics_source(report))
 
         live_ids = [agent_id for agent_id in agent_ids if agent_id not in result]
         if live_ids:
@@ -328,9 +344,12 @@ class DashboardService:
             }
             visits = self._visit_counts(live_ids, period.start, period.end)
             for agent_id in live_ids:
-                result[agent_id] = self.perf.metrics_from_counts(
-                    {indicator: counts[indicator].get((agent_id, None)) for indicator in BREAKDOWN_KEYS},
-                    visits.get(agent_id, 0),
+                result[agent_id] = (
+                    self.perf.metrics_from_counts(
+                        {indicator: counts[indicator].get((agent_id, None)) for indicator in BREAKDOWN_KEYS},
+                        visits.get(agent_id, 0),
+                    ),
+                    metrics_source(None),
                 )
         return result
 
@@ -699,14 +718,19 @@ class DashboardService:
         return f"{monday.day} {MONTH_ABBR[monday.month - 1]}"
 
     def _weekly_contacts(self, agent_ids, start: datetime, end: datetime) -> dict:
-        """{(agent_id, lunes): contactos venta + alquiler}."""
+        """{(agent_id, lunes): contactos venta + alquiler}.
+
+        Por agente, de sus alertas de cualquier empresa (misma regla que el
+        indicador, PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2): una sola
+        consulta, así que la suma de empresas no duplica nada.
+        """
         week = func.date_trunc("week", PropertyAlert.created_at)
         kind = business_kind(PropertyAlert.business_type)
         rows = (
             self.db.query(PropertyAlert.agent_id, week.label("week"), func.count(PropertyAlert.id))
             .filter(
-                # Por agente: cuentan también las búsquedas sin propiedad
-                company_match(PropertyAlert.company_id, self._company_scope()),
+                # Por agente: cuentan también las búsquedas sin propiedad y las
+                # alertas de cualquier empresa
                 PropertyAlert.agent_id.in_(list(agent_ids)),
                 PropertyAlert.created_at >= start,
                 PropertyAlert.created_at <= end,
@@ -991,6 +1015,29 @@ class DashboardService:
             self.db, settings.BUYER_REMINDER_HOURS, now=now, company_id=self.company_id,
         )
 
+    def _pending_agents(self, agents, pending: dict) -> dict:
+        """{agent_id: Agent} de los grupos de compradores pendientes de la empresa.
+
+        Los del equipo (`agents`) y, además, los agentes de fuera de la
+        empresa que llevan alertas suyas (asignar no cambia sus empresas,
+        PLAN_LISTAS_AGENTES_POR_EMPRESA.md): sin esto salían "Sin agente".
+        """
+        known = {a.id: a for a in agents}
+        missing = {
+            agent_id for (agent_id, company_id) in pending
+            if company_id == self.company_id and agent_id is not None and agent_id not in known
+        }
+        if missing:
+            for agent in self.db.query(Agent).filter(Agent.id.in_(missing)):
+                known[agent.id] = agent
+        return known
+
+    def _outside_label(self, agent) -> Optional[str]:
+        """Empresas de un agente que no es de la empresa del servicio (para su distintivo)."""
+        if agent is None or any(c.id == self.company_id for c in agent.companies):
+            return None
+        return ", ".join(c.name for c in sorted(agent.companies, key=lambda c: c.id)) or None
+
     def pending_buyers_by_agent(self, agents, now: Optional[datetime] = None, raw: Optional[dict] = None) -> list:
         """Compradores que requieren atención agrupados por agente (horas hábiles).
 
@@ -999,15 +1046,17 @@ class DashboardService:
         hábiles. `raw`: resultado de `_pending_buyers` ya calculado.
         """
         pending = raw if raw is not None else self._pending_buyers(now)
-        names = {a.id: a.name for a in agents}
+        by_id = self._pending_agents(agents, pending)
         groups = []
         for (agent_id, company_id), buyers in pending.items():
             if company_id != self.company_id:
                 continue
             oldest = max(b["business_hours_elapsed"] for b in buyers)
+            agent = by_id.get(agent_id)
             groups.append({
                 "agent_id": agent_id,
-                "agent_name": names.get(agent_id) or "Sin agente",
+                "agent_name": agent.name if agent is not None else "Sin agente",
+                "outside_company": self._outside_label(agent),
                 "count": len(buyers),
                 "no_action": sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION),
                 "callback": sum(1 for b in buyers if b["rule"] == RULE_CALLBACK),
@@ -1028,12 +1077,20 @@ class DashboardService:
         hábiles y `reassigned`, cuántas llegaron al agente por una
         reasignación o cesión (`previous_agent_id`, ver `BuyerAttention.as_dict`)
         y siguen sin gestión. `raw`: resultado de `_pending_buyers` ya calculado.
+
+        PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-3: sin los dados de baja. Un
+        agente activo de otra empresa con alertas de esta sí sale (con el
+        distintivo de sus empresas, `outside_company`): las alertas son de la
+        empresa y el admin tiene que poder reasignarlas.
         """
         pending = raw if raw is not None else self._pending_buyers(now)
-        names = {a.id: a.name for a in agents}
+        by_id = self._pending_agents(agents, pending)
         groups = []
         for (agent_id, company_id), buyers in pending.items():
             if company_id != self.company_id:
+                continue
+            agent = by_id.get(agent_id)
+            if agent is not None and agent.is_active is False:
                 continue
             unmanaged = [b for b in buyers if b["never_managed"]]
             if not unmanaged:
@@ -1041,7 +1098,8 @@ class DashboardService:
             oldest = max(b["business_hours_elapsed"] for b in unmanaged)
             groups.append({
                 "agent_id": agent_id,
-                "agent_name": names.get(agent_id) or "Sin agente",
+                "agent_name": agent.name if agent is not None else "Sin agente",
+                "outside_company": self._outside_label(agent),
                 "count": len(unmanaged),
                 "reassigned": sum(1 for b in unmanaged if b["reassigned"]),
                 "oldest_hours": int(oldest),
@@ -1050,7 +1108,11 @@ class DashboardService:
         return sorted(groups, key=lambda g: (-g["count"], -g["oldest_hours"]))
 
     def last_activity_by_agent(self, agent_ids) -> dict:
-        """Última actividad de cada agente: visita (principal o acompañante), seguimiento o alerta leída."""
+        """Última actividad de cada agente: visita (principal o acompañante), seguimiento o alerta leída.
+
+        Visitas, las registradas en la empresa; seguimientos y lecturas, en sus
+        alertas de cualquier empresa (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2).
+        """
         agent_ids = list(agent_ids)
         last = {}
 
@@ -1071,7 +1133,6 @@ class DashboardService:
             self.db.query(PropertyAlert.agent_id, func.max(AlertFollowUp.created_at))
             .join(AlertFollowUp, AlertFollowUp.alert_id == PropertyAlert.id)
             .filter(
-                PropertyAlert.company_id == self.company_id,
                 PropertyAlert.agent_id.in_(agent_ids),
                 # La nota de reasignación la escribe el admin y los seguimientos
                 # anteriores a la asignación son del agente previo: no son
@@ -1084,7 +1145,7 @@ class DashboardService:
             keep(agent_id, when)
         for agent_id, when in (
             self.db.query(PropertyAlert.agent_id, func.max(PropertyAlert.read_at))
-            .filter(PropertyAlert.company_id == self.company_id, PropertyAlert.agent_id.in_(agent_ids))
+            .filter(PropertyAlert.agent_id.in_(agent_ids))
             .group_by(PropertyAlert.agent_id)
         ):
             keep(agent_id, when)
