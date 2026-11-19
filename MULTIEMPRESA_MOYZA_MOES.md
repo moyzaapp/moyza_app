@@ -30,8 +30,9 @@ editan desde la interfaz. Se pueden eliminar en una migración futura.
   la activa (cookie `active_company`), y las deja en `request.state.company`
   y `request.state.allowed_companies`. Lógica en
   `app/web/dependencies/company.py`.
-- **Permisos**: el admin ve todas las empresas; el resto, las de su usuario
-  más las de su ficha de agente. Un usuario sin ninguna cae a MOYZA.
+- **Permisos**: el admin ve todas las empresas; el resto, las de su usuario,
+  las de su ficha de agente (igual a las del usuario desde §23) y las de las
+  alertas que lleva (§23). Un usuario sin ninguna cae a MOYZA.
 - **Selector**: `POST /switch-company` valida la empresa contra las permitidas
   y guarda la cookie un año. Solo se muestra si el usuario tiene más de una y
   no está en la vista unificada: el admin siempre lo tiene; un agente, solo
@@ -62,6 +63,16 @@ editan desde la interfaz. Se pueden eliminar en una migración futura.
 - La cola secuencial de alertas de un agente es por empresa.
 - Los recordatorios de compradores se envían por agente y empresa.
 - Un agente no puede cambiar sus propias empresas; solo el admin.
+- **Las listas de agentes siguen la configuración del usuario** (§23): la
+  ficha de agente tiene las mismas empresas que su usuario (pantalla
+  Usuarios) y asignar una alerta de otra empresa ya no la amplía. Filtros y
+  selects por empresa (Alertas, historial de cesiones, ventana "sin
+  gestionar", Resultados) muestran solo los agentes **activos** de la empresa
+  activa; los dados de baja solo se ven en Agentes ("Ver dados de baja") y en
+  las filas de Rendimiento de un período congelado. Alta y reasignación de
+  alertas ofrecen los activos de las dos empresas agrupados.
+- **Una alerta de cualquier empresa cuenta para el agente que la lleva** (§23):
+  "contactos" es por agente, sin filtrar por la empresa de la alerta.
 - Excepciones al aislamiento (lista cerrada, detalle en la sección 16): en
   `/properties?tab=other_company` todos los roles ven, en solo lectura, las
   propiedades activas y disponibles de la otra empresa (sin propietario ni
@@ -202,9 +213,10 @@ solo admin) con tres pestañas: Rendimiento (semana / mes / año), Evolución
 Compradores. `/alerts-dashboard` y `/performance-reports` redirigen con 301
 conservando los query params.
 
-- Todas las métricas se calculan con las propiedades de la empresa activa.
-  Un agente que está en las dos empresas tiene resultados, objetivos y
-  snapshots separados en cada una.
+- Todas las métricas se calculan con las propiedades de la empresa activa,
+  salvo "contactos", que es por agente y cuenta sus alertas de cualquier
+  empresa (§23). Un agente que está en las dos empresas tiene resultados,
+  objetivos y snapshots separados en cada una.
 - Captaciones, bajadas y cierres se desglosan en venta / alquiler (el
   cierre usa el tipo de la alerta y, si falta, el de la propiedad).
 - Objetivos por período (`PerformanceObjectives` en `core/constants.py`):
@@ -291,12 +303,14 @@ crearla (modal "Nueva alerta" y formulario rápido de la ficha del comprador)
 y **reasignarla** mientras está abierta (detalle y acción de fila del
 listado). El agente no elige: ve "Se asignará a {captador}".
 
-- Se puede elegir un agente de **cualquier empresa**. Si no pertenece a la
-  empresa de la propiedad, se le añade a esa empresa (`agent_companies`,
-  igual que desde la ficha del agente) y su usuario gana acceso a ella por
-  la ficha (`get_allowed_companies`), sin tocar `user_companies`. El
-  formulario lo avisa antes de guardar y `/alerts` le muestra al agente un
-  banner con el cambio de empresa si tiene alertas abiertas en la otra.
+- Se puede elegir un agente activo de **cualquier empresa**. Desde §23
+  (2026-11-18) ya **no** se le añade a la empresa de la propiedad: su ficha
+  y su usuario no cambian. Su usuario ve esa empresa porque
+  `get_allowed_companies` suma las empresas de las alertas que lleva (en la
+  vista unificada, la alerta le sale en su listado con distintivo). El
+  formulario avisa de que la llevará sin cambiar sus empresas. Antes
+  (decisión §4-1 B de PLAN_ASIGNACION_ALERTAS.md, retirada) se le añadía a
+  `agent_companies`.
 - Propiedad sin captador: el admin puede crear la alerta eligiendo agente.
 - Motivo opcional. Reasignar deja la alerta Pendiente y sin leer, conserva
   los seguimientos, la anota en el historial (`alert_assignment_logs`) y con
@@ -323,8 +337,8 @@ docker restart moyza_backend
 
 Rollback: `docker exec moyza_backend alembic downgrade u4v5w6x7y8z9` con el
 código anterior desplegado (borra el historial y las columnas de asignación;
-el agente actual de cada alerta se conserva). Las altas en empresa hechas al
-asignar no se deshacen: se quitan a mano desde la ficha del agente.
+el agente actual de cada alerta se conserva). Las altas en empresa que hacía
+la asignación hasta §23 las deshizo la migración `l8s9x0y1z2a3`.
 
 ```bash
 # Tests (servicio con base de datos; rutas contra la app levantada)
@@ -925,4 +939,99 @@ empresa principal de cada usuario).
 
 ```bash
 docker exec moyza_backend python -m pytest tests/test_unified_view_alerts.py tests/test_unified_view_dashboard.py tests/test_unified_view_properties.py tests/test_unified_view_results.py tests/test_visit_company.py tests/test_visits_cross_company.py -q
+```
+
+## 23. Listas de agentes por configuración del usuario y sin dados de baja (2026-11-18)
+
+Detalle y decisiones en `PLAN_LISTAS_AGENTES_POR_EMPRESA.md`. Principio del
+usuario: "un agente puede recibir alertas de cualquier propiedad, y eso solo
+afecta al rendimiento del agente; las listas de agentes muestran lo que manda
+la configuración del usuario".
+
+**La configuración del usuario manda (fase A)**
+
+- La ficha de agente tiene exactamente las empresas de su usuario: se copian
+  al guardar el usuario (como antes) y asignar o reasignar una alerta de otra
+  empresa ya no añade esa empresa a la ficha (`assign` sin `add_to_company`,
+  `AssignmentResult` sin `granted_company`, flashes sin "ahora tiene acceso").
+- El agente ve y trabaja la alerta de la otra empresa porque
+  `get_allowed_companies` suma las empresas de las alertas que lleva
+  (`property_alerts.agent_id`), sin tocar usuario ni ficha.
+- Migración de datos `l8s9x0y1z2a3_agent_companies_follow_user`: cada ficha
+  con usuario (email igual, sin mayúsculas ni espacios) pasa a tener las
+  empresas del usuario y `agents.company` el texto unido; fichas sin usuario,
+  con usuario sin empresas o con dos usuarios con su email no se tocan. Log de
+  cada ficha que cambia (id, nombre, antes -> después). Downgrade no-op.
+
+**Listas por empresa, solo activos; contactos por agente (fase B)**
+
+- Filtro de agentes de Alertas, filtro del historial de cesiones, select de
+  Evolución, Compradores, Rendimiento y Cierres de Resultados: agentes
+  **activos** de la empresa activa (sin "(baja)"). Un enlace con `agent_id` de
+  un dado de baja o de un agente de otra empresa sigue filtrando y se ve como
+  chip quitable ("Nombre · dado de baja" / "Nombre · de MOES PREMIUM").
+- Rendimiento: en el período en curso, solo activos; en uno pasado, también
+  los dados de baja de la empresa con snapshot congelado o con algún dato
+  (badge "Baja"). Evolución, solo activos.
+- Ventana "sin gestionar" del Inicio del admin: sin dados de baja; un agente
+  activo de otra empresa con alertas de esta sale con su nombre y "Agente de
+  {empresas}" (antes salía "Sin agente"). La reasignación múltiple y la de una
+  alerta ofrecen los activos de las dos empresas agrupados "MOYZA" / "MOES
+  PREMIUM" / "MOYZA, MOES PREMIUM" (este, solo usuarios en las dos).
+- **Contactos** (alertas de las que el agente es el agente actual, venta o
+  alquiler, creadas en el período) se calcula **sin filtrar por la empresa de
+  la alerta** (`AGENT_WIDE_INDICATORS` en `performance_report_service`): un
+  agente de MOYZA suma en Rendimiento de MOYZA las alertas de MOES que lleva,
+  y el total del equipo también. Igual en el equipo, la tendencia semanal y la
+  "última actividad" del Inicio. Captaciones y bajadas siguen por empresa de
+  la propiedad, cierres por empresa del cierre y hojas de visita por empresa
+  de la visita. La lupa marca con distintivo, sin enlace, las alertas de otra
+  empresa y el CSV lleva la columna "Empresa".
+- Snapshots: no se recalculan. `agent_performance_reports.contacts_all_companies`
+  (migración `m9t0y1z2a3b4`) dice con qué regla se congeló cada uno: False en
+  los existentes, True en los nuevos. El Inicio del agente en varias empresas
+  suma sus empresas con `sum_company_metrics`: contactos una sola vez (el
+  snapshot nuevo o, si no hay, el vivo), y los snapshots antiguos se suman
+  como antes.
+- Pestaña Compradores: filas por agente activo de la empresa; los totales
+  incluyen todas las alertas de la empresa, también las de agentes de fuera.
+
+**Despliegue**
+
+1. Copia de seguridad:
+   `docker exec moyza_db pg_dump -U <usuario> -d <bd> -Fc > backup_pre_listas_agentes_$(date +%F).dump`
+2. Desplegar el código y `docker exec moyza_backend alembic upgrade head`
+   (aplica `l8s9x0y1z2a3` y `m9t0y1z2a3b4`). Guardar la salida: lista las
+   fichas que cambian ("Ficha de agente N (nombre): antes -> después").
+3. Verificar:
+
+   ```bash
+   docker exec moyza_db psql -U <usuario> -d <bd> -c "
+     select a.id, a.name, a.company,
+            string_agg(distinct ac.company_id::text, ',') as ficha,
+            string_agg(distinct uc.company_id::text, ',') as usuario
+     from agents a join users u on lower(trim(u.email)) = lower(trim(a.email))
+     left join agent_companies ac on ac.agent_id = a.id
+     left join user_companies uc on uc.user_id = u.id
+     group by 1, 2, 3 having string_agg(distinct ac.company_id::text, ',')
+       is distinct from string_agg(distinct uc.company_id::text, ',');
+     select contacts_all_companies, count(*) from agent_performance_reports group by 1;"
+   ```
+
+   Esperado: ninguna fila en la primera consulta (salvo usuarios sin
+   empresas) y todos los snapshots con `contacts_all_companies = false`.
+4. Reiniciar el backend: `docker restart moyza_backend`. Sin CSS nuevo
+   (clases ya compiladas), sin variables de entorno ni jobs nuevos;
+   `alert-assign.js` lleva `?v=<mtime>`.
+5. Aviso al equipo: las listas de agentes de cada empresa siguen la pantalla
+   Usuarios; los dados de baja ya no salen en filtros; "contactos" cuenta las
+   alertas del agente de cualquier empresa.
+
+Rollback: `docker exec moyza_backend alembic downgrade k7r8w9x0y1z2` con el
+código anterior desplegado: quita la columna de snapshots; las fichas
+igualadas no vuelven a su estado anterior (restaurar desde la copia o a mano
+desde la ficha del agente).
+
+```bash
+docker exec moyza_backend python -m pytest tests/test_agent_companies_follow_user.py tests/test_agent_lists_by_company.py tests/test_alert_assignment.py tests/test_alert_assignment_routes.py tests/test_indicator_rows.py tests/test_performance_service.py -q
 ```

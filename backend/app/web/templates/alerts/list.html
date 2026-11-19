@@ -126,6 +126,8 @@
                 {# Total con los filtros aplicados (todas las páginas), no el tamaño de página #}
                 <span class="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full font-medium">{{ total_alerts }}</span>
             </h2>
+            {% if attention_filter or filtered_agent %}
+            <div class="flex flex-wrap items-center gap-2">
             {# Filtro "sin gestionar" (solo admin, PLAN_VENTANA_SIN_GESTION.md): chip para quitarlo #}
             {% if attention_filter %}
             {% set attention_keep = request.query_params.multi_items() | rejectattr("0", "in", ["attention", "page"]) | list %}
@@ -135,6 +137,19 @@
                 Sin gestionar · {{ total_alerts }}
                 <svg class="w-3.5 h-3.5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
             </a>
+            {% endif %}
+            {# Agente que no sale en el filtro (dado de baja o de otra empresa,
+               PLAN_LISTAS_AGENTES_POR_EMPRESA.md): sigue filtrando; chip para quitarlo #}
+            {% if filtered_agent %}
+            {% set agent_keep = request.query_params.multi_items() | rejectattr("0", "in", ["agent_id", "page"]) | list %}
+            <a href="/alerts{{ ('?' ~ (agent_keep | urlencode)) if agent_keep else '' }}#alertas"
+               class="inline-flex items-center gap-1.5 min-h-[2.25rem] max-w-full rounded-lg bg-gray-100 hover:bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-700 transition-colors"
+               aria-label="Quitar el filtro del agente {{ filtered_agent.name }}">
+                <span class="truncate min-w-0 max-w-xs" title="{{ filtered_agent.name }}{% if filtered_agent.note %} · {{ filtered_agent.note }}{% endif %}">{{ filtered_agent.name }}{% if filtered_agent.note %} · {{ filtered_agent.note }}{% endif %}</span>
+                <svg class="w-3.5 h-3.5 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+            </a>
+            {% endif %}
+            </div>
             {% endif %}
         </div>
 
@@ -158,7 +173,7 @@
                 >
             </div>
 
-            <!-- Filtro por agente (solo admin) -->
+            <!-- Filtro por agente (solo admin): activos de la empresa activa según su usuario -->
             {% if is_admin and agents %}
             {# En móvil el select va a ancho completo: su ancho mínimo es el nombre más largo y desbordaba la pantalla #}
             <div class="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3">
@@ -167,7 +182,7 @@
                     <option value="">Todos los agentes</option>
                     {% for agent in agents %}
                     <option value="{{ agent.id }}" {% if selected_agent_id == agent.id %}selected{% endif %}>
-                        {{ agent.name }}{% if agent.is_active is false %} (baja){% endif %}
+                        {{ agent.name }}
                     </option>
                     {% endfor %}
                 </select>
@@ -318,6 +333,9 @@
                                             {# Propiedad de otra empresa que la de la alerta, asociada desde la Propuesta
                                                (PLAN_SUGERENCIAS_MULTIEMPRESA.md). Para el admin la alerta es de la activa #}
                                             {% if alert.property.company_id != alert.company_id %}{{ ui.company_badge(alert.property.company, extra="mt-1") }}{% endif %}
+                                            {# Más propiedades en su lista (PLAN_ALERTA_VARIAS_PROPIEDADES.md) #}
+                                            {% set extra_count = alert.extra_properties_count %}
+                                            {% if extra_count %}{{ ui.badge("+" ~ extra_count ~ " más", "blue", extra="mt-1") }}{% endif %}
                                         </div>
                                         {% else %}
                                         {# Alerta sin referencia (búsqueda general) aún sin propiedad (PLAN_ALERTA_SIN_REFERENCIA.md) #}
@@ -984,7 +1002,7 @@
     var subtitle = document.getElementById('bulkReassignSubtitle');
     var assign = AlertAssign.init('rb');
     // Con el filtro de agente todas son del mismo: no se puede volver a elegir
-    var current = {{ {'id': selected_agent_id or '', 'name': (agents | selectattr('id', 'equalto', selected_agent_id) | map(attribute='name') | first) or ''} | tojson }};
+    var current = {{ {'id': selected_agent_id or '', 'name': (agents | selectattr('id', 'equalto', selected_agent_id) | map(attribute='name') | first) or (filtered_agent.name if filtered_agent else '')} | tojson }};
 
     function chosen() { return picks.filter(function (p) { return p.checked; }); }
 

@@ -464,7 +464,7 @@ def test_nota_de_reasignacion_no_permite_cerrar(data):
 
 
 # ---------------------------------------------------------------------------
-# Fase 4: agente de la otra empresa (decisión §4-1 B)
+# Fase 4: agente de la otra empresa (§4-1; sin ampliar su ficha desde PLAN_LISTAS_AGENTES_POR_EMPRESA.md)
 # ---------------------------------------------------------------------------
 
 def test_agente_solo_moes_recibe_alerta_moyza(data):
@@ -480,13 +480,15 @@ def test_agente_solo_moes_recibe_alerta_moyza(data):
 
     status, _, headers = _create(admin, data["property_id"], name, agent_id=data["moes"])
     flash = _flash(headers)
-    assert flash.get("category") == "success" and f"{TAG} MOES ahora tiene acceso a MOYZA" in flash["message"]
+    assert flash.get("category") == "success" and "ahora tiene acceso" not in flash["message"]
 
+    # PLAN_LISTAS_AGENTES_POR_EMPRESA.md: ni la ficha ni el usuario cambian de
+    # empresas; el agente ve la alerta por ser suya (get_allowed_companies)
     db = _session()
     agent = db.get(Agent, data["moes"])
-    assert {c.code for c in agent.companies} == {"MOYZA", "MOES"}
+    assert {c.code for c in agent.companies} == {"MOES"}
     user = db.query(User).filter(User.email == EMAIL.format("moes")).one()
-    assert [c.code for c in user.companies] == ["MOES"]   # basta la ficha de agente
+    assert [c.code for c in user.companies] == ["MOES"]
     [alert] = _alerts_of_buyer(db, name)
     db.close()
 

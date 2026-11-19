@@ -126,6 +126,7 @@ def _create(env, user, **form):
         buyer_phone_number=None, buyer_phone=None, buyer_email=None, source="Llamada",
         alert_type="LEAD_INTERES", message=None, priority="NORMAL", business_type="Venta",
         confirm_duplicate=None, confirm_new_buyer=None, agent_id=None, assignment_reason=None,
+        return_to=None,
     )
     data.update(form)
     return asyncio.run(create_alert(_request(env, user, "/alerts/create", "POST"), db=env.db, **data))
@@ -624,9 +625,9 @@ def test_asociar_duplicado_exige_confirmacion(env):
     assert _flash(response)["category"] == "warning"
     assert _reload(env, alert).property_id is None
 
-    # El detalle pinta el aviso con "Asociar de todas formas"
+    # El detalle pinta el aviso con "Añadir de todas formas"
     _, html = _detail(env, env.users["ana"], alert, step="proposal", confirm_property=str(env.props["bea"].id))
-    assert "ya tiene una alerta abierta sobre Piso Bea" in html and "Asociar de todas formas" in html
+    assert "ya tiene una alerta abierta sobre Piso Bea" in html and "Añadir de todas formas" in html
     assert f'href="/alerts/{other.id}"' not in html  # la otra es de Bea: Ana no la abre
 
     response = _link(env, env.users["ana"], alert, "bea", confirm="1")
@@ -672,8 +673,10 @@ def test_metricas_por_agente_cuentan_busquedas_sin_propiedad(env):
     # El seguimiento «Cerrado» ya no es un cierre: los cierres se registran a mano
     # (PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1)
     assert closings == {}
-    # En MOES no cuenta nada de MOYZA
-    assert PerformanceReportService(env.db, env.moes.id).grouped_counts("contactos", start, end, agents) == {}
+    # Contactos es por agente, de sus alertas de cualquier empresa
+    # (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2): en MOES salen los mismos;
+    # los cierres siguen siendo de la empresa del cierre
+    assert PerformanceReportService(env.db, env.moes.id).grouped_counts("contactos", start, end, agents) == contacts
 
 
 # ---------------------------------------------------------------------------
@@ -734,24 +737,24 @@ def test_detalle_tres_pasos_perfil_sin_m2_sugerencias_y_cambio(env):
     assert response.context["step"] == "proposal"
     # De las dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md)
     assert [p.title for p in response.context["suggestions"]] == ["Piso Centro", "Piso MOES", "Piso Bea"]
-    assert html.count("Asociar a esta alerta") >= 2
+    assert html.count('data-interest-check') >= 2
     assert "Agente de la propiedad: Agente Bea" in html
     # Sin enlace "Ver" a la ficha de la propiedad de Bea; sí a la suya
     assert f'href="/properties/{env.props["ana"].id}"' in html
     assert f'href="/properties/{env.props["bea"].id}"' not in html
     assert "¿No está en la lista?" in html
 
-    # Tras asociar: tarjeta de propiedad y "Cambiar propiedad"; los pasos siguen
+    # Tras asociar: tarjeta de propiedad y "Gestionar su lista"; los pasos siguen
     # (PLAN_PERFIL_OBLIGATORIO.md: en todas las alertas), en Propuesta
     _link(env, env.users["ana"], alert, "bea")
     response, html = _detail(env, env.users["ana"], alert)
     assert response.context["show_steps"] is True and response.context["step"] == "proposal"
-    assert "Piso Bea" in html and "Cambiar propiedad" in html and "1. Contactar" in html
+    assert "Piso Bea" in html and "Gestionar su lista" in html and "1. Contactar" in html
 
-    # "Cambiar propiedad": paso Propuesta con la actual marcada
+    # "Gestionar su lista": paso Propuesta con la actual marcada
     response, html = _detail(env, env.users["ana"], alert, step="proposal")
     assert response.context["show_steps"] is True
-    assert "Asociada ahora" in html and html.count("Asociar a esta alerta") >= 1
+    assert "En su lista" in html and html.count('data-interest-check') >= 1
 
 
 def test_detalle_admin_y_alerta_cerrada(env):
@@ -763,7 +766,7 @@ def test_detalle_admin_y_alerta_cerrada(env):
     alert.status = AlertStatus.COMPLETED
     env.db.commit()
     response, html = _detail(env, env.admin, alert)
-    assert response.context["show_steps"] is False and "Cambiar propiedad" not in html
+    assert response.context["show_steps"] is False and "Gestionar su lista" not in html
     assert "Búsqueda general" in html
 
 

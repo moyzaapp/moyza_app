@@ -194,6 +194,41 @@ window.UI = (function () {
         label.classList.remove('hidden');
     });
 
+    // ---- Casillas «Le interesa» (PLAN_ALERTA_VARIAS_PROPIEDADES.md) -------
+    //
+    // <form id="interestForm" data-interest-form> con un botón [data-interest-submit]
+    // y un texto [data-interest-count]; las casillas van fuera del formulario
+    // (form="interestForm" [data-interest-check]) porque la tarjeta ya lleva el
+    // formulario de envío. Cuenta las marcadas, pone el número en el botón y
+    // lo deja desactivado sin ninguna. Lo usan la Propuesta de la alerta y la
+    // ficha del comprador (PLAN_FICHA_COMPRADOR_CONSULTA.md).
+
+    function interestForm() {
+        var form = document.querySelector('form[data-interest-form]');
+        if (!form) return;
+        var button = form.querySelector('[data-interest-submit]');
+        var count = form.querySelector('[data-interest-count]');
+        if (!button || !count) return;
+        var idle = count.textContent;
+        var label = button.textContent.trim();
+        function update() {
+            var n = document.querySelectorAll('[data-interest-check]:checked').length;
+            button.disabled = n === 0;
+            button.textContent = n ? label + ' (' + n + ')' : label;
+            count.textContent = n ? (n === 1 ? '1 propiedad marcada' : n + ' propiedades marcadas') : idle;
+        }
+        document.addEventListener('change', function (e) {
+            if (e.target.matches && e.target.matches('[data-interest-check]')) update();
+        });
+        update();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', interestForm);
+    } else {
+        interestForm();
+    }
+
     // ---- Tablas ordenables por columna ------------------------------------
     //
     // <table class="js-sortable" data-table-id="teamTable">

@@ -11,6 +11,9 @@
     (decisión §4, nota).
   - Cierres: registros manuales del admin (fecha sin hora, operación,
     propiedad opcional y nota). PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1.
+  - Contactos: alertas del agente de cualquier empresa
+    (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2); las de otra empresa llevan su
+    distintivo y no enlazan (no se abren desde la empresa activa).
 #}
 {% import "components/ui_macros.html" as ui %}
 
@@ -33,10 +36,13 @@
 {% macro property_cell(r, search_label="Búsqueda general") -%}
 <td class="{{ td }}">
   {% if r.property_id and r.property_company %}
-  {# Hojas de visita a una propiedad de otra empresa (PLAN_VISITAS_OTRA_EMPRESA.md):
-     su ficha no se abre desde esta empresa; distintivo de su empresa #}
+  {# Hojas de visita (PLAN_VISITAS_OTRA_EMPRESA.md) o contactos de una propiedad de otra
+     empresa: su ficha no se abre desde esta empresa; distintivo de su empresa (no se
+     repite si es la misma que ya marca la alerta) #}
   <span class="font-medium text-gray-900">{{ r.property_title or ('Propiedad #' ~ r.property_id) }}</span>
+  {% if not r.alert_company or r.alert_company.id != r.property_company.id %}
   <span class="block mt-1">{{ ui.company_badge(r.property_company, extra="whitespace-nowrap") }}</span>
+  {% endif %}
   {% set meta = [r.property_ref if r.property_ref != r.property_title else none, r.property_city] | select | list %}
   {% if meta %}<span class="block text-xs text-gray-500">{{ meta | join(' · ') }}</span>{% endif %}
   {% elif r.property_id %}
@@ -52,8 +58,15 @@
 
 {% macro buyer_cell(r) -%}
 <td class="{{ td }}">
+  {% if r.alert_company %}
+  {# Alerta de otra empresa: cuenta para el agente, pero se abre desde su empresa #}
+  <span class="font-medium text-gray-900">{{ r.buyer_name }}</span>
+  <span class="block text-xs text-gray-500">Alerta #{{ r.alert_id }}</span>
+  <span class="block mt-1">{{ ui.company_badge(r.alert_company, extra="whitespace-nowrap", title="Alerta de " ~ r.alert_company.name) }}</span>
+  {% else %}
   <a href="/alerts/{{ r.alert_id }}" class="font-medium text-gray-900 hover:text-blue-600 hover:underline">{{ r.buyer_name }}</a>
   <span class="block text-xs text-gray-500">Alerta #{{ r.alert_id }}</span>
+  {% endif %}
 </td>
 {%- endmacro %}
 

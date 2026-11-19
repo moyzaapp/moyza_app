@@ -469,7 +469,7 @@ def test_propuesta_avisa_si_la_propiedad_es_de_otra_operacion(env):
     assert response.context["operation_mismatch"] == {"property": "Venta", "wanted": "Alquiler"}
     assert "La propiedad asociada es de Venta y el comprador busca Alquiler" in html
     assert "cambia la operación en el perfil" not in html              # en alquiler no hay perfil
-    assert "Asociada ahora" in html                                    # la propiedad se mantiene
+    assert "En su lista" in html                                    # la propiedad se mantiene
 
     # Si la alerta vuelve a Venta el aviso desaparece (en Alquiler ya no hay
     # formulario de perfil desde el que cambiarla: se cambia en la alerta)
@@ -522,20 +522,30 @@ def test_ficha_del_comprador_con_minimos_sin_seguimientos(env):
 
 
 def test_ficha_del_comprador_render_con_minimos(env):
+    """PLAN_FICHA_COMPRADOR_CONSULTA.md: sin alerta abierta el perfil es de solo lectura;
+    con ella, el formulario de la alerta (mismos mínimos y cascada) enviado a la alerta."""
     from app.web.routes.alerts import buyer_detail
     _jaen_and_more(env)
     _complete_profile(env, country="España", province="Jaén", zones=None, cities=["Martos"])
-    request = _request(env, env.admin, f"/buyers/{env.buyer.id}")
-    response = asyncio.run(buyer_detail(env.buyer.id, request, tab="criteria", db=env.db))
-    html = response.body.decode("utf-8")
-    assert response.status_code == 200
+
+    def html():
+        request = _request(env, env.admin, f"/buyers/{env.buyer.id}")
+        response = asyncio.run(buyer_detail(env.buyer.id, request, tab="criteria", db=env.db))
+        assert response.status_code == 200
+        return response.body.decode("utf-8")
+
+    page = html()
+    assert 'id="bcPropertyType"' not in page and "Crear búsqueda" in page and "Provincia: Jaén" in page
+
+    alert = _property_alert(env, "ana", "ana")
+    page = html()
     for text in ("Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)",
                  'id="bcMaxBedrooms" name="max_bedrooms" value="3" placeholder="–" required',
                  'id="geoData-bc"', 'id="bcCountry"', 'id="bcProvince"', "data-places-required",
                  'id="bcPropertyType" name="property_type" required', "/static/js/search-profile.js",
-                 '<option value="Jaén" selected>Jaén</option>', "Provincia: Jaén"):
-        assert text in html, text
-    assert "Si la cambias, cambia la operación de la alerta" not in html   # aquí no hay alerta
+                 '<option value="Jaén" selected>Jaén</option>', "Provincia: Jaén",
+                 f'action="/alerts/{alert.id}/search-profile"', "Si la cambias, cambia la operación de la alerta"):
+        assert text in page, text
 
 
 # ---------------------------------------------------------------------------

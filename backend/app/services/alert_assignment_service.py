@@ -5,12 +5,14 @@ Reglas (decisiones §4):
 - Por defecto la alerta va al captador de la propiedad. Solo el admin puede
   elegir otro agente al crearla (§4-2) y reasignarla después (§4-3), y solo
   mientras está abierta (pendiente o en proceso).
-- Se puede elegir cualquier agente de cualquier empresa activa (§4-1, opción
-  B). Si no pertenece a la empresa de la propiedad, se le añade a esa empresa
-  con `add_to_company`, igual que desde la ficha del agente. Su usuario gana
-  acceso porque `get_allowed_companies` suma las empresas de su ficha y, en
-  la vista unificada (PLAN_VISTA_UNIFICADA_AGENTES.md), la alerta le sale en
-  su listado sin cambiar de empresa.
+- Se puede elegir cualquier agente activo de cualquier empresa activa (§4-1).
+  Asignar ya **no** amplía las empresas de su ficha (la ampliación de §4-1 B
+  se retiró en PLAN_LISTAS_AGENTES_POR_EMPRESA.md: la ficha sigue a su
+  usuario y las listas de agentes salen de esa configuración). El agente ve
+  y trabaja la alerta porque `get_allowed_companies` suma las empresas de
+  las alertas que lleva y, en la vista unificada
+  (PLAN_VISTA_UNIFICADA_AGENTES.md), le sale en su listado sin cambiar de
+  empresa. La alerta solo cuenta en su rendimiento.
 - Propiedad sin captador: se puede crear la alerta si el admin elige agente (§4-7).
 - Alerta sin referencia (búsqueda general, PLAN_ALERTA_SIN_REFERENCIA.md): no
   hay captador; el admin elige el agente (obligatorio) y el agente que la crea
@@ -61,7 +63,6 @@ from app.models.company import Company
 from app.models.property_alert import PropertyAlert
 from app.services import alert_view
 from app.services import buyer_attention_service
-from app.services.company_scope import add_to_company
 from app.services.company_scope import in_company
 from app.services.company_scope import scope_active_agents
 from app.services.notification_service import NotificationKind
@@ -104,8 +105,6 @@ class AlertAssignmentError(ValueError):
 class AssignmentResult:
     agent: object
     previous_agent: Optional[object] = None
-    # Empresa a la que se añadió el agente por no pertenecer a la de la propiedad
-    granted_company: Optional[Company] = None
     notifications: list = field(default_factory=list)
     # Fila del historial escrita por esta asignación
     log: Optional[AlertAssignmentLog] = None
@@ -130,7 +129,7 @@ def clean_reason(reason) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def assignable_agents(db: Session, company_id: int) -> list[dict]:
-    """Agentes elegibles (todas las empresas activas, §4-1 B) agrupados por empresa.
+    """Agentes elegibles (todas las empresas activas, §4-1) agrupados por empresa.
 
     Mismo formato y orden que el acompañante de visitas:
     [{"label": "MOYZA", "agents": [...]}, {"label": "MOYZA, MOES PREMIUM", ...}, ...].
@@ -185,7 +184,7 @@ def resolve_search_assignee(
     """Agente de una alerta sin referencia (búsqueda general). Devuelve el Agent.
 
     Sin propiedad no hay captador del que deducirlo: el admin debe elegirlo
-    (cualquier agente activo, §4-1 B) y el agente queda asignado a sí mismo.
+    (cualquier agente activo, §4-1) y el agente queda asignado a sí mismo.
     Un agente que manda otro `agent_id` recibe un error, como en el alta con
     referencia.
     """
@@ -364,11 +363,6 @@ def assign(
     owner_agent_id = prop.agent_id if prop is not None else None
 
     result = AssignmentResult(agent=agent)
-
-    # §4-1 B: acceso a la empresa de la propiedad si no lo tenía
-    if company_id is not None and not in_company(agent, company_id):
-        add_to_company(db, agent, company_id)
-        result.granted_company = db.get(Company, company_id)
 
     previous_agent = None if is_new else alert.agent
     result.previous_agent = previous_agent

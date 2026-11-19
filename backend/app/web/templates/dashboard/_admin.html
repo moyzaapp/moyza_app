@@ -234,6 +234,8 @@
         <li class="py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
             <div class="min-w-0 flex-1">
                 <p class="text-sm font-medium text-gray-900 truncate">{{ g.agent_name }}</p>
+                {# Agente de otra empresa con alertas de esta (PLAN_LISTAS_AGENTES_POR_EMPRESA.md) #}
+                {% if g.outside_company %}<p class="text-xs text-gray-500">Agente de {{ g.outside_company }}</p>{% endif %}
                 <p class="text-xs text-gray-500">{{ g.count }} sin gestionar · el más antiguo, <span class="font-medium text-red-700">{{ g.oldest_label }} hábiles</span></p>
                 {% if g.reassigned %}<p class="text-xs font-medium text-red-700">{{ g.reassigned }} {{ "ya reasignada y sigue" if g.reassigned == 1 else "ya reasignadas y siguen" }} sin gestionar</p>{% endif %}
             </div>

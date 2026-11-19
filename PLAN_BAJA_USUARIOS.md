@@ -130,6 +130,15 @@ def scope_active_agents(query, company_id: int):
 En los filtros/listados que pintan el nombre, los inactivos llevan el sufijo " (baja)" en la
 opción o el badge `ui.badge("Baja", "gray")` en la fila.
 
+> **Cambio (2026-11-18, PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-3):** los filtros y selects ya
+> no muestran a los inactivos: filtro de agentes de Alertas y del historial de cesiones,
+> select de Evolución, Compradores y Rendimiento de Resultados y la ventana "sin gestionar"
+> listan solo agentes activos de la empresa activa. Un enlace con el `agent_id` de un
+> inactivo sigue filtrando (chip "Nombre · dado de baja"). Se mantienen: la pantalla
+> Agentes ("Ver dados de baja", para reactivar), la fila con badge "Baja" en Rendimiento de
+> un período congelado y el "(de baja)" de los registros de Cierres. Sus alertas cerradas
+> se encuentran por texto o desde el comprador.
+
 ## 5. Servicio de baja (fase B): `app/services/offboarding_service.py`
 
 ```python

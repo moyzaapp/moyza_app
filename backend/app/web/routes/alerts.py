@@ -34,6 +34,7 @@ from app.db.deps import get_db
 from app.models.property_alert import PropertyAlert
 from app.models.alert_follow_up import AlertFollowUp
 from app.models.alert_assignment_log import AlertAssignmentLog
+from app.models.alert_property import AlertProperty
 from app.models.property import Property
 from app.models.agent import Agent
 from app.models.user import User
@@ -42,7 +43,6 @@ from app.models.buyer_search_criteria import BuyerSearchCriteria
 
 from app.services.company_scope import (
     scope_alerts,
-    scope_agents,
     scope_active_agents,
     scope_buyers,
     scope_properties,
@@ -745,6 +745,8 @@ async def alerts_page(
         contains_eager(PropertyAlert.property).selectinload(Property.company),
         contains_eager(PropertyAlert.agent),
         selectinload(PropertyAlert.follow_ups),
+        # «+N más» de su lista (PLAN_ALERTA_VARIAS_PROPIEDADES.md)
+        selectinload(PropertyAlert.extra_properties),
     ]
     if unmanaged_view:
         # Marca "Reasignada el dd/mm · antes Nombre": una consulta para la página
@@ -761,15 +763,20 @@ async def alerts_page(
         .all()
     )
 
-    # `agents`: filtro "Agente" del listado (solo admin). Es una consulta: incluye
-    # a los dados de baja, con "(baja)" en la opción, para ver sus alertas
-    # cerradas (PLAN_BAJA_USUARIOS.md §4.4). Las propiedades no se precargan:
-    # el formulario de alta las busca por /alerts/search-properties.
+    # `agents`: filtro "Agente" del listado (solo admin): agentes activos de la
+    # empresa activa según su usuario (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-1 y
+    # §3-3; ya no salen los dados de baja). Un `agent_id` de fuera de la lista
+    # (dado de baja o de otra empresa, p. ej. desde la ventana "sin gestionar")
+    # sigue filtrando y se ve como chip (`filtered_agent`). Las propiedades no
+    # se precargan: el formulario de alta las busca por /alerts/search-properties.
     agents = []
     assignable_groups = []
+    filtered_agent = None
     if admin_view:
-        agents = scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
-        # "Agente asignado" del alta y de la reasignación: todas las empresas (§4-1 B)
+        agents = scope_active_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
+        if agent_id_int and agent_id_int not in {a.id for a in agents}:
+            filtered_agent = _filtered_agent_chip(db, agent_id_int, company.id)
+        # "Agente asignado" del alta y de la reasignación: todas las empresas (§4-1)
         assignable_groups = assignment.assignable_agents(db, company.id)
 
     # Compradores visibles: el título "Compradores (N)" y el desglose por
@@ -969,6 +976,7 @@ async def alerts_page(
             "q": q,
             "status_filter": valid_status_filters,
             "selected_agent_id": agent_id_int,
+            "filtered_agent": filtered_agent,
             "attention_filter": UNMANAGED_FILTER if unmanaged_view else None,
             # Casillas y "Reasignar" de varias (PLAN_VENTANA_SIN_GESTION.md fase C)
             "bulk_reassign": unmanaged_view,
@@ -1443,6 +1451,8 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
         "suggestions_total": 0,
         "suggestion_limit": SEARCH_SUGGESTION_LIMIT,
         "current_in_suggestions": False,
+        "interest_properties": [],
+        "interest_ids": set(),
         "link_duplicate": None,
         "own_agent_id": None,
         "property_link_allowed": True,
@@ -1479,6 +1489,11 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
         ctx["property_other_company"] = prop.company_id not in company_ids
         if not admin_view:
             ctx["property_link_allowed"] = own_agent is not None and prop.agent_id == own_agent.id
+
+    # Lista de propiedades de interés (PLAN_ALERTA_VARIAS_PROPIEDADES.md): la
+    # de la alerta y las adicionales, de cualquier empresa y agente
+    ctx["interest_properties"] = alert.interest_properties
+    ctx["interest_ids"] = {p.id for p in ctx["interest_properties"]}
 
     # Formulario del perfil (paso Perfil y «Contactado» del modal de
     # seguimiento): valores de las propiedades de la empresa, solo si se va a pintar
@@ -1551,18 +1566,53 @@ def _search_context(db: Session, alert: PropertyAlert, current_user, admin_view:
     # sobre esa propiedad (lo pide /link-property antes de confirmar). La
     # propiedad puede ser de la otra empresa (PLAN_SUGERENCIAS_MULTIEMPRESA.md);
     # los duplicados siguen siendo los de la empresa de la alerta.
-    confirm_id = assignment._to_int(confirm_property)
-    if step == "proposal" and can_propose and confirm_id is not None and alert.buyer_id:
-        target = _linkable_property(db, confirm_id)
-        if target is not None:
+    # PLAN_ALERTA_VARIAS_PROPIEDADES.md: `confirm_property` puede traer varios
+    # ids separados por comas (el lote que se quiso añadir); el aviso lista las
+    # que ya están en otra alerta abierta y "Añadir de todas formas" reenvía
+    # el lote entero con la confirmación.
+    confirm_ids = _unique_ids((confirm_property or "").split(","))
+    if step == "proposal" and can_propose and confirm_ids and alert.buyer_id:
+        items, batch = [], []
+        for pid in confirm_ids:
+            target = _linkable_property(db, pid)
+            if target is None:
+                continue
+            batch.append(target.id)
             others = [
                 a for a in find_duplicate_alerts(db, alert.company_id, alert.buyer_id, target.id)["open"]
                 if a.id != alert.id
             ]
             if others:
-                ctx["link_duplicate"] = {"property": target, "alerts": others}
+                items.append({"property": target, "alerts": others})
+        if items:
+            ctx["link_duplicate"] = {
+                # Compatibilidad: la primera, como cuando solo había una
+                "property": items[0]["property"],
+                "alerts": items[0]["alerts"],
+                "items": items,
+                "property_ids": batch,
+            }
 
     return ctx
+
+
+def _filtered_agent_chip(db: Session, agent_id: int, company_id: int) -> dict:
+    """Chip del filtro de agente cuando el agente no sale en el select.
+
+    PLAN_LISTAS_AGENTES_POR_EMPRESA.md: los filtros solo listan a los agentes
+    activos de la empresa, pero un enlace con `agent_id` de un dado de baja o
+    de un agente de otra empresa (que lleva alertas de esta) sigue filtrando.
+    """
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        return {"id": agent_id, "name": f"Agente #{agent_id}", "note": "no encontrado"}
+    if agent.is_active is False:
+        note = "dado de baja"
+    elif not any(c.id == company_id for c in agent.companies):
+        note = "de " + ", ".join(c.name for c in sorted(agent.companies, key=lambda c: c.id))
+    else:
+        note = None
+    return {"id": agent.id, "name": agent.name, "note": note}
 
 
 def _parse_day(value: Optional[str]) -> Optional[date]:
@@ -1629,6 +1679,12 @@ async def alert_assignments_page(
     )
 
     filters_active = bool(agent_id_int or kind_value or date_from or date_to)
+    # Filtro de agentes: activos de la empresa (PLAN_LISTAS_AGENTES_POR_EMPRESA.md);
+    # un agent_id de fuera de la lista sigue filtrando y se ve como chip
+    history_agents = scope_active_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all()
+    filtered_agent = None
+    if agent_id_int and agent_id_int not in {a.id for a in history_agents}:
+        filtered_agent = _filtered_agent_chip(db, agent_id_int, company.id)
 
     return templates.TemplateResponse(
         request=request,
@@ -1640,7 +1696,8 @@ async def alert_assignments_page(
             "logs": logs,
             "pagination": pagination,
             "summary": assignment.cession_summary(db, company.id, start=start, end=end),
-            "agents": scope_agents(db.query(Agent), company.id).order_by(Agent.name.asc()).all(),
+            "agents": history_agents,
+            "filtered_agent": filtered_agent,
             "kind_labels": assignment.KIND_LABELS,
             "selected_agent_id": agent_id_int,
             "selected_kind": kind_value,
@@ -1827,9 +1884,16 @@ async def create_alert(
     agent_id: str = Form(None),
     assignment_reason: str = Form(None),
     company_id: str = Form(None),
+    return_to: str = Form(None),
     db: Session = Depends(get_db)
 ):
     """Crear nueva alerta con comprador existente o nuevo (admin y agentes).
+
+    PLAN_FICHA_COMPRADOR_CONSULTA.md: `return_to="buyer"` (botón «Crear
+    búsqueda» de la ficha del comprador, siempre con `buyer_id` y sin
+    propiedad) lleva al detalle de la alerta recién creada en vez de al
+    listado; el aviso de búsqueda duplicada y el error de agente vuelven a la
+    ficha.
 
     Empresa de la alerta (PLAN_VISTA_UNIFICADA_AGENTES.md §2.1): con
     propiedad, la de la propiedad (de cualquiera de las empresas del usuario;
@@ -1866,6 +1930,9 @@ async def create_alert(
 
     company_ids = get_company_ids(request)
     is_search = property_id is None
+    # Desde la ficha del comprador (PLAN_FICHA_COMPRADOR_CONSULTA.md)
+    from_buyer = return_to == "buyer" and bool(buyer_id)
+    buyer_url = f"/buyers/{buyer_id}" if buyer_id else "/alerts"
 
     # Operación obligatoria: solo Venta o Alquiler (no se guarda nada si falta).
     # El formulario rápido de la ficha del comprador vuelve a esa ficha.
@@ -1979,7 +2046,7 @@ async def create_alert(
             )
         except AlertAssignmentError as error:
             db.rollback()
-            response = RedirectResponse(url="/alerts", status_code=302)
+            response = RedirectResponse(url=buyer_url if from_buyer else "/alerts", status_code=302)
             set_flash(response, "error", str(error))
             return response
 
@@ -1991,7 +2058,8 @@ async def create_alert(
                 if not confirm_duplicate:
                     db.rollback()
                     fecha = existing.created_at.strftime("%d/%m/%Y") if existing.created_at else ""
-                    response = RedirectResponse(url="/alerts", status_code=302)
+                    response = RedirectResponse(url=f"{buyer_url}?tab=alerts" if from_buyer else "/alerts",
+                                                status_code=302)
                     set_flash(
                         response,
                         "warning",
@@ -2074,7 +2142,7 @@ async def create_alert(
         )
 
         db.add(alert)
-        result = assignment.assign(
+        assignment.assign(
             db,
             alert,
             assignee,
@@ -2085,16 +2153,14 @@ async def create_alert(
         )
         db.commit()
 
-        response = RedirectResponse(url="/alerts", status_code=302)
+        # Desde la ficha del comprador, a la alerta nueva (ahí se trabaja)
+        response = RedirectResponse(url=f"/alerts/{alert.id}" if from_buyer else "/alerts", status_code=302)
         # Un agente solo crea alertas sobre sus propiedades (o búsquedas a su
         # nombre), así que la alerta siempre queda a su nombre y no hace falta
         # avisarle de la asignación.
         what = "Búsqueda general creada" if is_search else "Alerta creada"
         if admin_view:
-            message = f"{what} para {buyer.name} y asignada a {assignee.name}"
-            if result.granted_company is not None:
-                message += f". {assignee.name} ahora tiene acceso a {result.granted_company.name}"
-            set_flash(response, "success", message)
+            set_flash(response, "success", f"{what} para {buyer.name} y asignada a {assignee.name}")
         elif is_search:
             set_flash(response, "success", f"{what} para {buyer.name}. Ábrela para tomar su perfil de búsqueda")
         else:
@@ -2429,6 +2495,235 @@ async def link_property_to_alert(
 
 
 # ---------------------------------------------------------------------------
+# Varias propiedades de interés por alerta (PLAN_ALERTA_VARIAS_PROPIEDADES.md)
+# ---------------------------------------------------------------------------
+
+def _proposal_url(alert_id: int) -> str:
+    return f"/alerts/{alert_id}?step=proposal#propuesta"
+
+
+def _unique_ids(values) -> list:
+    """Ids enteros sin repetir, en el orden recibido (lo que no es un número se ignora)."""
+    seen, ids = set(), []
+    for value in values or []:
+        pid = assignment._to_int(value)
+        if pid is not None and pid not in seen:
+            seen.add(pid)
+            ids.append(pid)
+    return ids
+
+
+def interest_note(labels: list) -> str:
+    """Nota del seguimiento al añadir: «Propiedad de interés: A» / «Propiedades de interés: A, B»."""
+    head = "Propiedad de interés" if len(labels) == 1 else "Propiedades de interés"
+    return f"{head}: {', '.join(labels)}"
+
+
+@router.post("/alerts/{alert_id}/interest-properties")
+async def add_interest_properties(
+    alert_id: int,
+    request: Request,
+    property_ids: List[str] = Form(default=[]),
+    confirm_duplicate: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    """Añade a la lista de la alerta las propiedades que le interesan al comprador.
+
+    Mismas reglas que /link-property: alerta abierta del agente (o admin), el
+    perfil completo si la alerta lo exige, propiedades de CUALQUIER empresa y
+    agente (`_linkable_property`), no archivadas y disponibles. Si alguna no
+    vale, no se añade ninguna. Las que ya están en la lista se ignoran.
+
+    Si la alerta aún no tiene propiedad, la primera pasa a ser la de la alerta
+    (`property_id` y `property_linked_at`); el resto van a `alert_properties`.
+    `alert.company_id` y `alert.agent_id` no cambian, y al captador no se le
+    avisa. Registra un único seguimiento PROPIEDAD_ASOCIADA («Propiedades de
+    interés: A, B (MOES PREMIUM)»): cuenta como gestión pero no avanza la etapa.
+
+    Si el comprador ya tiene otra alerta abierta con alguna de ellas (como
+    principal o en su lista), no se añade nada y se pide confirmación para el
+    lote entero (`confirm_property` con los ids separados por comas); con
+    ``confirm_duplicate`` se añaden y se anota en el mensaje de la alerta.
+    """
+    current_user = request.state.user
+    proposal_url = _proposal_url(alert_id)
+
+    alert = get_alert_in_company(db, alert_id, get_company_ids(request))
+    if not alert:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Alerta no encontrada")
+        return response
+
+    denied = _search_link_denied(alert, current_user, db, require_profile=True)
+    if denied:
+        return _search_denied_response(alert_id, denied)
+
+    ids = _unique_ids(property_ids)
+    if not ids:
+        response = RedirectResponse(url=proposal_url, status_code=302)
+        set_flash(response, "error", "Marca al menos una propiedad")
+        return response
+
+    properties = []
+    for pid in ids:
+        prop = _linkable_property(db, pid)
+        if prop is None:
+            response = RedirectResponse(url=proposal_url, status_code=302)
+            set_flash(response, "error", "Propiedad no encontrada")
+            return response
+        if not prop.is_available or prop.status == PropertyStatus.ARCHIVED:
+            response = RedirectResponse(url=proposal_url, status_code=302)
+            set_flash(response, "error", f"{property_label(prop, alert.company_id)} no está disponible")
+            return response
+        properties.append(prop)
+
+    in_list = {p.id for p in alert.interest_properties}
+    new = [p for p in properties if p.id not in in_list]
+    if not new:
+        response = RedirectResponse(url=proposal_url, status_code=302)
+        if len(properties) == 1:
+            set_flash(response, "info", f"{property_label(properties[0], alert.company_id)} ya está en su lista")
+        else:
+            set_flash(response, "info", "Esas propiedades ya están en su lista")
+        return response
+    labels = [property_label(p, alert.company_id) for p in new]
+
+    # Otra alerta abierta del mismo comprador con alguna de ellas (en la
+    # empresa de la alerta, como siempre)
+    duplicates = {}
+    duplicate_labels = []
+    if alert.buyer_id:
+        for prop, label in zip(new, labels):
+            others = [
+                a for a in find_duplicate_alerts(db, alert.company_id, alert.buyer_id, prop.id)["open"]
+                if a.id != alert.id
+            ]
+            if others:
+                duplicate_labels.append(f"{label} (#{others[0].id})")
+                for other in others:
+                    duplicates.setdefault(other.id, other)
+    if duplicates and not confirm_duplicate:
+        wanted = ",".join(str(p.id) for p in new)
+        response = RedirectResponse(
+            url=f"/alerts/{alert_id}?step=proposal&confirm_property={wanted}#propuesta", status_code=302
+        )
+        set_flash(
+            response,
+            "warning",
+            f"{alert.lead_name} ya tiene una alerta abierta sobre {', '.join(duplicate_labels)}. "
+            "No se ha añadido nada: confírmalo si quieres añadirlas igualmente."
+        )
+        return response
+
+    try:
+        now = datetime.utcnow()
+        for other in duplicates.values():
+            alert.message = append_note(alert.message, linked_duplicate_note(other))
+        for prop in new:
+            if alert.property is None:
+                alert.property = prop
+                alert.property_linked_at = now
+            else:
+                alert.extra_properties.append(
+                    AlertProperty(property=prop, added_at=now, added_by=current_user.id)
+                )
+        db.add(AlertFollowUp(
+            alert_id=alert.id,
+            action_type=FollowUpActionType.PROPIEDAD_ASOCIADA,
+            notes=interest_note(labels),
+            created_at=now,
+            created_by=current_user.id,
+        ))
+        if alert.status == AlertStatus.PENDING:
+            alert.status = AlertStatus.IN_PROGRESS
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error añadiendo propiedades de interés: alert_id=%s ids=%s", alert_id, ids)
+        response = RedirectResponse(url=proposal_url, status_code=302)
+        set_flash(response, "error", "Ocurrió un error al añadir las propiedades")
+        return response
+
+    # Es una gestión real: el aviso "sin gestión" ya no aplica
+    notification_service.safe_resolve_buyer_notifications(db, alert.id)
+
+    response = RedirectResponse(url=proposal_url, status_code=302)
+    if len(new) == 1:
+        set_flash(response, "success", f"{labels[0]} añadida a la lista de {alert.lead_name}")
+    else:
+        set_flash(response, "success", f"{len(new)} propiedades añadidas a la lista de {alert.lead_name}")
+    return response
+
+
+@router.post("/alerts/{alert_id}/interest-properties/{property_id}/remove")
+async def remove_interest_property(
+    alert_id: int,
+    property_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Quita una propiedad de la lista de la alerta (PLAN_ALERTA_VARIAS_PROPIEDADES.md).
+
+    Mismos permisos que añadir. Si es la propiedad de la alerta, la siguiente
+    de la lista (la más antigua) pasa a ocupar su lugar. La única propiedad de
+    la lista no se quita: para cambiarla se añade otra y se quita esa.
+    Registra el seguimiento PROPIEDAD_ASOCIADA «Quitada de su lista: A».
+    """
+    current_user = request.state.user
+    proposal_url = _proposal_url(alert_id)
+
+    alert = get_alert_in_company(db, alert_id, get_company_ids(request))
+    if not alert:
+        response = RedirectResponse(url="/alerts", status_code=302)
+        set_flash(response, "error", "Alerta no encontrada")
+        return response
+
+    denied = _search_link_denied(alert, current_user, db, require_profile=True)
+    if denied:
+        return _search_denied_response(alert_id, denied)
+
+    interest = alert.interest_properties
+    target = next((p for p in interest if p.id == property_id), None)
+    if target is None:
+        response = RedirectResponse(url=proposal_url, status_code=302)
+        set_flash(response, "error", "Esa propiedad no está en su lista")
+        return response
+    label = property_label(target, alert.company_id)
+    if len(interest) <= 1:
+        response = RedirectResponse(url=proposal_url, status_code=302)
+        set_flash(response, "warning", f"{label} es la única de su lista: añade otra antes de quitarla")
+        return response
+
+    try:
+        now = datetime.utcnow()
+        if alert.property_id == target.id:
+            successor = next(link for link in alert.extra_properties if link.property_id != target.id)
+            alert.property = successor.property
+            alert.property_linked_at = now
+            alert.extra_properties.remove(successor)
+        for link in [link for link in alert.extra_properties if link.property_id == target.id]:
+            alert.extra_properties.remove(link)
+        db.add(AlertFollowUp(
+            alert_id=alert.id,
+            action_type=FollowUpActionType.PROPIEDAD_ASOCIADA,
+            notes=f"Quitada de su lista: {label}",
+            created_at=now,
+            created_by=current_user.id,
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error quitando propiedad de interés: alert_id=%s property_id=%s", alert_id, property_id)
+        response = RedirectResponse(url=proposal_url, status_code=302)
+        set_flash(response, "error", "Ocurrió un error al quitar la propiedad")
+        return response
+
+    response = RedirectResponse(url=proposal_url, status_code=302)
+    set_flash(response, "success", f"{label} quitada de su lista")
+    return response
+
+
+# ---------------------------------------------------------------------------
 # Enviar una propiedad al comprador por WhatsApp (PLAN_ENVIO_PROPIEDAD_COMPRADOR.md)
 # ---------------------------------------------------------------------------
 
@@ -2610,7 +2905,7 @@ async def reassign_alerts_bulk(
     }
     reason = reason if reason not in (None, "") else assignment_reason
 
-    done, failed, granted = [], [], None
+    done, failed = [], []
     for alert_id in ids:
         alert = found.get(alert_id)
         if alert is None:
@@ -2619,9 +2914,8 @@ async def reassign_alerts_bulk(
         name = alert.lead_name or "Comprador"
         try:
             with db.begin_nested():
-                result = _reassign(db, alert, agent, current_user, reason)
+                _reassign(db, alert, agent, current_user, reason)
             done.append(alert.id)
-            granted = granted or result.granted_company
         except AlertAssignmentError as error:
             message = str(error)
             failed.append((name, message[:1].lower() + message[1:]))
@@ -2646,8 +2940,6 @@ async def reassign_alerts_bulk(
     if done:
         text = (f"{len(done)} {'comprador reasignado' if len(done) == 1 else 'compradores reasignados'} "
                 f"a {agent.name}")
-        if granted is not None:
-            text += f". {agent.name} ahora tiene acceso a {granted.name}"
         messages.append(("success", text))
     if failed:
         messages.append(("error", "No se pudieron reasignar: " + ", ".join(f"{n} ({why})" for n, why in failed)))
@@ -2667,8 +2959,8 @@ async def reassign_alert(
 ):
     """Reasigna una alerta abierta a otro agente (solo admin).
 
-    PLAN_ASIGNACION_ALERTAS.md §2.2: cualquier agente de cualquier empresa (si
-    no pertenece a la de la propiedad se le da acceso), motivo opcional. La
+    PLAN_ASIGNACION_ALERTAS.md §2.2: cualquier agente de cualquier empresa
+    (sus empresas no cambian, PLAN_LISTAS_AGENTES_POR_EMPRESA.md), motivo opcional. La
     alerta vuelve a pendiente y sin leer, conserva sus seguimientos, queda en
     el historial con una nota automática y el nuevo agente recibe un aviso
     in-app. Vuelve a `next` (listado o detalle).
@@ -2711,8 +3003,6 @@ async def reassign_alert(
 
     previous_name = result.previous_agent.name if result.previous_agent is not None else "sin agente"
     message = f"Alerta de {alert.lead_name} reasignada de {previous_name} a {agent.name}"
-    if result.granted_company is not None:
-        message += f". {agent.name} ahora tiene acceso a {result.granted_company.name}"
     response = RedirectResponse(url=back_url, status_code=302)
     set_flash(response, "success", message)
     return response
@@ -3328,6 +3618,20 @@ def _buyer_send_alert(db: Session, buyer: Buyer, current_user) -> Optional[Prope
     return latest_open or query.order_by(*order).first()
 
 
+def _buyer_work_alert(db: Session, buyer: Buyer, current_user) -> Optional[PropertyAlert]:
+    """Alerta ABIERTA desde la que el usuario trabaja a este comprador, o None.
+
+    PLAN_FICHA_COMPRADOR_CONSULTA.md: la ficha no deja trabajar fuera de la
+    alerta. El perfil se guarda en ella, las compatibles se añaden a su lista
+    y el aviso de cabecera enlaza a ella. Misma elección que
+    `_buyer_send_alert` pero solo abiertas (agente: las suyas; admin:
+    cualquiera; la más reciente por asignación). Sin ella, la ficha ofrece
+    crear la búsqueda.
+    """
+    alert = _buyer_send_alert(db, buyer, current_user)
+    return alert if alert is not None and alert.status in OPEN_ALERT_STATUSES else None
+
+
 @router.get("/buyers/{buyer_id}", response_class=HTMLResponse)
 async def buyer_detail(
     buyer_id: int,
@@ -3426,7 +3730,8 @@ async def buyer_detail(
         buyer_alerts_query
         # La propiedad se pinta en cada fila: en la misma consulta (puede faltar),
         # con su empresa para el distintivo si es de la otra (sin N+1)
-        .options(selectinload(PropertyAlert.property).selectinload(Property.company))
+        .options(selectinload(PropertyAlert.property).selectinload(Property.company),
+                 selectinload(PropertyAlert.extra_properties))
         .order_by(date_order.desc(), PropertyAlert.id.desc())
         .all()
     )
@@ -3436,6 +3741,10 @@ async def buyer_detail(
     # del comprador donde registrarlo. "Enviada el …" con los envíos de las
     # alertas que ve en la pestaña Alertas.
     send_alert = _buyer_send_alert(db, buyer, current_user) if matching_properties else None
+    # Alerta abierta desde la que se trabaja (PLAN_FICHA_COMPRADOR_CONSULTA.md)
+    # y su lista de interés, para marcar «En su lista» en las compatibles
+    work_alert = _buyer_work_alert(db, buyer, current_user)
+    work_interest_ids = {p.id for p in work_alert.interest_properties} if work_alert is not None else set()
     buyer_sent_dates = {}
     if send_alert is not None and buyer_alerts:
         buyer_sent_dates = sent_dates(
@@ -3483,6 +3792,8 @@ async def buyer_detail(
             "profile_applies": buyer_matching.profile_applies,
             "send_action": f"/buyers/{buyer.id}/send-property" if send_alert is not None else None,
             "sent_dates": buyer_sent_dates,
+            "work_alert": work_alert,
+            "work_interest_ids": work_interest_ids,
             "tab": tab,
             "AlertStatus": AlertStatus,
             "AlertPriority": AlertPriority,
@@ -3657,7 +3968,12 @@ async def save_search_criteria(
     PLAN_PERFIL_SOLO_VENTA.md: los mínimos solo se exigen si la operación
     enviada es la que los requiere
     (`buyer_matching.profile_required_for_business_type`: Venta). En Alquiler
-    se guarda lo que llegue."""
+    se guarda lo que llegue.
+
+    PLAN_FICHA_COMPRADOR_CONSULTA.md: la ficha ya no envía aquí. Con alerta
+    abierta el formulario va a `/alerts/{id}/search-profile` (deja
+    seguimiento) y sin ella es de solo lectura. La ruta se conserva por
+    compatibilidad."""
 
     current_user = request.state.user
 

@@ -21,7 +21,7 @@
                            obligatorio (`can_propose`; en Alquiler no, PLAN_PERFIL_SOLO_VENTA.md) #}
                         {% if can_manage_search and can_propose and alert.property %}
                         <a href="/alerts/{{ alert.id }}?step=proposal#propuesta"
-                           class="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Cambiar propiedad</a>
+                           class="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Gestionar su lista</a>
                         {% endif %}
                     </div>
                     {% if alert.property %}
@@ -65,6 +65,28 @@
                         <p class="text-xs text-gray-500">
                             {{ "Búsqueda general" if is_search else "Con referencia" }}{% if alert.property_linked_at %} · propiedad {{ "asociada" if is_search else "cambiada" }} el {{ alert.property_linked_at | madrid_dt('%d/%m/%Y %H:%M') }}{% if alert.property.agent and alert.property.agent_id != alert.agent_id %} · agente de la propiedad: {{ alert.property.agent.name }}{% endif %}{% endif %}
                         </p>
+                        {% endif %}
+
+                        {# Resto de su lista (PLAN_ALERTA_VARIAS_PROPIEDADES.md): título, distintivo si no es
+                           de la empresa de la alerta y agente si no es el de la alerta; se gestionan en la Propuesta #}
+                        {% set other_interest = (interest_properties if interest_properties is defined else [])[1:] %}
+                        {% if other_interest %}
+                        <div class="pt-3 border-t border-gray-100">
+                            <p class="text-sm text-gray-600">Otras propiedades de interés ({{ other_interest | length }})</p>
+                            <ul class="mt-2 space-y-2">
+                                {% for prop in other_interest %}
+                                <li class="text-sm">
+                                    <p class="font-medium text-gray-900">{{ prop.title }}</p>
+                                    <p class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                                        {% if prop.address | street %}<span>{{ prop.address | street }}</span>{% endif %}
+                                        {% if prop.price %}<span class="tabular-nums">{{ prop.price | eur }}</span>{% endif %}
+                                        {% if prop.agent and prop.agent_id != alert.agent_id %}<span>· agente: {{ prop.agent.name }}</span>{% endif %}
+                                        {% if prop.company_id != alert.company_id %}{{ ui.company_badge(prop.company) }}{% endif %}
+                                    </p>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
                         {% endif %}
                     </div>
                     {% else %}

@@ -2,11 +2,17 @@
 
 PLAN_RESULTADOS_COMERCIALES.md. Reglas:
 
-- Todas las métricas se calculan dentro de una empresa (`company_id`): las
-  de sus propiedades, alertas, seguimientos y visitas. Un agente que está
-  en las dos empresas tiene resultados, objetivos y snapshots separados.
-  La vista unificada del agente (PLAN_VISTA_UNIFICADA_AGENTES.md §5-3) los
-  suma después con `sum_metrics` / `sum_targets`; aquí no se mezclan.
+- Las métricas se calculan para una empresa (`company_id`): captaciones y
+  bajadas, de sus propiedades; cierres, de sus registros; hojas de visita, de
+  las visitas registradas en ella. Un agente que está en las dos empresas
+  tiene resultados, objetivos y snapshots separados.
+- Excepción (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2): "contactos" sale de
+  las alertas y es **por agente** (`AGENT_WIDE_INDICATORS`): cuenta las
+  alertas que lleva en cualquier empresa, no solo en la del servicio. Un
+  agente de MOYZA con alertas de MOES las suma en Rendimiento de MOYZA.
+- La vista unificada del agente (PLAN_VISTA_UNIFICADA_AGENTES.md §5-3) suma
+  sus empresas con `sum_company_metrics` (contactos una sola vez) y
+  `sum_targets`.
 - Captaciones, bajadas y cierres se desglosan en venta / alquiler. El tipo
   sale de la propiedad; en cierres, del propio registro. Lo que no es venta
   ni alquiler cuenta en el total ("otros") pero en ningún tipo.
@@ -46,6 +52,7 @@ from app.models.property_alert import PropertyAlert
 from app.models.property_price_history import PropertyPriceHistory
 from app.models.property_visit import PropertyVisit
 from app.services.company_scope import scope_active_agents
+from app.services.company_scope import scope_agents
 from app.services.company_scope import scope_visits
 from app.services.company_scope import visits_for_agent
 
@@ -62,6 +69,18 @@ BREAKDOWN_KEYS = {
     "bajadas": ("bajadas_venta", "bajadas_alquiler"),
     "cierres": ("cierres_venta", "cierres_alquiler"),
 }
+
+# Indicadores por agente sin filtrar por empresa: salen de las alertas que
+# lleva, de cualquier empresa (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2), y sus
+# claves de métricas. Captaciones y bajadas siguen por empresa de la propiedad,
+# cierres por empresa del cierre y hojas de visita por empresa de la visita.
+AGENT_WIDE_INDICATORS = ("contactos",)
+AGENT_WIDE_METRIC_KEYS = tuple(key for ind in AGENT_WIDE_INDICATORS for key in BREAKDOWN_KEYS[ind])
+
+# Origen de las métricas de una empresa para `sum_company_metrics`
+SOURCE_LIVE = "live"                  # calculadas ahora (contactos de cualquier empresa)
+SOURCE_SNAPSHOT = "snapshot"          # snapshot con contactos de cualquier empresa
+SOURCE_SNAPSHOT_COMPANY = "snapshot_company"  # snapshot antiguo: contactos solo de su empresa
 
 # Métricas de la pestaña Rendimiento, en orden de presentación
 RESULT_METRICS = ("captaciones_crm", "bajadas", "cierres", "contactos", "hojas_visita")
@@ -153,6 +172,40 @@ def sum_metrics(metrics_list) -> dict:
     for key in keys:
         values = [m.get(key) for m in metrics_list]
         result[key] = None if all(v is None for v in values) else sum(v or 0 for v in values)
+    return result
+
+
+def metrics_source(report) -> str:
+    """Origen de unas métricas: vivo (sin snapshot) o el tipo de snapshot."""
+    if report is None:
+        return SOURCE_LIVE
+    return SOURCE_SNAPSHOT if getattr(report, "contacts_all_companies", False) else SOURCE_SNAPSHOT_COMPANY
+
+
+def sum_company_metrics(parts) -> dict:
+    """Suma de las métricas de un agente en varias empresas sin contar dos
+    veces sus contactos (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2).
+
+    `parts`: [(métricas, origen)] con el origen de `metrics_source`. Todo se
+    suma (`sum_metrics`) salvo `AGENT_WIDE_METRIC_KEYS`, que en vivo y en los
+    snapshots nuevos ya traen las alertas de todas sus empresas en cada
+    parte: se toman una vez (el snapshot congelado si hay, el mayor si hay
+    varios; si no, el vivo). Los snapshots antiguos solo contaban su
+    empresa: si todas las partes son antiguas, se suman como antes.
+    """
+    parts = [(m, source) for m, source in parts if m is not None]
+    if not parts:
+        return {}
+    result = sum_metrics([m for m, _ in parts])
+    if len(parts) == 1:
+        return result
+    snapshots = [m for m, source in parts if source == SOURCE_SNAPSHOT]
+    live = [m for m, source in parts if source == SOURCE_LIVE]
+    for key in AGENT_WIDE_METRIC_KEYS:
+        if snapshots:
+            result[key] = max((m.get(key) or 0) for m in snapshots)
+        elif live:
+            result[key] = live[0].get(key) or 0
     return result
 
 
@@ -430,16 +483,18 @@ class PerformanceReportService:
         """(columna agente, columna fecha, columna tipo, columna empresa, función que monta FROM/JOIN/WHERE).
 
         Contactos es métrica **por agente** de la alerta: cuenta también las
-        búsquedas sin propiedad (PLAN_ALERTA_SIN_REFERENCIA.md), así que la
-        empresa es la de la propia alerta. Captaciones y bajadas son de la
-        propiedad. Cierres, de los registros manuales de `closings` (agente,
-        empresa, fecha y tipo propios; la propiedad es opcional).
+        búsquedas sin propiedad (PLAN_ALERTA_SIN_REFERENCIA.md) y las alertas
+        de cualquier empresa (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2): sin
+        columna de empresa (None), `_scoped_indicator_query` no filtra por
+        ella. Captaciones y bajadas son de la propiedad. Cierres, de los
+        registros manuales de `closings` (agente, empresa, fecha y tipo
+        propios; la propiedad es opcional).
         """
         if indicator == "contactos":
             def build(query):
                 return query.select_from(PropertyAlert)
             return (PropertyAlert.agent_id, PropertyAlert.created_at, PropertyAlert.business_type,
-                    PropertyAlert.company_id, build)
+                    None, build)
 
         if indicator == "captaciones_crm":
             def build(query):
@@ -469,18 +524,23 @@ class PerformanceReportService:
         """FROM/JOIN/WHERE de un indicador: empresa del servicio, agentes y rango de fechas.
 
         Punto único de la regla de cada indicador: lo usan el contador
-        (`grouped_counts`) y el detalle (`indicator_rows`).
+        (`grouped_counts`) y el detalle (`indicator_rows`). Un indicador por
+        agente (columna de empresa None, `AGENT_WIDE_INDICATORS`) no filtra
+        por empresa: cuenta lo del agente en cualquiera.
         """
         agent_col, date_col, _type_col, company_col, build = spec
+        company_id = self._require_company()
         if isinstance(date_col.type, Date):
             # Columna de fecha sin hora (cierres): se compara con días, no con instantes
             period_start, period_end = period_start.date(), period_end.date()
-        return build(query).filter(
-            company_col == self._require_company(),
+        query = build(query).filter(
             agent_col.in_(list(agent_ids)),
             date_col >= period_start,
             date_col <= period_end,
         )
+        if company_col is not None:
+            query = query.filter(company_col == company_id)
+        return query
 
     def _visits_query(self, query, agent_id: int, period_start: datetime, period_end: datetime):
         """Visitas en las que participó el agente (principal o acompañante)
@@ -506,8 +566,8 @@ class PerformanceReportService:
         """Conteo por agente (y mes) y tipo: {(agent_id, mes|None): {'venta', 'alquiler', 'otros'}}.
 
         Una sola consulta agrupada, filtrada por la empresa del servicio
-        (la de la alerta o la de la propiedad, según el indicador); `mes` es
-        1..12 si `by_month`.
+        (la de la propiedad o la del cierre, según el indicador; contactos,
+        sin filtro de empresa); `mes` es 1..12 si `by_month`.
         """
         self._require_company()
         agent_ids = list(agent_ids)
@@ -602,6 +662,38 @@ class PerformanceReportService:
         """True si la tarjeta del período muestra el snapshot congelado y no el vivo."""
         return not period.is_current and report is not None and bool(report.is_locked)
 
+    def period_agents(self, period: Period) -> list:
+        """Filas de Rendimiento (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-3), por nombre.
+
+        Agentes activos de la empresa (según su ficha, igual a su usuario).
+        En un período pasado se añaden los dados de baja de la empresa con
+        dato de ese período: snapshot congelado (dato cerrado) o, sin él,
+        alguna métrica distinta de cero. En el período en curso, solo activos.
+        """
+        company_id = self._require_company()
+        agents = scope_active_agents(self.db.query(Agent), company_id).order_by(Agent.name.asc(), Agent.id).all()
+        if not period.is_current:
+            inactive = scope_agents(self.db.query(Agent), company_id).filter(Agent.is_active.is_(False)).all()
+            if inactive:
+                frozen = {
+                    report.agent_id
+                    for report in self._reports_query([a.id for a in inactive]).filter(
+                        AgentPerformanceReport.period_type == period.period_type,
+                        AgentPerformanceReport.period_start == period.start,
+                        AgentPerformanceReport.is_locked.is_(True),
+                    )
+                }
+                kept = [
+                    agent.id for agent in inactive
+                    if agent.id in frozen or any(
+                        value for value in self.calculate_metrics(agent.id, period.start, period.end).values()
+                    )
+                ]
+                if kept:
+                    ids = [a.id for a in agents] + kept
+                    agents = self.db.query(Agent).filter(Agent.id.in_(ids)).order_by(Agent.name.asc(), Agent.id).all()
+        return agents
+
     def agents_period_data(self, agents, period: Period) -> list:
         """Datos de la pestaña Rendimiento: una entrada por agente."""
         data = []
@@ -657,7 +749,9 @@ class PerformanceReportService:
 
         if indicator == "contactos":
             entities = (PropertyAlert, kind)
-            options = (joinedload(PropertyAlert.property), joinedload(PropertyAlert.buyer))
+            # Empresa de la alerta y de su propiedad: distintivo si no es la del servicio
+            options = (joinedload(PropertyAlert.property).joinedload(Property.company),
+                       joinedload(PropertyAlert.buyer), joinedload(PropertyAlert.company))
             id_col = PropertyAlert.id
         elif indicator == "captaciones_crm":
             entities = (Property, kind)
@@ -722,6 +816,7 @@ class PerformanceReportService:
 
         if indicator == "contactos":
             alert, kind = row
+            prop = alert.property
             return {
                 "id": alert.id,
                 "date": alert.created_at,
@@ -731,7 +826,14 @@ class PerformanceReportService:
                 "is_search": alert.property_id is None,
                 "source": alert.source,
                 "status": alert.status,
-                **self._property_fields(alert.property),
+                **self._property_fields(prop),
+                # Alerta de otra empresa (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2):
+                # distintivo y sin enlace (no se abre desde esta empresa)
+                "company_name": alert.company.name if alert.company is not None else "",
+                "alert_company": alert.company if alert.company_id != self.company_id else None,
+                "property_company": (
+                    prop.company if prop is not None and prop.company_id != self.company_id else None
+                ),
             }
 
         if indicator == "captaciones_crm":
@@ -860,8 +962,9 @@ class PerformanceReportService:
 
         if indicator == "contactos":
             return (
-                f"{label} = alertas de comprador de {brand} cuyo agente actual es {name}, "
-                f"de tipo venta o alquiler, creadas {dates}."
+                f"{label} = contactos registrados por {name} en sus alertas de cualquier empresa: "
+                f"alertas de comprador cuyo agente actual es {name}, de tipo venta o alquiler, "
+                f"creadas {dates}. Las de otra empresa cuentan también en {brand} y llevan su distintivo."
             )
         if indicator == "captaciones_crm":
             return (
@@ -980,7 +1083,6 @@ class PerformanceReportService:
             agents_data.append({
                 "id": agent.id,
                 "name": agent.name,
-                # Para marcar "(baja)" en el select de la gráfica (PLAN_BAJA_USUARIOS.md §4.4)
                 "is_active": agent.is_active,
                 "totals": totals,
                 "monthly": monthly,
@@ -1063,6 +1165,8 @@ class PerformanceReportService:
 
         for key, value in metrics.items():
             setattr(report, key, value)
+        # Regla actual de contactos: alertas de cualquier empresa (§3-2)
+        report.contacts_all_companies = True
 
         report.is_locked = True
         report.locked_at = datetime.utcnow()

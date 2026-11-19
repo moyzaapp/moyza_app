@@ -211,7 +211,9 @@ def _seed(c):
 EXPECTED_MOYZA = {
     "captaciones_crm": 4,   # venta, alquiler, traspaso, venta del último segundo
     "bajadas": 3,
-    "contactos": 3,         # venta, alquiler, búsqueda (venta); el sin tipo no suma
+    # venta, alquiler, búsqueda (venta) y la alerta de MOES (venta): contactos de
+    # cualquier empresa (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2); el sin tipo no suma
+    "contactos": 4,
     "cierres": 3,           # cierres manuales: 2 venta (días 1 y 10), 1 alquiler (día 31)
     "hojas_visita": 2,
 }
@@ -242,8 +244,9 @@ def test_otra_empresa_y_otro_agente(ctx, indicator):
     moes = PerformanceReportService(ctx.db, ctx.moes.id)
     moes_value = moes.metric_value(moes.calculate_metrics(ctx.agent.id, *MARCH), indicator)
     assert len(moes.indicator_rows(indicator, ctx.agent.id, *MARCH, limit=None)) == moes_value
-    # Cada indicador tiene exactamente un registro de Laura en MOES
-    assert moes_value == 1
+    # Cada indicador tiene exactamente un registro de Laura en MOES; contactos es
+    # por agente y cuenta sus alertas de cualquier empresa (§3-2 del plan de listas)
+    assert moes_value == (EXPECTED_MOYZA["contactos"] if indicator == "contactos" else 1)
 
     moyza = PerformanceReportService(ctx.db, ctx.moyza.id)
     other_value = moyza.metric_value(moyza.calculate_metrics(ctx.other.id, *MARCH), indicator)

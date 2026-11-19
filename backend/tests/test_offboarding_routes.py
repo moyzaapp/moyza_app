@@ -558,12 +558,19 @@ def test_inactivo_fuera_de_los_selectores_de_asignacion(data):
     assert baja_id not in ids and data["destino_agent"] in ids
 
 
-def test_inactivo_en_filtro_del_historial_de_cesiones_con_baja(data):
+def test_inactivo_fuera_del_filtro_del_historial_de_cesiones(data):
+    """PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-3: los dados de baja ya no salen en
+    el filtro (antes, con "(baja)"); un enlace con su agent_id sigue filtrando
+    y se ve como chip."""
     status, body, _ = _admin().get("/alerts/assignments")
     assert status == 200
     filtro = _select(body, "hAgent")
-    assert re.search(rf'value="{data["baja_agent"]}"[^>]*>{re.escape(TAG)} BAJA \(baja\)</option>', filtro)
+    assert f'value="{data["baja_agent"]}"' not in filtro
     assert re.search(rf'value="{data["destino_agent"]}"[^>]*>{re.escape(TAG)} DESTINO</option>', filtro)
+
+    status, body, _ = _admin().get(f"/alerts/assignments?agent_id={data['baja_agent']}")
+    assert status == 200
+    assert f"{TAG} BAJA · dado de baja" in body
 
 
 def test_crear_propiedad_con_captador_inactivo(data):

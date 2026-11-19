@@ -265,7 +265,7 @@ def test_detalle_alquiler_sin_perfil_de_comprador(env):
                  'id="fuPropertyType"', "toma su perfil"):
         assert text not in html, text
     for text in ("Información del Interesado", "Juan Comprador", "Historial de Seguimientos",
-                 "Piso Centro", "Cambiar propiedad", "1. Contactar", "2. Propuesta",
+                 "Piso Centro", "Gestionar su lista", "1. Contactar", "2. Propuesta",
                  "Siguiente: propuesta", '<option value="CONTACTADO">', "const PROFILE_BLOCKS_STAGES = false"):
         assert text in html, text
 
@@ -277,7 +277,7 @@ def test_detalle_alquiler_sin_perfil_de_comprador(env):
     _add_follow_up(env, env.users["ana"], alert, "SIN_RESPUESTA")
     response, html = _detail(env, env.users["ana"], alert)
     assert response.context["step"] == "proposal" and response.context["suggestions"] == []
-    for text in ('id="linkPropertySearch"', "Buscar una propiedad", 'id="linkPropertyForm"', "Asociada ahora"):
+    for text in ('id="linkPropertySearch"', "Buscar una propiedad", 'id="linkPropertyForm"', "En su lista"):
         assert text in html, text
     for text in ("Perfil pendiente", "Aún no hay propuesta", ">¿No está en la lista?</h3>", "Perfil opcional",
                  "No hay propiedades que encajen con su perfil"):
@@ -319,7 +319,7 @@ def test_detalle_venta_sin_perfil_como_antes(env):
     response, html = _detail(env, env.users["ana"], alert)
     assert response.context["profile_required"] is True and response.context["can_propose"] is False
     assert "Perfil pendiente" in html and "Perfil opcional" not in html
-    assert "Cambiar propiedad" not in html
+    assert "Gestionar su lista" not in html
     assert "const PROFILE_BLOCKS_STAGES = true" in html
     assert 'id="fuPropertyType" name="property_type" required' in html
     assert "Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)." in html
@@ -401,16 +401,19 @@ def test_ficha_render_minimos_segun_operacion(env):
     def html():
         return _buyer_page(env)[1]
 
+    # PLAN_FICHA_COMPRADOR_CONSULTA.md: el formulario es el de la alerta abierta (Venta):
+    # se pinta con la operación de la alerta y los mínimos "si se rellena", como en su paso Perfil
     _complete_profile(env, business_type="Alquiler", max_price=None)
     page = html()
-    assert 'data-required-operations="[&#34;Venta&#34;]"' in page and "data-minimums-if-filled" not in page
+    assert 'data-required-operations="[&#34;Venta&#34;]"' in page and "data-minimums-if-filled" in page
     assert "Obligatorios en venta; en alquiler, opcionales." in page
-    assert 'id="bcPropertyType" name="property_type" required' not in page   # Alquiler al pintar
+    assert 'id="bcPropertyType" name="property_type" required' in page       # la alerta es de Venta
+    assert "Si la cambias, cambia la operación de la alerta" in page
 
     criteria = _criteria(env)
     criteria.business_type = "Venta"
     env.db.commit()
-    assert 'id="bcPropertyType" name="property_type" required' in html()     # Venta al pintar
+    assert 'id="bcPropertyType" name="property_type" required' in html()
 
 
 # ---------------------------------------------------------------------------

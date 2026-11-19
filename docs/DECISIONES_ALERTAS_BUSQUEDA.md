@@ -271,3 +271,53 @@ informe que agrupe por la empresa de la **propiedad** de las alertas verá
 alertas de la otra empresa: para "dónde se captó al comprador" usar siempre
 `property_alerts.company_id`. Las alertas con propiedad ya no cumplen siempre
 `alert.company_id == property.company_id`.
+
+## 9. 2026-11-18: varias propiedades de interés por alerta
+
+Plan: `PLAN_ALERTA_VARIAS_PROPIEDADES.md`. Sustituye la decisión 1 en lo de
+"una sola propiedad": el agente marca en la Propuesta **varias** propiedades
+(casilla «Le interesa», de las dos empresas y de cualquier agente) y se añaden
+a la **lista de la alerta** con un solo seguimiento `PROPIEDAD_ASOCIADA`
+(«Propiedades de interés: A, B (MOES PREMIUM)»). Sigue siendo una alerta:
+no se crean alertas hijas (la alternativa del §2 sigue descartada).
+
+Modelo: `property_alerts.property_id` es la **primera** de la lista y la
+tabla `alert_properties` guarda las demás (migración `k7r8w9x0y1z2`). Lista
+completa: `PropertyAlert.interest_properties`. Quitar una deja «Quitada de su
+lista: A»; si es la primera, la siguiente ocupa su lugar; la única no se
+quita. `alert.agent_id` y `alert.company_id` no cambian y al captador no se
+le avisa. `/link-property` (cambiar la principal) se conserva pero la
+interfaz ya no lo usa.
+
+Duplicados: `find_duplicate_alerts` mira también las propiedades adicionales
+(también en el alta con referencia). Al añadir un lote con alguna duplicada no
+se añade nada hasta confirmar el lote entero.
+
+Implicaciones para analítica: lo que cuenta alertas por propiedad usando
+`property_alerts.property_id` solo ve la primera de cada lista. A 2026-11-18
+ningún informe al propietario ni métrica por propiedad lee las alertas
+(trazabilidad de Resultados muestra la primera); si se añade uno, debe unir
+`alert_properties` para contar todas (decisión del usuario: cuentan todas).
+
+## 10. 2026-11-18: la ficha del comprador es de consulta; el trabajo se hace desde la alerta
+
+Plan: `PLAN_FICHA_COMPRADOR_CONSULTA.md`. Motivo: algunos agentes entraban por
+la tabla «Compradores» de `/alerts`, registraban el perfil en la ficha y
+proponían propiedades sin alerta, y eso no dejaba ningún seguimiento (medido:
+12 compradores de 5 agentes nunca tuvieron alerta; otros 150 con perfil y sin
+alerta abierta habían pasado por una ya cerrada).
+
+Decisión: la tabla y la ficha se **mantienen** (directorio y vista del
+comprador a lo largo de sus alertas), pero desde la ficha no se puede trabajar
+fuera de la alerta. `work_alert` = alerta abierta más reciente del comprador
+que el usuario puede gestionar (agente: las suyas; admin: cualquiera). Con
+ella, el perfil se guarda en la alerta (`/alerts/{id}/search-profile`, deja
+«Contactado» / «Perfil guardado» y lleva a su Propuesta) y las compatibles se
+añaden a su lista (`/alerts/{id}/interest-properties`). Sin ella, perfil de
+solo lectura y botón «Crear búsqueda» (alerta sin referencia; el agente se la
+crea a su nombre y el admin elige agente), que abre la alerta nueva
+(`/alerts/create` con `return_to=buyer`).
+
+Se retira el alta rápida **con referencia** desde la ficha y la edición del
+perfil (y de su «Agente responsable») sin alerta abierta. La ruta
+`/buyers/{id}/search-criteria` se conserva sin uso en la interfaz.

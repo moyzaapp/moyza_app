@@ -425,7 +425,7 @@ def test_detalle_con_referencia_sin_perfil(env):
     assert html.index("Calle Piso Centro 1") < html.index('id="propuesta"')
     assert f'href="/properties/{env.props["ana"].id}"' in html
     # Sin perfil no se puede cambiar de propiedad
-    assert "Cambiar propiedad" not in html
+    assert "Gestionar su lista" not in html
 
     # Modal de seguimiento: Contactado con el perfil (obligatorio) y aviso de etapas bloqueadas
     for text in ('id="followUpProfile"', "Perfil del comprador", 'name="profile_notes"',
@@ -466,12 +466,12 @@ def test_detalle_con_referencia_tras_contactado_con_perfil(env):
     for part in ("Piso", "Centro, Jaen", "≤ 150.000 €"):
         assert f'text-xs text-gray-700">{part}</span>' in html, part
     assert "Perfil pendiente" not in html and ">Editar</a>" in html
-    # "Cambiar propiedad" y sugerencias: la actual marcada, la de Bea para asociar
-    assert "Cambiar propiedad" in html
+    # "Gestionar su lista" y sugerencias: la actual marcada, la de Bea para asociar
+    assert "Gestionar su lista" in html
     # De las dos empresas (PLAN_SUGERENCIAS_MULTIEMPRESA.md)
     assert [p.title for p in ctx["suggestions"]] == ["Piso Centro", "Piso MOES", "Piso Bea"]
     assert ctx["current_in_suggestions"] is True
-    assert "Asociada ahora" in html and html.count("Asociar a esta alerta") >= 1
+    assert "En su lista" in html and html.count('data-interest-check') >= 1
     assert "¿No está en la lista?" in html
     # El historial muestra la nota del agente y el resumen en otra línea
     assert "Hablado\nPerfil de búsqueda: Piso · Centro, Jaen · ≤ 3 dorm · ≤ 150.000 €." in html
@@ -490,13 +490,13 @@ def test_detalle_con_referencia_tras_contactado_con_perfil(env):
 
 
 def test_propiedad_actual_fuera_del_perfil_se_ve_asociada(env):
-    """Si la propiedad de la alerta no encaja con el perfil, sale aparte como "Asociada ahora"."""
+    """Si la propiedad de la alerta no encaja con el perfil, sale aparte como "En su lista"."""
     _complete_profile(env, max_price=100000)
     alert = _property_alert(env, "ana", "ana")
     _add_follow_up(env, env.users["ana"], alert, "SIN_RESPUESTA")
     response, html = _detail(env, env.users["ana"], alert, step="proposal")
     assert response.context["suggestions"] == [] and response.context["current_in_suggestions"] is False
-    assert "Asociada ahora" in html and "No hay propiedades que encajen con su perfil" in html
+    assert "En su lista" in html and "No hay propiedades que encajen con su perfil" in html
 
 
 def test_detalle_admin_alerta_con_referencia(env):

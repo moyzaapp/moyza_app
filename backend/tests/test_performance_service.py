@@ -292,7 +292,10 @@ def test_metricas_aisladas_por_empresa(ctx):
 
     assert (m_moes["captaciones_crm"], m_moes["captaciones_alquiler"]) == (1, 1)
     assert m_moes["hojas_visita"] == 1
-    assert m_moes["bajadas"] == m_moes["cierres"] == m_moes["contactos_venta"] == 0
+    assert m_moes["bajadas"] == m_moes["cierres"] == 0
+    # Contactos es por agente: su alerta de MOYZA cuenta también en MOES
+    # (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2)
+    assert m_moes["contactos_venta"] == 1
 
 
 def test_desglose_venta_alquiler_mayusculas_y_null(ctx):
