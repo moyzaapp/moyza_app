@@ -170,6 +170,22 @@ class ElevatorPreference:
         return ((cls.ANY, "Indiferente"), (cls.YES, "Con ascensor"), (cls.NO, "Sin ascensor"))
 
 
+class GaragePreference:
+    """Garaje en el perfil del comprador.
+
+    Valores del select "Garaje" (opcional, "Indiferente" por defecto). Solo
+    dos opciones: nadie busca expresamente un inmueble sin plaza. En la base
+    de datos `buyer_search_criteria.garage` es NULL (indiferente) o True
+    (`buyer_matching.parse_garage` y `garage_value` traducen).
+    """
+    ANY = ""
+    YES = "yes"
+
+    @classmethod
+    def choices(cls) -> tuple[tuple[str, str], ...]:
+        return ((cls.ANY, "Indiferente"), (cls.YES, "Con garaje"))
+
+
 class PropertyInteractionType:
     INQUIRY = "CONSULTA"
     VISIT = "VISITA"

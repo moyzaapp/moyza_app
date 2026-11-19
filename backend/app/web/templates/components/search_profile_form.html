@@ -210,7 +210,12 @@
                          id=prefix ~ "Elevator") }}
         </div>
 
-        <div class="grid grid-cols-2 gap-3 sm:col-span-2">
+        {# Garaje: opcional, Indiferente por defecto; solo "Con garaje" filtra (plazas >= 1) #}
+        {{ ui.select("garage", "Garaje", GaragePreference.choices(),
+                     value=(GaragePreference.YES if c and c.garage else GaragePreference.ANY), empty=none,
+                     id=prefix ~ "Garage") }}
+
+        <div class="grid grid-cols-2 gap-3">
             {{ ui.field("min_price", "Precio mín. (€)", type="number",
                         value=((c.min_price | int) if c and c.min_price is not none else ""),
                         placeholder="–", attrs='min="0" step="1" inputmode="numeric"', id=prefix ~ "MinPrice") }}

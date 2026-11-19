@@ -52,6 +52,10 @@ class BuyerSearchCriteria(Base):
     # ascensor, False = sin ascensor. Se cruza con `Property.num_ascensores`.
     elevator = Column(Boolean, nullable=True)
 
+    # Garaje: NULL = indiferente, True = con garaje. Se cruza con
+    # `Property.num_garaje_aparcam` (>= 1; vacío o 0 cuenta como sin garaje).
+    garage = Column(Boolean, nullable=True)
+
     # Superficie
     min_m2 = Column(Numeric, nullable=True)
     max_m2 = Column(Numeric, nullable=True)

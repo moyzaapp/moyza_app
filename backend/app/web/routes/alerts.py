@@ -462,8 +462,9 @@ def _can_hold_profile(alert: PropertyAlert) -> bool:
 # País, provincia y operación (PLAN_PERFIL_UBICACION.md) se leen del formulario.
 # `elevator` (PLAN_PERFIL_ZONAS.md, fase C): "yes" / "no" / vacío (indiferente);
 # con valor cuenta como dato del perfil (`_profile_values_present`).
+# `garage`: "yes" / vacío (indiferente), mismo trato que el ascensor.
 PROFILE_TEXT_FIELDS = ("property_type", "min_price", "max_price", "min_bedrooms", "max_bedrooms", "min_bathrooms",
-                       "elevator")
+                       "elevator", "garage")
 PROFILE_LOCATION_FIELDS = ("country", "province")
 
 
@@ -518,6 +519,7 @@ def _profile_kwargs(alert: PropertyAlert, values: dict, criteria: Optional[Buyer
         max_bedrooms=values["max_bedrooms"],
         min_bathrooms=values["min_bathrooms"],
         elevator=values["elevator"],
+        garage=values["garage"],
         notes=values["notes"],
         agent_id=alert.agent_id,
     )
@@ -2209,6 +2211,7 @@ async def save_alert_search_profile(
     max_bedrooms: str = Form(None),
     min_bathrooms: str = Form(None),
     elevator: str = Form(None),
+    garage: str = Form(None),
     notes: str = Form(None),
     db: Session = Depends(get_db)
 ):
@@ -2272,7 +2275,7 @@ async def save_alert_search_profile(
     values = _profile_values(
         form_data, property_type=property_type, min_price=min_price, max_price=max_price,
         min_bedrooms=min_bedrooms, max_bedrooms=max_bedrooms, min_bathrooms=min_bathrooms, elevator=elevator,
-        notes=notes,
+        garage=garage, notes=notes,
     )
 
     # Operación elegida en el perfil (si cambia, cambia la de la alerta). Se lee
@@ -3949,6 +3952,7 @@ async def save_search_criteria(
     max_bedrooms: str = Form(None),
     min_bathrooms: str = Form(None),
     elevator: str = Form(None),
+    garage: str = Form(None),
     notes: str = Form(None),
     db: Session = Depends(get_db)
 ):
@@ -4018,6 +4022,7 @@ async def save_search_criteria(
         max_bedrooms=max_bedrooms,
         min_bathrooms=min_bathrooms,
         elevator=elevator,
+        garage=garage,
         notes=notes,
         agent_id=agent_id,
     )

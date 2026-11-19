@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from app.core import geo
 from app.core.address import street_only
 from app.core.config import settings
-from app.core.constants import AlertOrigin, BusinessType, ElevatorPreference, PhoneCountryCodes
+from app.core.constants import AlertOrigin, BusinessType, ElevatorPreference, GaragePreference, PhoneCountryCodes
 from app.core.phone import phone_display, split_phone, tel_href, whatsapp_url
 from app.services.property_link import property_public_url
 
@@ -144,6 +144,7 @@ templates.env.globals["BusinessType"] = BusinessType
 templates.env.globals["AlertOrigin"] = AlertOrigin
 # Select "Ascensor" del perfil del comprador (PLAN_PERFIL_ZONAS.md, fase C)
 templates.env.globals["ElevatorPreference"] = ElevatorPreference
+templates.env.globals["GaragePreference"] = GaragePreference
 # Provincia según el código postal (PLAN_PERFIL_UBICACION.md): tabla para la
 # ayuda "Provincia (según CP)" del formulario de propiedad
 templates.env.globals["geo_cp"] = {"provincias": geo.PROVINCIAS_POR_CP, "spain_aliases": geo.SPAIN_ALIASES,

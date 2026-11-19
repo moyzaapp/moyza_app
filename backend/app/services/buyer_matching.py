@@ -50,6 +50,10 @@ PLAN_PERFIL_OBLIGATORIO.md también las creadas con referencia):
   True = con ascensor (`num_ascensores >= 1`), False = sin ascensor
   (`num_ascensores` 0 o vacío). En el formulario es un select opcional
   (`ElevatorPreference`: "" / "yes" / "no"; `parse_elevator`, `elevator_value`).
+- Garaje: `garage` NULL = indiferente, True = con garaje
+  (`num_garaje_aparcam >= 1`; una propiedad sin el dato o con 0 cuenta como
+  sin garaje, igual que el ascensor). Select opcional de dos opciones
+  (`GaragePreference`: "" / "yes"; `parse_garage`, `garage_value`).
 - `criteria_summary`: resumen corto para listados, notas y cabeceras
   ("Piso · Jaén · 2-3 dorm · ≤ 150.000 €").
 """
@@ -62,7 +66,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core import business_calendar as bc
 from app.core import geo
 from app.core.config import settings
-from app.core.constants import BusinessType, ElevatorPreference, PropertyStatus
+from app.core.constants import BusinessType, ElevatorPreference, GaragePreference, PropertyStatus
 from app.models.buyer_search_criteria import BuyerSearchCriteria
 from app.models.company import Company
 from app.models.property import Property
@@ -329,6 +333,9 @@ def _matching_filters(query, criteria: BuyerSearchCriteria, company_id: Optional
         query = query.filter(Property.num_ascensores >= 1)
     elif criteria.elevator is False:
         query = query.filter(or_(Property.num_ascensores.is_(None), Property.num_ascensores == 0))
+    # Garaje: indiferente (NULL) no filtra; sin dato de plazas = sin garaje
+    if criteria.garage is True:
+        query = query.filter(Property.num_garaje_aparcam >= 1)
     return query
 
 
@@ -573,6 +580,18 @@ def elevator_value(criteria: Optional[BuyerSearchCriteria]) -> str:
     return ElevatorPreference.YES if criteria.elevator else ElevatorPreference.NO
 
 
+def parse_garage(value) -> Optional[bool]:
+    """'yes' -> True; vacío o cualquier otro valor -> None (indiferente)."""
+    return True if str(value or "").strip().lower() == GaragePreference.YES else None
+
+
+def garage_value(criteria: Optional[BuyerSearchCriteria]) -> str:
+    """Valor del select para un perfil guardado: 'yes' o '' (indiferente)."""
+    if criteria is None or not criteria.garage:
+        return GaragePreference.ANY
+    return GaragePreference.YES
+
+
 def apply_profile(
     criteria: BuyerSearchCriteria,
     *,
@@ -588,6 +607,7 @@ def apply_profile(
     max_bedrooms=None,
     min_bathrooms=None,
     elevator=None,
+    garage=None,
     notes=None,
     agent_id=None,
     now: Optional[datetime] = None,
@@ -598,6 +618,7 @@ def apply_profile(
     España → "España"); la provincia solo se guarda si es una de la tabla de
     `app/core/geo.py` y el país es España (si no hay país, queda España).
     Ascensor: `parse_elevator` ('yes' / 'no' / vacío = indiferente).
+    Garaje: `parse_garage` ('yes' / vacío = indiferente).
     Zonas vacías = "Todas" (PLAN_PERFIL_ZONAS.md: con la regla nueva hay que
     marcar al menos una población; la lista vacía de poblaciones solo queda
     en perfiles antiguos, donde sigue significando "Todas").
@@ -623,6 +644,7 @@ def apply_profile(
     criteria.max_bedrooms = to_int(max_bedrooms)
     criteria.min_bathrooms = to_int(min_bathrooms)
     criteria.elevator = parse_elevator(elevator)
+    criteria.garage = parse_garage(garage)
     criteria.notes = (notes or "").strip() or None
     criteria.updated_at = now or datetime.utcnow()
     return criteria
@@ -701,6 +723,8 @@ def criteria_parts(criteria: Optional[BuyerSearchCriteria]) -> list:
         parts.append(f"≥ {criteria.min_bathrooms} {'baño' if criteria.min_bathrooms == 1 else 'baños'}")
     if criteria.elevator is not None:
         parts.append("con ascensor" if criteria.elevator else "sin ascensor")
+    if criteria.garage:
+        parts.append("con garaje")
     price = _price_range(criteria.min_price, criteria.max_price)
     if price:
         parts.append(price)
