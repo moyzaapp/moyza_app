@@ -52,9 +52,9 @@
   con la configuración para el JS.
   - notes_name: nombre del campo "Imprescindibles" (en el modal de seguimiento
     `notes` ya es la nota del seguimiento, allí va como `profile_notes`).
-  - type_empty: texto de la opción vacía del tipo (por defecto "Selecciona…" si es
-    obligatorio y "Cualquier tipo" si no). En la alerta el tipo es un mínimo, así
-    que al editar un perfil completo se pasa "Selecciona…" aunque no sea `required`.
+  - Tipo de inmueble: casillas `property_types` (se pueden marcar varias; al
+    menos una cuando se exigen los mínimos, lo valida search-profile.js y el
+    servidor). `type_empty` ya no se usa: era el texto vacío del desplegable.
   - caller(): campos extra al final (p. ej. "Agente responsable" en la ficha).
 #}
 {% import "components/ui_macros.html" as ui %}
@@ -154,8 +154,11 @@
 
 {% macro search_profile_fields(criteria=None, location={}, property_types=[], alert_operation=None, prefix="sp", required=False, notes_name="notes", type_empty=None, required_operations=None, minimums_if_filled=False) -%}
 {% set c = criteria %}
-{% set type_options = [] %}
-{% for pt in property_types %}{% set _ = type_options.append((pt, pt)) %}{% endfor %}
+{# Tipos marcados: la lista del perfil o, en perfiles anteriores, su tipo único #}
+{% set selected_types = ((c.property_types or ([c.property_type] if c.property_type else [])) if c else []) %}
+{# Opciones: los tipos del inventario más los ya guardados que no estén en él #}
+{% set type_options = (property_types | list) %}
+{% for st in selected_types %}{% if st not in type_options %}{% set _ = type_options.append(st) %}{% endif %}{% endfor %}
 {# Operación: en la alerta, precargada con la de la alerta y editable (si cambia,
    cambia la de la alerta; PLAN_PERFIL_UBICACION.md); en la ficha, la del perfil #}
 {% set current_bt = alert_operation if alert_operation else (c.business_type if c else none) %}
@@ -167,11 +170,26 @@
      {% if minimums_if_filled %}data-minimums-if-filled{% endif %}{% endif %}>
     {{ _location(location, prefix, validated, required) }}
 
+    {# Tipo de inmueble: casillas, se pueden marcar varias. Mínimo del perfil (al
+       menos una) cuando se exigen los mínimos; sin marcar ninguna = cualquier tipo #}
+    {# data-types-min: el grupo entra en los mínimos (JS); data-types-required: obligatorio al pintar #}
+    <fieldset id="{{ prefix }}PropertyType" data-profile-types{% if validated %} data-types-min data-types-error="{{ prefix }}TypesError"{% endif %}{% if required %} data-types-required{% endif %}>
+        <legend class="block text-sm font-medium text-gray-700 mb-2">
+            Tipo de inmueble{% if validated %} <span class="text-red-500{% if not required %} hidden{% endif %}" aria-hidden="true" data-profile-mark>*</span>{% endif %}
+            <span class="font-normal text-gray-500">· puedes marcar varios</span>
+        </legend>
+        <div class="flex flex-wrap gap-2">
+            {% for pt in type_options %}
+            {{ _geo_box("property_types", pt, pt in selected_types, false) }}
+            {% endfor %}
+        </div>
+        {% if not type_options %}<p class="text-sm text-gray-500">No hay tipos de inmueble registrados</p>{% endif %}
+        {% if validated %}
+        <p id="{{ prefix }}TypesError" class="hidden text-xs text-red-600 mt-2" role="alert">Marca al menos un tipo de inmueble</p>
+        {% endif %}
+    </fieldset>
+
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {{ ui.select("property_type", "Tipo de inmueble", type_options,
-                     value=(c.property_type if c else none), required=required,
-                     empty=(type_empty or ("Selecciona…" if validated else "Cualquier tipo")), id=prefix ~ "PropertyType",
-                     attrs=("data-profile-min" if validated else "")) }}
 
         <div>
             <label for="{{ prefix }}BusinessType" class="block text-sm font-medium text-gray-700 mb-1">
@@ -215,7 +233,7 @@
                      value=(GaragePreference.YES if c and c.garage else GaragePreference.ANY), empty=none,
                      id=prefix ~ "Garage") }}
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-2 gap-3 sm:col-span-2">
             {{ ui.field("min_price", "Precio mín. (€)", type="number",
                         value=((c.min_price | int) if c and c.min_price is not none else ""),
                         placeholder="–", attrs='min="0" step="1" inputmode="numeric"', id=prefix ~ "MinPrice") }}

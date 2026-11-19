@@ -43,6 +43,7 @@ from app.services.company_service import (
 )
 from app.web.utils.flash import set_flash
 from app.services import offboarding_service
+from app.services import notification_service
 from app.services.offboarding_service import OffboardingError
 from app.web.routes.auth import json_admin_denied
 from app.web.routes.auth import reassign_to_from_form
@@ -487,6 +488,101 @@ async def deactivate_agent(
 
     except OffboardingError as e:
         set_flash(response, "error", str(e))
+
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Repartir compradores antes de la baja
+# ---------------------------------------------------------------------------
+
+def _handover_back(agent, db: Session) -> tuple:
+    """(url, texto) para volver a la pantalla desde la que se da de baja."""
+    if offboarding_service.find_user(db, agent) is not None:
+        return "/auth", "Volver a Usuarios"
+    return "/agents", "Volver a Agentes"
+
+
+@router.get("/agents/{agent_id}/handover", response_class=HTMLResponse)
+async def agent_handover_page(
+    agent_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Reparto de los compradores abiertos de un agente antes de darlo de baja (solo admin).
+
+    Lista sus alertas abiertas de todas las empresas, agrupadas por empresa:
+    el admin marca varias y las reasigna a un agente activo de esa empresa (o
+    las elimina). Cada acción se aplica al momento; con todo repartido, el
+    modal de baja ya no pide destino.
+    """
+    denied = deny_if_not_admin(request, "/agents")
+    if denied:
+        return denied
+
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        return RedirectResponse(url="/agents?error=agent_not_found", status_code=303)
+
+    back_url, back_label = _handover_back(agent, db)
+    summary = offboarding_service.summary_for_agent(db, agent)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="agents/handover.html",
+        context={
+            "request": request,
+            "current_user": request.state.user,
+            "agent": agent,
+            "groups": offboarding_service.handover_groups(db, agent),
+            "blocked_message": offboarding_service.blocked_message(summary) if summary.blocked else None,
+            "back_url": back_url,
+            "back_label": back_label,
+        },
+    )
+
+
+@router.post("/agents/{agent_id}/handover")
+async def agent_handover_action(
+    agent_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Reasigna (`action=reassign`) o elimina (`action=delete`) los compradores marcados."""
+    denied = deny_if_not_admin(request, "/agents")
+    if denied:
+        return denied
+
+    agent = db.get(Agent, agent_id)
+    if agent is None:
+        return RedirectResponse(url="/agents?error=agent_not_found", status_code=303)
+
+    form = await request.form()
+    company_id = form.get("company_id")
+    alert_ids = form.getlist("alert_ids")
+    response = RedirectResponse(url=f"/agents/{agent_id}/handover", status_code=303)
+
+    try:
+        if form.get("action") == "delete":
+            ids = offboarding_service.handover_delete(db, agent, company_id=company_id, alert_ids=alert_ids)
+            noun = "comprador eliminado" if len(ids) == 1 else "compradores eliminados"
+            message = f"{len(ids)} {noun}"
+        else:
+            target, ids = offboarding_service.handover_reassign(
+                db, agent, company_id=company_id, alert_ids=alert_ids,
+                target_id=form.get("target_agent_id"), by_user=request.state.user,
+            )
+            noun = "comprador reasignado" if len(ids) == 1 else "compradores reasignados"
+            message = f"{len(ids)} {noun} a {target.name}"
+        # Los avisos del agente anterior sobre esas alertas ya no aplican
+        notification_service.safe_resolve_buyer_notifications(db, ids)
+        set_flash(response, "success", message)
+
+    except OffboardingError as e:
+        set_flash(response, "error", str(e))
+    except Exception:
+        logger.exception("Error repartiendo compradores: agent_id=%s", agent_id)
+        set_flash(response, "error", "Ocurrió un error al repartir los compradores")
 
     return response
 

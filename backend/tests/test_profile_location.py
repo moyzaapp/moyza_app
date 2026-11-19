@@ -542,7 +542,7 @@ def test_ficha_del_comprador_render_con_minimos(env):
     for text in ("Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)",
                  'id="bcMaxBedrooms" name="max_bedrooms" value="3" placeholder="–" required',
                  'id="geoData-bc"', 'id="bcCountry"', 'id="bcProvince"', "data-places-required",
-                 'id="bcPropertyType" name="property_type" required', "/static/js/search-profile.js",
+                 'id="bcPropertyType" data-profile-types data-types-min data-types-error="bcTypesError" data-types-required', "/static/js/search-profile.js",
                  '<option value="Jaén" selected>Jaén</option>', "Provincia: Jaén",
                  f'action="/alerts/{alert.id}/search-profile"', "Si la cambias, cambia la operación de la alerta"):
         assert text in page, text

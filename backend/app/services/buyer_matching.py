@@ -163,7 +163,7 @@ def missing_profile_fields(criteria: Optional[BuyerSearchCriteria], geo_tree: Op
         return list(PROFILE_MINIMUM_LABELS)
     new_rule = uses_new_minimums(criteria)
     missing = []
-    if not (criteria.property_type or "").strip():
+    if not profile_types(criteria):
         missing.append(PROFILE_MINIMUM_LABELS[0])
     if criteria.max_price is None or criteria.max_price <= 0:
         missing.append(PROFILE_MINIMUM_LABELS[1])
@@ -314,8 +314,9 @@ def _matching_filters(query, criteria: BuyerSearchCriteria, company_id: Optional
         query = query.filter(Property.zona.in_(criteria.zones))
     if criteria.cities:
         query = query.filter(Property.city.in_(criteria.cities))
-    if criteria.property_type:
-        query = query.filter(Property.property_type == criteria.property_type)
+    types = profile_types(criteria)
+    if types:
+        query = query.filter(Property.property_type.in_(types))
     if criteria.business_type:
         query = query.filter(Property.business_type == criteria.business_type)
     if criteria.min_price is not None:
@@ -580,6 +581,26 @@ def elevator_value(criteria: Optional[BuyerSearchCriteria]) -> str:
     return ElevatorPreference.YES if criteria.elevator else ElevatorPreference.NO
 
 
+def clean_types(values) -> list:
+    """Tipos de inmueble sin vacíos ni repetidos, en el orden recibido."""
+    return list(dict.fromkeys(v.strip() for v in (values or []) if v and str(v).strip()))
+
+
+def profile_types(criteria: Optional[BuyerSearchCriteria]) -> list:
+    """Tipos de inmueble del perfil (lista vacía = cualquier tipo).
+
+    Manda `property_types`; un perfil guardado antes de la selección múltiple
+    solo tiene `property_type` y cuenta como lista de un tipo.
+    """
+    if criteria is None:
+        return []
+    types = clean_types(criteria.property_types)
+    if types:
+        return types
+    single = (criteria.property_type or "").strip()
+    return [single] if single else []
+
+
 def parse_garage(value) -> Optional[bool]:
     """'yes' -> True; vacío o cualquier otro valor -> None (indiferente)."""
     return True if str(value or "").strip().lower() == GaragePreference.YES else None
@@ -600,6 +621,7 @@ def apply_profile(
     zones: Iterable[str] = (),
     cities: Iterable[str] = (),
     property_type=None,
+    property_types=None,
     business_type=None,
     min_price=None,
     max_price=None,
@@ -619,6 +641,9 @@ def apply_profile(
     `app/core/geo.py` y el país es España (si no hay país, queda España).
     Ascensor: `parse_elevator` ('yes' / 'no' / vacío = indiferente).
     Garaje: `parse_garage` ('yes' / vacío = indiferente).
+    Tipo de inmueble: `property_types` (lista de las casillas marcadas); si no
+    llega, vale el `property_type` único de antes. Se guardan la lista y su
+    texto ("Piso, Casa") en `property_type`.
     Zonas vacías = "Todas" (PLAN_PERFIL_ZONAS.md: con la regla nueva hay que
     marcar al menos una población; la lista vacía de poblaciones solo queda
     en perfiles antiguos, donde sigue significando "Todas").
@@ -636,7 +661,9 @@ def apply_profile(
     # dos grupos del formulario (PLAN_PERFIL_ZONAS.md) y llega dos veces
     criteria.zones = list(dict.fromkeys(z for z in zones if z)) or None
     criteria.cities = list(dict.fromkeys(c for c in cities if c)) or None
-    criteria.property_type = (property_type or "").strip() or None
+    types = clean_types(property_types) or clean_types([property_type])
+    criteria.property_types = types or None
+    criteria.property_type = ", ".join(types) or None
     criteria.business_type = (business_type or "").strip() or None
     criteria.min_price = to_decimal(min_price)
     criteria.max_price = to_decimal(max_price)
@@ -713,8 +740,9 @@ def criteria_parts(criteria: Optional[BuyerSearchCriteria]) -> list:
     if criteria is None:
         return []
     parts = []
-    if criteria.property_type:
-        parts.append(criteria.property_type)
+    types = profile_types(criteria)
+    if types:
+        parts.append(", ".join(types))
     parts += _location_parts(criteria)
     bedrooms = _range(criteria.min_bedrooms, criteria.max_bedrooms, "dorm")
     if bedrooms:

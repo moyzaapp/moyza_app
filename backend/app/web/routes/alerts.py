@@ -480,6 +480,14 @@ def _profile_values(form_data, notes_field: str = "notes", **overrides) -> dict:
     values["notes"] = form_data.get(notes_field)
     values["business_type"] = form_data.get("business_type")
     values.update({k: v for k, v in overrides.items() if k in values})
+    # Tipo de inmueble: casillas `property_types` (varios); si no llegan, el
+    # `property_type` único de antes. `property_type` queda con el texto de la
+    # lista para que cuente como dato del perfil (`_profile_values_present`).
+    values["property_types"] = (
+        buyer_matching.clean_types(form_data.getlist("property_types"))
+        or buyer_matching.clean_types([values["property_type"]])
+    )
+    values["property_type"] = ", ".join(values["property_types"]) or None
     values["zones"] = [z for z in form_data.getlist("zones") if z]
     values["cities"] = [c for c in form_data.getlist("cities") if c]
     # "Todas" las zonas marcada a propósito (PLAN_PERFIL_ZONAS.md): se guarda como
@@ -511,7 +519,7 @@ def _profile_kwargs(alert: PropertyAlert, values: dict, criteria: Optional[Buyer
         province=values.get("province"),
         zones=values["zones"],
         cities=values["cities"],
-        property_type=values["property_type"],
+        property_types=values["property_types"],
         business_type=alert.business_type or (criteria.business_type if criteria is not None else None),
         min_price=values["min_price"],
         max_price=values["max_price"],
@@ -4014,7 +4022,8 @@ async def save_search_criteria(
         province=form_data.get("province"),
         zones=form_data.getlist("zones"),
         cities=form_data.getlist("cities"),
-        property_type=property_type,
+        property_types=(buyer_matching.clean_types(form_data.getlist("property_types"))
+                        or buyer_matching.clean_types([property_type])),
         business_type=business_type,
         min_price=min_price,
         max_price=max_price,

@@ -321,13 +321,13 @@ def test_detalle_venta_sin_perfil_como_antes(env):
     assert "Perfil pendiente" in html and "Perfil opcional" not in html
     assert "Gestionar su lista" not in html
     assert "const PROFILE_BLOCKS_STAGES = true" in html
-    assert 'id="fuPropertyType" name="property_type" required' in html
+    assert 'id="fuPropertyType" data-profile-types data-types-min data-types-error="fuTypesError" data-types-required' in html
     assert "Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)." in html
 
     _add_follow_up(env, env.users["ana"], alert, "SIN_RESPUESTA")
     response, html = _detail(env, env.users["ana"], alert)
     assert response.context["step"] == "profile"
-    assert 'id="spPropertyType" name="property_type" required' in html
+    assert 'id="spPropertyType" data-profile-types data-types-min data-types-error="spTypesError" data-types-required' in html
     _, html = _detail(env, env.users["ana"], alert, step="proposal")
     assert "Aún no hay propuesta" in html and 'id="linkPropertySearch"' not in html
 
@@ -407,13 +407,13 @@ def test_ficha_render_minimos_segun_operacion(env):
     page = html()
     assert 'data-required-operations="[&#34;Venta&#34;]"' in page and "data-minimums-if-filled" in page
     assert "Obligatorios en venta; en alquiler, opcionales." in page
-    assert 'id="bcPropertyType" name="property_type" required' in page       # la alerta es de Venta
+    assert 'id="bcPropertyType" data-profile-types data-types-min data-types-error="bcTypesError" data-types-required' in page       # la alerta es de Venta
     assert "Si la cambias, cambia la operación de la alerta" in page
 
     criteria = _criteria(env)
     criteria.business_type = "Venta"
     env.db.commit()
-    assert 'id="bcPropertyType" name="property_type" required' in html()
+    assert 'id="bcPropertyType" data-profile-types data-types-min data-types-error="bcTypesError" data-types-required' in html()
 
 
 # ---------------------------------------------------------------------------

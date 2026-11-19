@@ -269,7 +269,7 @@
 
     // Campos que cuentan como "datos del perfil" (mismo criterio que
     // _profile_values_present en routes/alerts.py: ni país ni operación)
-    var VALUE_NAMES = ['property_type', 'min_price', 'max_price', 'min_bedrooms', 'max_bedrooms', 'min_bathrooms',
+    var VALUE_NAMES = ['min_price', 'max_price', 'min_bedrooms', 'max_bedrooms', 'min_bathrooms',
         'elevator', 'garage', 'province'];
 
     function requiredOperations(root) {
@@ -337,8 +337,49 @@
             Array.prototype.slice.call(root.querySelectorAll('[data-places-required]')).forEach(function (block) {
                 showError(block, null);
             });
+            Array.prototype.slice.call(root.querySelectorAll('[data-types-min]')).forEach(function (group) {
+                showTypesError(group, false);
+            });
         }
     }
+
+    // ------------------------------------------- mínimo de tipo de inmueble
+    // Casillas `property_types` (se pueden marcar varias): al menos una cuando
+    // se exigen los mínimos. Un grupo de casillas no admite `required` nativo.
+
+    function typesMissing(group) {
+        return group.querySelector('input[name="property_types"]:checked') === null;
+    }
+
+    function showTypesError(group, on) {
+        var id = group.getAttribute('data-types-error');
+        var error = id ? document.getElementById(id) : null;
+        if (error) error.classList.toggle('hidden', !on);
+    }
+
+    document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (!form.querySelectorAll || e.defaultPrevented) return;
+        var groups = form.querySelectorAll('[data-types-min]');
+        for (var i = 0; i < groups.length; i++) {
+            var group = groups[i];
+            if (group.disabled || group.closest('fieldset[disabled]')) continue;
+            if (!minimumsEnforced(group.closest('[data-search-profile]'))) continue;
+            var missing = typesMissing(group);
+            showTypesError(group, missing);
+            if (!missing) continue;
+            e.preventDefault();
+            var first = group.querySelector('input[name="property_types"]');
+            if (first) first.focus();
+            return;
+        }
+    }, true);
+
+    document.addEventListener('change', function (e) {
+        var target = e.target;
+        var group = target && target.closest ? target.closest('[data-types-min]') : null;
+        if (group && !typesMissing(group)) showTypesError(group, false);
+    });
 
     function syncAll() {
         var roots = document.querySelectorAll('[data-search-profile]');

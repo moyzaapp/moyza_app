@@ -36,7 +36,12 @@ class BuyerSearchCriteria(Base):
     cities = Column(JSON, nullable=True)  # ["Barcelona", "Hospitalet", ...]
 
     # Tipo de inmueble y operación
-    property_type = Column(String, nullable=True)   # Casa, Piso, Local…
+    # Varios tipos: la lista manda (`property_types`, ["Piso", "Casa"]; vacía =
+    # cualquier tipo). `property_type` se conserva como texto de la lista
+    # ("Piso, Casa") para resúmenes y para los perfiles anteriores a la lista;
+    # leer siempre con `buyer_matching.profile_types`.
+    property_type = Column(String, nullable=True)   # "Piso" / "Piso, Casa"
+    property_types = Column(JSON, nullable=True)    # ["Piso", "Casa", ...]
     business_type = Column(String, nullable=True)   # Venta, Alquiler
 
     # Rango de precio

@@ -23,7 +23,9 @@ from urllib.parse import quote
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import selectinload
 
+from app.core.constants import FollowUpActionType
 from app.core.constants import PropertyStatus
 from app.models.agent import Agent
 from app.models.agent_performance_report import AgentPerformanceReport
@@ -42,6 +44,7 @@ from app.models.property_visit import PropertyVisit
 from app.models.report import Report
 from app.models.user import User
 from app.services import alert_assignment_service
+from app.services import alert_view
 from app.services.alert_assignment_service import REASSIGNABLE_STATUSES
 from app.services.alert_assignment_service import AlertAssignmentError
 from app.services.company_scope import scope_active_agents
@@ -317,6 +320,11 @@ def properties_url(agent: Optional[Agent]) -> Optional[str]:
     return f"/properties?search={quote(agent.name or '')}"
 
 
+def handover_url(agent: Optional[Agent]) -> Optional[str]:
+    """Pantalla "Repartir compradores" del agente (reparto uno a uno antes de la baja)."""
+    return f"/agents/{agent.id}/handover" if agent is not None else None
+
+
 def summary_to_dict(summary: OffboardingSummary) -> dict:
     """JSON del resumen para el modal de baja (§6.1)."""
     url = properties_url(summary.agent)
@@ -332,6 +340,7 @@ def summary_to_dict(summary: OffboardingSummary) -> dict:
                 "live_properties": p.live_properties,
                 "open_alerts": p.open_alerts,
                 "properties_url": url,
+                "handover_url": handover_url(summary.agent) if p.open_alerts else None,
                 "targets": [{"id": a.id, "name": a.name} for a in p.targets],
             }
             for p in summary.pending
@@ -359,6 +368,166 @@ def deactivation_message(summary: OffboardingSummary) -> str:
     if parts:
         message += " " + ", ".join(parts) + "."
     return message
+
+
+# ---------------------------------------------------------------------------
+# Reparto de compradores antes de la baja
+# ---------------------------------------------------------------------------
+# El modal de baja manda todas las alertas abiertas de una empresa a un solo
+# agente. Para no cargar a uno solo, la pantalla "Repartir compradores"
+# (`/agents/{id}/handover`) lista las alertas abiertas del agente y el admin
+# marca grupos y elige a quién va cada uno, o elimina las que no merece la
+# pena traspasar. Cada acción se aplica en el momento (misma reasignación que
+# en Compradores: historial, nota y aviso al nuevo agente); cuando no queda
+# ninguna abierta, la baja del modal ya no pide destino.
+
+@dataclass
+class HandoverTarget:
+    agent: Agent
+    open_alerts: int               # compradores abiertos que ya tiene en esa empresa
+
+
+@dataclass
+class HandoverGroup:
+    """Alertas abiertas del agente en una empresa y a quién pueden ir."""
+    company: Company
+    alerts: list                   # PropertyAlert, las más antiguas primero
+    stages: dict                   # {alert_id: {"label", "color"}} (sin entrada = sin iniciar)
+    targets: list                  # HandoverTarget, activos de la empresa sin el propio
+
+
+def _open_alerts_query(db: Session, agent: Agent):
+    return db.query(PropertyAlert).filter(
+        PropertyAlert.agent_id == agent.id,
+        PropertyAlert.status.in_(OPEN_ALERT_STATUSES),
+    )
+
+
+def _stage(alert, labels: dict) -> Optional[dict]:
+    """Etapa visible de la alerta para el admin (misma regla que el listado de Compradores)."""
+    real = alert_view.real_follow_ups_since(alert.follow_ups, None)
+    if not real:
+        return None
+    progression = [f for f in real if f.action_type not in FollowUpActionType.REPEATABLE_ACTIONS]
+    latest = max(progression if progression else real, key=lambda f: f.created_at)
+    return {
+        "label": labels.get(latest.action_type, latest.action_type),
+        "color": FollowUpActionType.stage_badge_color(latest.action_type),
+    }
+
+
+def handover_groups(db: Session, agent: Agent) -> list:
+    """Alertas abiertas del agente agrupadas por empresa, con los destinos y su carga."""
+    alerts = (
+        _open_alerts_query(db, agent)
+        .options(
+            selectinload(PropertyAlert.property),
+            selectinload(PropertyAlert.follow_ups),
+            selectinload(PropertyAlert.company),
+        )
+        .order_by(PropertyAlert.created_at, PropertyAlert.id)
+        .all()
+    )
+    by_company: dict = {}
+    for alert in alerts:
+        by_company.setdefault(alert.company_id, []).append(alert)
+    if not by_company:
+        return []
+
+    companies = db.query(Company).filter(Company.id.in_(by_company)).order_by(Company.id).all()
+    labels = FollowUpActionType.labels()
+    groups = []
+    for company in companies:
+        targets = _targets(db, company.id, agent.id)
+        load = dict(
+            db.query(PropertyAlert.agent_id, func.count())
+            .filter(
+                PropertyAlert.company_id == company.id,
+                PropertyAlert.status.in_(OPEN_ALERT_STATUSES),
+                PropertyAlert.agent_id.in_([t.id for t in targets]),
+            )
+            .group_by(PropertyAlert.agent_id)
+            .all()
+        ) if targets else {}
+        company_alerts = by_company[company.id]
+        stages = {}
+        for alert in company_alerts:
+            stage = _stage(alert, labels)
+            if stage:
+                stages[alert.id] = stage
+        groups.append(HandoverGroup(
+            company=company,
+            alerts=company_alerts,
+            stages=stages,
+            targets=[HandoverTarget(agent=t, open_alerts=load.get(t.id, 0)) for t in targets],
+        ))
+    return groups
+
+
+def _handover_alerts(db: Session, agent: Agent, company_id, alert_ids) -> list:
+    """Las alertas marcadas que siguen siendo suyas, abiertas y de esa empresa."""
+    ids = list(dict.fromkeys(i for i in (_to_int(v) for v in (alert_ids or [])) if i is not None))
+    if not ids:
+        raise OffboardingError("Marca al menos un comprador")
+    alerts = (
+        _open_alerts_query(db, agent)
+        .filter(PropertyAlert.company_id == _to_int(company_id), PropertyAlert.id.in_(ids))
+        .order_by(PropertyAlert.id)
+        .all()
+    )
+    if not alerts:
+        raise OffboardingError("Los compradores marcados ya no están abiertos a su nombre")
+    return alerts
+
+
+def handover_reassign(db: Session, agent: Agent, *, company_id, alert_ids, target_id, by_user,
+                      reason: Optional[str] = None, now: Optional[datetime] = None) -> tuple:
+    """Reasigna las alertas marcadas a `target_id`. Devuelve (agente destino, ids reasignados).
+
+    Todo o nada: si una falla, no se reasigna ninguna (`OffboardingError`).
+    """
+    alerts = _handover_alerts(db, agent, company_id, alert_ids)
+    target_id = _to_int(target_id)
+    if target_id is None:
+        raise OffboardingError("Elige a qué agente van los compradores marcados")
+    target = (
+        scope_active_agents(db.query(Agent), _to_int(company_id))
+        .filter(Agent.id == target_id, Agent.id != agent.id)
+        .first()
+    )
+    if target is None:
+        raise OffboardingError("El agente elegido no es un agente activo de esa empresa")
+
+    reason = alert_assignment_service.clean_reason(reason) or f"Reparto por baja de {agent.name}"
+    now = now or datetime.utcnow()
+    try:
+        for alert in alerts:
+            alert_assignment_service.validate_reassignment(alert, target, is_admin_user=True)
+            alert_assignment_service.assign(db, alert, target, by_user, reason, is_new=False, now=now)
+        ids = [alert.id for alert in alerts]
+        db.commit()
+    except AlertAssignmentError as exc:
+        db.rollback()
+        raise OffboardingError(str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
+    return target, ids
+
+
+def handover_delete(db: Session, agent: Agent, *, company_id, alert_ids) -> list:
+    """Elimina las alertas marcadas (con sus seguimientos, como el borrado del admin
+    en Compradores). No se puede deshacer. Devuelve los ids eliminados."""
+    alerts = _handover_alerts(db, agent, company_id, alert_ids)
+    ids = [alert.id for alert in alerts]
+    try:
+        for alert in alerts:
+            db.delete(alert)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return ids
 
 
 # ---------------------------------------------------------------------------

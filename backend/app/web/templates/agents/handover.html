@@ -1,0 +1,245 @@
+{% extends 'base.html' %}
+
+{% block title %}Repartir compradores - {{ brand_name }}{% endblock %}
+
+{#
+  Reparto de los compradores abiertos de un agente antes de darlo de baja (solo admin).
+  GET/POST /agents/{id}/handover. Una sección por empresa (groups: HandoverGroup de
+  offboarding_service): tabla con casillas y una barra para reasignar las marcadas a un
+  agente activo de esa empresa o eliminarlas. Cada envío se aplica al momento y vuelve
+  aquí con lo que queda; sin nada pendiente, se vuelve a Usuarios/Agentes a dar de baja.
+#}
+{% import "components/ui_macros.html" as ui %}
+
+{% set th = "px-3 sm:px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap" %}
+{% set total = groups | sum(attribute="alerts", start=[]) | length %}
+
+{% block content %}
+
+<div class="max-w-6xl mx-auto space-y-6">
+
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+            <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">Repartir compradores</h1>
+            <p class="text-sm text-gray-500 mt-1">
+                Compradores abiertos de <span class="font-medium text-gray-900">{{ agent.name }}</span>.
+                Marca varios y elige a quién van, para no cargarlos todos a un solo agente.
+            </p>
+        </div>
+        {{ ui.button(back_label, "secondary", href=back_url, full_mobile=True) }}
+    </div>
+
+    {% if blocked_message %}
+    {{ ui.banner("Además tiene propiedades activas", tone="amber", text=blocked_message) }}
+    {% endif %}
+
+    {% if not groups %}
+
+    <div class="max-w-2xl">
+        {% call ui.banner("No le queda ningún comprador abierto", tone="green",
+                          text="Ya puedes darle de baja: no hará falta elegir a quién reasignar.") %}
+        {{ ui.button(back_label ~ " para dar de baja", "secondary", href=back_url) }}
+        {% endcall %}
+    </div>
+
+    {% else %}
+
+    <p class="text-sm text-gray-500">
+        Le {{ "queda" if total == 1 else "quedan" }}
+        <span class="font-medium text-gray-900 tabular-nums">{{ total }}</span>
+        {{ "comprador abierto" if total == 1 else "compradores abiertos" }} por repartir.
+        Cada cambio se aplica al momento: el nuevo agente recibe un aviso y queda en el historial del comprador.
+    </p>
+
+    {% for group in groups %}
+    {% set cid = group.company.id %}
+
+    <section class="bg-white rounded-2xl border border-gray-200 overflow-hidden" aria-labelledby="handoverTitle{{ cid }}" data-handover>
+
+        <form method="POST" action="/agents/{{ agent.id }}/handover" id="handoverForm{{ cid }}" data-once data-loading-text="Aplicando…">
+            <input type="hidden" name="company_id" value="{{ cid }}">
+
+            <div class="px-4 sm:px-6 py-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3">
+                <h2 id="handoverTitle{{ cid }}" class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full shrink-0" style="background-color: {{ group.company.primary_color or '#000000' }}" aria-hidden="true"></span>
+                    {{ group.company.name }}
+                    <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 tabular-nums">{{ group.alerts | length }}</span>
+                </h2>
+                <p class="text-sm text-gray-500" aria-live="polite">
+                    <span class="font-medium text-gray-900 tabular-nums" data-handover-count>0</span> marcados
+                </p>
+            </div>
+
+            <div class="overflow-x-auto relative">
+                <table class="w-full min-w-[760px]">
+                    <thead class="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                            <th scope="col" class="w-12 px-3 sm:px-4 py-3">
+                                <label class="flex items-center justify-center w-10 h-10 -m-2 cursor-pointer">
+                                    <span class="sr-only">Marcar todos los de {{ group.company.name }}</span>
+                                    <input type="checkbox" data-handover-all
+                                        class="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900/30">
+                                </label>
+                            </th>
+                            <th scope="col" class="{{ th }}">Comprador</th>
+                            <th scope="col" class="{{ th }}">Propiedad</th>
+                            <th scope="col" class="{{ th }}">Etapa</th>
+                            <th scope="col" class="{{ th }}">Estado</th>
+                            <th scope="col" class="{{ th }}">Alta</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for alert in group.alerts %}
+                        <tr class="border-b border-gray-100 hover:bg-gray-50">
+
+                            <td class="px-3 sm:px-4 py-3">
+                                <label class="flex items-center justify-center w-10 h-10 -m-2 cursor-pointer">
+                                    <span class="sr-only">Marcar a {{ alert.lead_name or "Comprador" }}</span>
+                                    <input type="checkbox" name="alert_ids" value="{{ alert.id }}" data-handover-item
+                                        class="w-4 h-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900/30">
+                                </label>
+                            </td>
+
+                            <td class="px-3 sm:px-4 py-3 text-sm">
+                                <a href="/alerts/{{ alert.id }}" target="_blank" rel="noopener"
+                                   class="font-medium text-gray-900 hover:text-blue-600">{{ alert.lead_name or "Comprador" }}</a>
+                                {% if alert.lead_phone %}
+                                <span class="block text-xs text-gray-500 tabular-nums">{{ alert.lead_phone | phone_display }}</span>
+                                {% endif %}
+                            </td>
+
+                            <td class="px-3 sm:px-4 py-3 text-sm text-gray-700">
+                                {% if alert.property %}
+                                <span class="block font-medium">{{ alert.property.title }}</span>
+                                <span class="block text-xs text-gray-500">
+                                    {{ alert.property.city or "Sin población" }}{% if alert.property.zona %} / {{ alert.property.zona }}{% endif %}
+                                </span>
+                                {% else %}
+                                {{ ui.badge("Búsqueda general", "gray") }}
+                                {% endif %}
+                                {% if alert.business_type %}
+                                <span class="block mt-1">{{ ui.status_badge("business", alert.business_type, dot=False) }}</span>
+                                {% endif %}
+                            </td>
+
+                            <td class="px-3 sm:px-4 py-3 whitespace-nowrap">
+                                {% set stage = group.stages.get(alert.id) %}
+                                {% if stage %}
+                                <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ stage.color }}">{{ stage.label }}</span>
+                                {% else %}
+                                <span class="text-xs text-gray-500">Sin iniciar</span>
+                                {% endif %}
+                            </td>
+
+                            <td class="px-3 sm:px-4 py-3 whitespace-nowrap">{{ ui.status_badge("alert", alert.status) }}</td>
+
+                            <td class="px-3 sm:px-4 py-3 text-sm text-gray-700 whitespace-nowrap tabular-nums">
+                                {{ alert.created_at | madrid_dt('%d/%m/%Y') }}
+                            </td>
+
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {# Barra de acción: a quién van los marcados #}
+            <div class="px-4 sm:px-6 py-4 border-t border-gray-200 bg-gray-50">
+                {% if group.targets %}
+                <div class="flex flex-col sm:flex-row sm:items-end gap-3">
+                    <div class="flex-1 sm:max-w-sm">
+                        <label for="handoverTarget{{ cid }}" class="block text-sm font-medium text-gray-700 mb-1">Reasignar los marcados a</label>
+                        <select id="handoverTarget{{ cid }}" name="target_agent_id" class="{{ ui.input_class }} bg-white" aria-describedby="handoverTargetHelp{{ cid }}">
+                            <option value="">Elige un agente…</option>
+                            {% for t in group.targets %}
+                            <option value="{{ t.agent.id }}">{{ t.agent.name }} · {{ t.open_alerts }} {{ "abierto" if t.open_alerts == 1 else "abiertos" }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" name="action" value="reassign" data-handover-submit disabled
+                        class="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 text-white rounded-xl px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/30 disabled:opacity-50 disabled:cursor-not-allowed">
+                        Reasignar marcados
+                    </button>
+                    <button type="button" data-modal-open="handoverDelete{{ cid }}" data-handover-delete disabled
+                        class="w-full sm:w-auto sm:ml-auto inline-flex items-center justify-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-red-700 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600/40 disabled:opacity-50 disabled:cursor-not-allowed">
+                        Eliminar marcados…
+                    </button>
+                </div>
+                <p id="handoverTargetHelp{{ cid }}" class="text-xs text-gray-500 mt-2">
+                    Junto a cada agente, los compradores abiertos que ya tiene en {{ group.company.name }}.
+                </p>
+                {% else %}
+                <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <p class="text-sm text-red-600 flex-1">
+                        No hay ningún otro agente activo en {{ group.company.name }} que pueda recibir sus compradores. Da de alta o reactiva uno antes.
+                    </p>
+                    <button type="button" data-modal-open="handoverDelete{{ cid }}" data-handover-delete disabled
+                        class="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-red-700 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600/40 disabled:opacity-50 disabled:cursor-not-allowed">
+                        Eliminar marcados…
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </form>
+
+    </section>
+
+    {# Confirmación del borrado: el botón envía el formulario de la sección con action=delete #}
+    {% call ui.modal("handoverDelete" ~ cid, "Eliminar los compradores marcados", size="md") %}
+    <div class="p-4 sm:p-6 space-y-2">
+        <p class="text-sm text-gray-700">
+            Se eliminarán las alertas marcadas de {{ group.company.name }} con todos sus seguimientos. No se reasignan a nadie.
+        </p>
+        <p class="text-sm font-medium text-red-700">Esta acción no se puede deshacer.</p>
+    </div>
+    <div class="{{ ui.modal_footer_class }}">
+        <button type="button" data-modal-close
+            class="inline-flex items-center justify-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20">
+            Cancelar
+        </button>
+        <button type="submit" form="handoverForm{{ cid }}" name="action" value="delete"
+            class="inline-flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white rounded-xl px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600/40">
+            Eliminar
+        </button>
+    </div>
+    {% endcall %}
+
+    {% endfor %}
+
+    {% endif %}
+
+</div>
+
+<script>
+(function () {
+    'use strict';
+    // Por sección: "marcar todos", contador y botones activos solo con algo marcado
+    Array.prototype.slice.call(document.querySelectorAll('[data-handover]')).forEach(function (section) {
+        var all = section.querySelector('[data-handover-all]');
+        var items = Array.prototype.slice.call(section.querySelectorAll('[data-handover-item]'));
+        var count = section.querySelector('[data-handover-count]');
+        var submit = section.querySelector('[data-handover-submit]');
+        var remove = section.querySelector('[data-handover-delete]');
+        var target = section.querySelector('select[name="target_agent_id"]');
+
+        function sync() {
+            var checked = items.filter(function (i) { return i.checked; }).length;
+            count.textContent = String(checked);
+            all.checked = checked > 0 && checked === items.length;
+            all.indeterminate = checked > 0 && checked < items.length;
+            if (submit) submit.disabled = !(checked > 0 && target && target.value);
+            if (remove) remove.disabled = checked === 0;
+        }
+
+        all.addEventListener('change', function () {
+            items.forEach(function (i) { i.checked = all.checked; });
+            sync();
+        });
+        items.forEach(function (i) { i.addEventListener('change', sync); });
+        if (target) target.addEventListener('change', sync);
+        sync();
+    });
+})();
+</script>
+
+{% endblock %}
