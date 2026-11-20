@@ -429,7 +429,7 @@ def test_detalle_con_referencia_sin_perfil(env):
 
     # Modal de seguimiento: Contactado con el perfil (obligatorio) y aviso de etapas bloqueadas
     for text in ('id="followUpProfile"', "Perfil del comprador", 'name="profile_notes"',
-                 'id="fuPropertyType" name="property_type" required', "data-places-required",
+                 'id="fuPropertyType" data-profile-types data-types-min data-types-error="fuTypesError" data-types-required', "data-places-required",
                  'id="followUpProfileBlocked"', "Primero registra el perfil con Contactado",
                  '"CERRADO", "OFERTA", "VISITA_PROGRAMADA"', "const PROFILE_BLOCKS_STAGES = true",
                  'id="followUpSubmit"', "/static/js/search-profile.js"):
@@ -451,7 +451,7 @@ def test_propuesta_sin_perfil_estado_vacio(env):
     assert response.context["step"] == "profile"
     assert "Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)" in html
     assert "Al guardar se registra el seguimiento «Contactado»" in html
-    assert 'id="spPropertyType" name="property_type" required' in html
+    assert 'id="spPropertyType" data-profile-types data-types-min data-types-error="spTypesError" data-types-required' in html
     assert 'id="spMaxPrice" name="max_price"' in html and 'data-places-error="spPlacesError"' in html
 
 
@@ -478,7 +478,7 @@ def test_detalle_con_referencia_tras_contactado_con_perfil(env):
     # Modal: perfil precargado y opcional; las etapas ya no se bloquean
     assert "const PROFILE_BLOCKS_STAGES = false" in html
     assert "Su perfil guardado; cámbialo si te ha contado algo nuevo." in html
-    assert 'id="fuPropertyType" name="property_type" required' not in html
+    assert 'id="fuPropertyType" data-profile-types data-types-min data-types-error="fuTypesError" data-types-required' not in html
     assert 'name="max_price" value="150000"' in html
 
     # Tras cambiar a la de Bea: tarjeta nueva, sin enlace a la ficha ajena, con su agente

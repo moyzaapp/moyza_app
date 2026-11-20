@@ -313,7 +313,8 @@ async def select_property(
     properties = (
         db.query(Property)
         .options(joinedload(Property.agent), joinedload(Property.company))
-        .filter(visitable_property_clause(company_ids), Property.available_clause())
+        # También las marcadas "No disponible": siguen en el inventario
+        .filter(visitable_property_clause(company_ids))
         .order_by(Property.title)
         .all()
     )
@@ -394,11 +395,6 @@ async def new_visit(
         set_flash(response, "error", "Propiedad no encontrada")
         return response
 
-    if not property_item.is_available:
-        response = RedirectResponse(url=_property_back_url(property_item, company_ids), status_code=302)
-        set_flash(response, "error", "No se pueden registrar visitas en una propiedad No disponible")
-        return response
-
     # Empresa de la visita: la preseleccionada (la principal o la activa);
     # un agente en varias empresas la puede cambiar en el select "Empresa"
     visit_company = resolve_visit_company(request)
@@ -448,11 +444,6 @@ async def create_visit(
     if not property_item:
         response = RedirectResponse(url="/visits/select-property", status_code=302)
         set_flash(response, "error", "Propiedad no encontrada")
-        return response
-
-    if not property_item.is_available:
-        response = RedirectResponse(url=_property_back_url(property_item, company_ids), status_code=302)
-        set_flash(response, "error", "No se pueden registrar visitas en una propiedad No disponible")
         return response
 
     form = await request.form()

@@ -488,7 +488,7 @@ def test_propuesta_avisa_si_la_propiedad_es_de_otra_operacion(env):
 def _save_buyer_profile(env, user, form):
     from app.web.routes.alerts import save_search_criteria
     fields = {k: form.get(k) for k in ("agent_id", "property_type", "business_type", "min_price", "max_price",
-                                       "min_bedrooms", "max_bedrooms", "min_bathrooms", "elevator", "notes")}
+                                       "min_bedrooms", "max_bedrooms", "min_bathrooms", "elevator", "garage", "notes")}
     request = _request(env, user, f"/buyers/{env.buyer.id}/search-criteria", "POST", form=form)
     return asyncio.run(save_search_criteria(env.buyer.id, request, db=env.db, **fields))
 
@@ -542,7 +542,7 @@ def test_ficha_del_comprador_render_con_minimos(env):
     for text in ("Datos mínimos: tipo, precio máximo, dormitorios máximos, población y zona (si la población tiene zonas)",
                  'id="bcMaxBedrooms" name="max_bedrooms" value="3" placeholder="–" required',
                  'id="geoData-bc"', 'id="bcCountry"', 'id="bcProvince"', "data-places-required",
-                 'id="bcPropertyType" name="property_type" required', "/static/js/search-profile.js",
+                 'id="bcPropertyType" data-profile-types data-types-min data-types-error="bcTypesError" data-types-required', "/static/js/search-profile.js",
                  '<option value="Jaén" selected>Jaén</option>', "Provincia: Jaén",
                  f'action="/alerts/{alert.id}/search-profile"', "Si la cambias, cambia la operación de la alerta"):
         assert text in page, text

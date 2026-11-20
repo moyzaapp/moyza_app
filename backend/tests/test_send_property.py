@@ -228,6 +228,16 @@ def test_envio_desde_la_alerta_redirige_a_whatsapp_y_registra(env):
     assert row.next_action_date is None
 
 
+def test_propiedad_no_disponible_tambien_se_envia(env):
+    """En el inventario pero sin publicar: se puede enviar si tiene enlace (2026-11-19)."""
+    alert = _alert(env)
+    env.props["ana"].estado_inmueble = "No disponible"
+    env.db.commit()
+    response = _send(env, env.users["ana"], alert, "ana")
+    assert response.headers["location"].startswith("https://wa.me/34600111222?text=")
+    assert len(_sent_rows(env, alert)) == 1
+
+
 def test_se_puede_reenviar_y_el_admin_tambien_envia(env):
     alert = _alert(env)
     assert _send(env, env.users["ana"], alert, "ana").status_code == 303
@@ -266,7 +276,7 @@ def test_alerta_cerrada_rechazada(env):
     assert _sent_rows(env) == []
 
 
-@pytest.mark.parametrize("case", ["sin_enlace", "telefono", "no_disponible", "archivada", "no_existe"])
+@pytest.mark.parametrize("case", ["sin_enlace", "telefono", "archivada", "no_existe"])
 def test_errores_sin_whatsapp_ni_seguimiento(env, case):
     phone = "123" if case == "telefono" else None
     alert = _alert(env, phone=phone)
@@ -274,8 +284,6 @@ def test_errores_sin_whatsapp_ni_seguimiento(env, case):
     prop_key = "ana"
     if case == "sin_enlace":
         prop_key = "moes"            # MOES sin plantilla ni enlace manual
-    elif case == "no_disponible":
-        env.props["ana"].estado_inmueble = "No disponible"
     elif case == "archivada":
         env.props["ana"].status = "Archivada"
     elif case == "no_existe":
@@ -291,7 +299,6 @@ def test_errores_sin_whatsapp_ni_seguimiento(env, case):
     expected = {
         "sin_enlace": "no tiene enlace en la web",
         "telefono": "teléfono válido para WhatsApp",
-        "no_disponible": "no está disponible",
         "archivada": "no está disponible",
         "no_existe": "Propiedad no encontrada",
     }[case]

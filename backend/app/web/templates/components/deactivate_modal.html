@@ -8,7 +8,9 @@
 
   Al abrir pide el resumen (JSON de §6.1) a `summaryUrl` y pinta una tarjeta por empresa.
   El formulario hace POST a `actionUrl` con `reason` (opcional) y `reassign_to_<company_id>`
-  por cada empresa con compradores abiertos.
+  por cada empresa con compradores abiertos. Con más de un comprador abierto, la tarjeta
+  enlaza a "Repartir compradores" (`handover_url`, agents/handover.html) para repartirlos
+  entre varios agentes antes de la baja.
 #}
 {% import "components/ui_macros.html" as ui %}
 
@@ -176,6 +178,16 @@
         help.id = fieldId + '_help';
         wrap.appendChild(help);
         card.appendChild(wrap);
+
+        // Varios compradores: se pueden repartir entre varios agentes en su propia pantalla
+        if (open > 1 && company.handover_url) {
+            var split = make('p', 'text-xs text-gray-500');
+            split.appendChild(document.createTextNode('¿Son muchos para un solo agente? '));
+            var link = make('a', 'font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2', 'Repartirlos entre varios agentes');
+            link.href = company.handover_url;
+            split.appendChild(link);
+            card.appendChild(split);
+        }
         return result;
     }
 

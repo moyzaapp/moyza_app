@@ -36,7 +36,12 @@ class BuyerSearchCriteria(Base):
     cities = Column(JSON, nullable=True)  # ["Barcelona", "Hospitalet", ...]
 
     # Tipo de inmueble y operación
-    property_type = Column(String, nullable=True)   # Casa, Piso, Local…
+    # Varios tipos: la lista manda (`property_types`, ["Piso", "Casa"]; vacía =
+    # cualquier tipo). `property_type` se conserva como texto de la lista
+    # ("Piso, Casa") para resúmenes y para los perfiles anteriores a la lista;
+    # leer siempre con `buyer_matching.profile_types`.
+    property_type = Column(String, nullable=True)   # "Piso" / "Piso, Casa"
+    property_types = Column(JSON, nullable=True)    # ["Piso", "Casa", ...]
     business_type = Column(String, nullable=True)   # Venta, Alquiler
 
     # Rango de precio
@@ -51,6 +56,10 @@ class BuyerSearchCriteria(Base):
     # Ascensor (PLAN_PERFIL_ZONAS.md, fase C): NULL = indiferente, True = con
     # ascensor, False = sin ascensor. Se cruza con `Property.num_ascensores`.
     elevator = Column(Boolean, nullable=True)
+
+    # Garaje: NULL = indiferente, True = con garaje. Se cruza con
+    # `Property.num_garaje_aparcam` (>= 1; vacío o 0 cuenta como sin garaje).
+    garage = Column(Boolean, nullable=True)
 
     # Superficie
     min_m2 = Column(Numeric, nullable=True)

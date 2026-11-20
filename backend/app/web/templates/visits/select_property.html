@@ -32,6 +32,10 @@ Seleccionar Propiedad
                 </span>
             {% endif %}
         </div>
+        {# En el inventario pero sin publicar: se puede visitar igual #}
+        {% if not property.is_available %}
+        <p class="mb-3"><span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800"><span class="w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden="true"></span>No disponible</span></p>
+        {% endif %}
 
         {% if show_company_badges or (active_company and property.company_id != active_company.id) %}
         <p class="mb-2">{{ ui.company_badge(property.company) }}</p>

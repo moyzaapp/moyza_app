@@ -462,8 +462,9 @@ def _can_hold_profile(alert: PropertyAlert) -> bool:
 # País, provincia y operación (PLAN_PERFIL_UBICACION.md) se leen del formulario.
 # `elevator` (PLAN_PERFIL_ZONAS.md, fase C): "yes" / "no" / vacío (indiferente);
 # con valor cuenta como dato del perfil (`_profile_values_present`).
+# `garage`: "yes" / vacío (indiferente), mismo trato que el ascensor.
 PROFILE_TEXT_FIELDS = ("property_type", "min_price", "max_price", "min_bedrooms", "max_bedrooms", "min_bathrooms",
-                       "elevator")
+                       "elevator", "garage")
 PROFILE_LOCATION_FIELDS = ("country", "province")
 
 
@@ -479,6 +480,14 @@ def _profile_values(form_data, notes_field: str = "notes", **overrides) -> dict:
     values["notes"] = form_data.get(notes_field)
     values["business_type"] = form_data.get("business_type")
     values.update({k: v for k, v in overrides.items() if k in values})
+    # Tipo de inmueble: casillas `property_types` (varios); si no llegan, el
+    # `property_type` único de antes. `property_type` queda con el texto de la
+    # lista para que cuente como dato del perfil (`_profile_values_present`).
+    values["property_types"] = (
+        buyer_matching.clean_types(form_data.getlist("property_types"))
+        or buyer_matching.clean_types([values["property_type"]])
+    )
+    values["property_type"] = ", ".join(values["property_types"]) or None
     values["zones"] = [z for z in form_data.getlist("zones") if z]
     values["cities"] = [c for c in form_data.getlist("cities") if c]
     # "Todas" las zonas marcada a propósito (PLAN_PERFIL_ZONAS.md): se guarda como
@@ -510,7 +519,7 @@ def _profile_kwargs(alert: PropertyAlert, values: dict, criteria: Optional[Buyer
         province=values.get("province"),
         zones=values["zones"],
         cities=values["cities"],
-        property_type=values["property_type"],
+        property_types=values["property_types"],
         business_type=alert.business_type or (criteria.business_type if criteria is not None else None),
         min_price=values["min_price"],
         max_price=values["max_price"],
@@ -518,6 +527,7 @@ def _profile_kwargs(alert: PropertyAlert, values: dict, criteria: Optional[Buyer
         max_bedrooms=values["max_bedrooms"],
         min_bathrooms=values["min_bathrooms"],
         elevator=values["elevator"],
+        garage=values["garage"],
         notes=values["notes"],
         agent_id=alert.agent_id,
     )
@@ -1209,7 +1219,8 @@ async def search_properties(
 
     query = db.query(Property).options(joinedload(Property.agent), selectinload(Property.company)).filter(
         Property.status != PropertyStatus.ARCHIVED,
-        Property.available_clause(),
+        # Las "No disponible" también se ofrecen (inventario sin publicar): el
+        # resultado lleva `available` para que el buscador lo indique
         or_(
             Property.title.ilike(like),
             Property.address.ilike(like),
@@ -1246,6 +1257,7 @@ async def search_properties(
             # muestra y la alerta irá a esa empresa)
             "company_id": p.company_id,
             "company_name": p.company.name if p.company else "",
+            "available": p.is_available,
         }
         if link_alert is not None:
             item["company"] = _company_json(p.company, link_alert.company_id)
@@ -2069,12 +2081,8 @@ async def create_alert(
                     return response
                 message = append_note(message, search_duplicate_note(existing))
     else:
-        # La propiedad ya está comprobada arriba (empresas del usuario)
-        if not property_item.is_available:
-            db.rollback()
-            response = RedirectResponse(url="/alerts", status_code=302)
-            set_flash(response, "error", "La propiedad está marcada como No disponible")
-            return response
+        # La propiedad ya está comprobada arriba (empresas del usuario). Una
+        # "No disponible" también admite alertas: sigue en el inventario.
 
         # El agente solo puede crear alertas sobre sus propiedades asignadas. El
         # buscador y la ficha del comprador ya no le ofrecen otras; esto es la red
@@ -2209,6 +2217,7 @@ async def save_alert_search_profile(
     max_bedrooms: str = Form(None),
     min_bathrooms: str = Form(None),
     elevator: str = Form(None),
+    garage: str = Form(None),
     notes: str = Form(None),
     db: Session = Depends(get_db)
 ):
@@ -2272,7 +2281,7 @@ async def save_alert_search_profile(
     values = _profile_values(
         form_data, property_type=property_type, min_price=min_price, max_price=max_price,
         min_bedrooms=min_bedrooms, max_bedrooms=max_bedrooms, min_bathrooms=min_bathrooms, elevator=elevator,
-        notes=notes,
+        garage=garage, notes=notes,
     )
 
     # Operación elegida en el perfil (si cambia, cambia la de la alerta). Se lee
@@ -2417,7 +2426,7 @@ async def link_property_to_alert(
 
     label = property_label(property_item, alert.company_id)
 
-    if not property_item.is_available or property_item.status == PropertyStatus.ARCHIVED:
+    if property_item.status == PropertyStatus.ARCHIVED:
         response = RedirectResponse(url=f"{detail_url}?step=proposal", status_code=302)
         set_flash(response, "error", f"{label} no está disponible")
         return response
@@ -2571,7 +2580,7 @@ async def add_interest_properties(
             response = RedirectResponse(url=proposal_url, status_code=302)
             set_flash(response, "error", "Propiedad no encontrada")
             return response
-        if not prop.is_available or prop.status == PropertyStatus.ARCHIVED:
+        if prop.status == PropertyStatus.ARCHIVED:
             response = RedirectResponse(url=proposal_url, status_code=302)
             set_flash(response, "error", f"{property_label(prop, alert.company_id)} no está disponible")
             return response
@@ -2777,7 +2786,7 @@ def _send_property(db: Session, alert: PropertyAlert, property_id: Optional[int]
         return _send_error(back_url, "Propiedad no encontrada")
 
     label = property_label(prop, alert.company_id)
-    if not prop.is_available or prop.status == PropertyStatus.ARCHIVED:
+    if prop.status == PropertyStatus.ARCHIVED:
         return _send_error(back_url, f"{label} no está disponible")
 
     link = property_public_url(prop)
@@ -3949,6 +3958,7 @@ async def save_search_criteria(
     max_bedrooms: str = Form(None),
     min_bathrooms: str = Form(None),
     elevator: str = Form(None),
+    garage: str = Form(None),
     notes: str = Form(None),
     db: Session = Depends(get_db)
 ):
@@ -4010,7 +4020,8 @@ async def save_search_criteria(
         province=form_data.get("province"),
         zones=form_data.getlist("zones"),
         cities=form_data.getlist("cities"),
-        property_type=property_type,
+        property_types=(buyer_matching.clean_types(form_data.getlist("property_types"))
+                        or buyer_matching.clean_types([property_type])),
         business_type=business_type,
         min_price=min_price,
         max_price=max_price,
@@ -4018,6 +4029,7 @@ async def save_search_criteria(
         max_bedrooms=max_bedrooms,
         min_bathrooms=min_bathrooms,
         elevator=elevator,
+        garage=garage,
         notes=notes,
         agent_id=agent_id,
     )
