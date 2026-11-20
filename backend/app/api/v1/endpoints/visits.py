@@ -26,7 +26,6 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
-from app.models.property import Property
 from app.services.visit_audit_service import (
     log_visit_event,
     get_client_ip,
@@ -321,13 +320,6 @@ async def finalize_visit(
 
     visit, user = _visit_for_api(request, db, visit_id)
 
-    property_item = db.query(Property).filter(
-        Property.id == visit.property_id
-    ).first()
-
-    if not property_item:
-        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
-
     # Verificar que está en estado 'signed'
     if visit.visit_status != 'signed':
         raise HTTPException(
@@ -350,12 +342,16 @@ async def finalize_visit(
         if missing:
             raise HTTPException(status_code=400, detail=_missing_signature_detail(missing))
 
+    # La del inventario o la externa (mismos atributos; id None en la externa)
+    property_item = visit.subject
+
     try:
         # Generar PDF con firma
         visits_dir = Path("storage/visit_sheets")
         visits_dir.mkdir(parents=True, exist_ok=True)
 
-        filename = f"ficha_visita_{property_item.id}_{visit.id}_{uuid4().hex[:8]}.pdf"
+        # "externa" en lugar del id de propiedad (como visit_sheet_filename en web/routes/visits.py)
+        filename = f"ficha_visita_{visit.property_id or 'externa'}_{visit.id}_{uuid4().hex[:8]}.pdf"
         output_path = visits_dir / filename
 
         generate_visit_sheet(
@@ -503,10 +499,12 @@ async def finalize_visit(
             "pdf_sent": len(sent_to) > 0,
             "sent_to": sent_to,
             "visit_sheet_url": f"/visits/{visit_id}/download",
-            # Visita cruzada: la ficha de la propiedad puede no ser accesible
+            # Visita cruzada: la ficha de la propiedad puede no ser accesible;
+            # una externa no tiene ficha
             "redirect_url": (
                 f"/properties/{property_item.id}"
-                if property_item.company_id in (resolve_company_ids_for_api(request, user, db) or [])
+                if not visit.is_external
+                and property_item.company_id in (resolve_company_ids_for_api(request, user, db) or [])
                 else "/visits"
             )
         }

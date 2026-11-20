@@ -8,6 +8,11 @@ Registrar visita
 
 {% block content %}
 
+{# `external`: visita a una propiedad que no está en el inventario (`property` None);
+   sus datos se escriben en el bloque visits/_external_property_fields.html.
+   `form_values`: lo escrito por el usuario cuando el servidor rechaza el alta. #}
+{% set v = form_values or {} %}
+
 <div class="flex items-start justify-between gap-4 sm:gap-6 mb-6 sm:mb-8">
 
     <div class="flex-1 min-w-0">
@@ -24,6 +29,11 @@ Registrar visita
             Registrar visita
         </h1>
 
+        {% if external %}
+        <p class="text-sm sm:text-base text-gray-500 mt-1 break-words">
+            A una propiedad externa, que no está en el inventario
+        </p>
+        {% else %}
         <p class="text-sm sm:text-base text-gray-500 mt-1 break-words">
             {{ property.title }}
         </p>
@@ -32,6 +42,7 @@ Registrar visita
         <p class="text-xs sm:text-sm text-gray-500 mt-0.5 break-words">
             {% if street_visible %}{{ (property.address | street) or 'Sin dirección' }}{% if property.city %} · {{ property.city }}{% endif %}{% else %}{{ property.city or 'Sin población' }}{% if property.zona %} · {{ property.zona }}{% endif %}{% endif %}
         </p>
+        {% endif %}
 
     </div>
 
@@ -39,6 +50,13 @@ Registrar visita
 
 <div class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6">
 
+    {% if form_error %}
+    <div class="mb-4 sm:mb-6">
+        {{ ui.banner("No se ha guardado la visita", "red", form_error) }}
+    </div>
+    {% endif %}
+
+    {% if not external %}
     {# Propiedad de otra empresa que la de la visita (PLAN_VISITAS_OTRA_EMPRESA.md, fase B).
        Con el select "Empresa de la visita" el texto sigue a la empresa elegida y el aviso
        se oculta si coincide con la de la propiedad (script al final). #}
@@ -69,9 +87,10 @@ Registrar visita
         </p>
     </div>
     {% endif %}
+    {% endif %}
 
     <form
-        action="/visits/create/{{ property.id }}"
+        action="{{ form_action }}"
         method="POST"
         class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4"
     >
@@ -85,6 +104,14 @@ Registrar visita
         </div>
         {% endif %}
 
+        {% if external %}
+        {% include 'visits/_external_property_fields.html' %}
+
+        <p class="sm:col-span-2 text-xs sm:text-sm font-semibold text-gray-800 mt-1">
+            Visitante
+        </p>
+        {% endif %}
+
         <div>
 
             <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
@@ -94,6 +121,7 @@ Registrar visita
             <input
                 type="text"
                 name="visitor_name"
+                value="{{ v.visitor_name or '' }}"
                 placeholder="Nombre completo"
                 required
                 class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
@@ -110,6 +138,7 @@ Registrar visita
             <input
                 type="text"
                 name="dni"
+                value="{{ v.dni or '' }}"
                 placeholder="DNI del visitante"
                 class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
@@ -118,7 +147,7 @@ Registrar visita
 
         {# Selector de país con "Otro…" (indicativo escrito a mano), el mismo que compradores;
            el servidor compone el número con phone_from_form (PLAN_VISITAS_INDICATIVO_HONORARIOS.md §2.1) #}
-        {{ phone.phone_field("phone_", required=True, id="visitPhone") }}
+        {{ phone.phone_field("phone_", v.phone_country_code, v.phone_number, required=True, id="visitPhone") }}
 
         <div>
 
@@ -129,6 +158,7 @@ Registrar visita
             <input
                 type="email"
                 name="email"
+                value="{{ v.email or '' }}"
                 placeholder="correo@ejemplo.com"
                 class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
@@ -150,8 +180,8 @@ Registrar visita
                     onchange="document.getElementById('purchase_fees').placeholder = this.value === '%' ? 'Ej: 2,5' : 'Ej: 2500'"
                     class="shrink-0 border border-gray-300 bg-white p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base text-gray-700"
                 >
-                    <option value="€" selected>€</option>
-                    <option value="%">%</option>
+                    <option value="€"{% if v.purchase_fees_unit != '%' %} selected{% endif %}>€</option>
+                    <option value="%"{% if v.purchase_fees_unit == '%' %} selected{% endif %}>%</option>
                 </select>
                 <div class="relative flex-1 min-w-0">
                     <input
@@ -161,7 +191,8 @@ Registrar visita
                         inputmode="decimal"
                         pattern="(\d{1,3}(\.\d{3})+|\d+)(,\d{1,2})?\s*%?"
                         title="Decimales con coma (2,5); el punto solo para los miles (2.500). El IVA se añade automáticamente"
-                        placeholder="Ej: 2500"
+                        placeholder="{{ 'Ej: 2,5' if v.purchase_fees_unit == '%' else 'Ej: 2500' }}"
+                        value="{{ v.purchase_fees or '' }}"
                         required
                         aria-describedby="purchase_fees_hint"
                         class="w-full border border-gray-300 p-2 sm:p-3 pr-16 sm:pr-20 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
@@ -187,11 +218,11 @@ Registrar visita
                 name="interest_level"
                 class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
-            <option value="1">1 - Muy bajo</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5 - Muy alto</option>
+            <option value="1"{% if v.interest_level == '1' %} selected{% endif %}>1 - Muy bajo</option>
+            <option value="2"{% if v.interest_level == '2' %} selected{% endif %}>2</option>
+            <option value="3"{% if v.interest_level == '3' %} selected{% endif %}>3</option>
+            <option value="4"{% if v.interest_level == '4' %} selected{% endif %}>4</option>
+            <option value="5"{% if v.interest_level == '5' %} selected{% endif %}>5 - Muy alto</option>
             </select>
 
         </div>
@@ -206,9 +237,9 @@ Registrar visita
                 name="price_feedback"
                 class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
-            <option value="ALTO">Precio alto</option>
-            <option value="ADECUADO">Precio adecuado</option>
-            <option value="BAJO">Precio bajo</option>
+            <option value="ALTO"{% if v.price_feedback == 'ALTO' %} selected{% endif %}>Precio alto</option>
+            <option value="ADECUADO"{% if v.price_feedback == 'ADECUADO' %} selected{% endif %}>Precio adecuado</option>
+            <option value="BAJO"{% if v.price_feedback == 'BAJO' %} selected{% endif %}>Precio bajo</option>
             </select>
 
         </div>
@@ -223,9 +254,9 @@ Registrar visita
                 name="location_feedback"
                 class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
-            <option value="MALA">Ubicación mala</option>
-            <option value="REGULAR">Ubicación regular</option>
-            <option value="BUENA">Ubicación buena</option>
+            <option value="MALA"{% if v.location_feedback == 'MALA' %} selected{% endif %}>Ubicación mala</option>
+            <option value="REGULAR"{% if v.location_feedback == 'REGULAR' %} selected{% endif %}>Ubicación regular</option>
+            <option value="BUENA"{% if v.location_feedback == 'BUENA' %} selected{% endif %}>Ubicación buena</option>
             </select>
 
         </div>
@@ -240,9 +271,9 @@ Registrar visita
                 name="condition_feedback"
                 class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
-            <option value="MALO">Estado malo</option>
-            <option value="REGULAR">Estado regular</option>
-            <option value="BUENO">Estado bueno</option>
+            <option value="MALO"{% if v.condition_feedback == 'MALO' %} selected{% endif %}>Estado malo</option>
+            <option value="REGULAR"{% if v.condition_feedback == 'REGULAR' %} selected{% endif %}>Estado regular</option>
+            <option value="BUENO"{% if v.condition_feedback == 'BUENO' %} selected{% endif %}>Estado bueno</option>
             </select>
 
         </div>
@@ -257,9 +288,9 @@ Registrar visita
                 name="lighting_feedback"
                 class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
-            <option value="MALA">Luminosidad mala</option>
-            <option value="REGULAR">Luminosidad regular</option>
-            <option value="BUENA">Luminosidad buena</option>
+            <option value="MALA"{% if v.lighting_feedback == 'MALA' %} selected{% endif %}>Luminosidad mala</option>
+            <option value="REGULAR"{% if v.lighting_feedback == 'REGULAR' %} selected{% endif %}>Luminosidad regular</option>
+            <option value="BUENA"{% if v.lighting_feedback == 'BUENA' %} selected{% endif %}>Luminosidad buena</option>
             </select>
 
         </div>
@@ -274,8 +305,8 @@ Registrar visita
                 name="elevator_feedback"
                 class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
-            <option value="SI">Tiene ascensor</option>
-            <option value="NO">No tiene ascensor</option>
+            <option value="SI"{% if v.elevator_feedback == 'SI' %} selected{% endif %}>Tiene ascensor</option>
+            <option value="NO"{% if v.elevator_feedback == 'NO' %} selected{% endif %}>No tiene ascensor</option>
             </select>
 
         </div>
@@ -290,8 +321,8 @@ Registrar visita
                 name="garage_feedback"
                 class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
             >
-            <option value="SI">Tiene garaje</option>
-            <option value="NO">No tiene garaje</option>
+            <option value="SI"{% if v.garage_feedback == 'SI' %} selected{% endif %}>Tiene garaje</option>
+            <option value="NO"{% if v.garage_feedback == 'NO' %} selected{% endif %}>No tiene garaje</option>
             </select>
 
         </div>
@@ -311,7 +342,7 @@ Registrar visita
                 aria-describedby="notes_help"
                 class="w-full border border-gray-300 p-2 sm:p-3 rounded-xl resize-y focus:outline-none focus:ring-2 focus:ring-gray-200 text-sm sm:text-base"
                 placeholder="Lo que el equipo debe saber de esta visita"
-            ></textarea>
+            >{{ v.notes or '' }}</textarea>
             <p id="notes_help" class="text-xs text-gray-500 mt-1">Solo las ve el equipo en la app; no salen en la ficha que firma el cliente</p>
         </div>
 

@@ -21,6 +21,8 @@ from reportlab.lib.units import cm
 from xml.sax.saxutils import escape
 
 from app.core.business_calendar import fmt_madrid
+from app.core.constants import BusinessType
+from app.core.numbers import format_es_decimal
 from app.core.phone import phone_display
 from app.services.company_service import branding_for
 
@@ -165,6 +167,63 @@ def marketed_by_name(brand_company, property_item):
     return property_company.name
 
 
+def is_external_subject(property_item) -> bool:
+    """La propiedad de la ficha es externa (`ExternalProperty`, fuera del inventario)."""
+    return bool(getattr(property_item, "is_external", False))
+
+
+def external_property_rows(property_item):
+    """Filas (etiqueta, valor) con los datos de una propiedad externa.
+
+    Solo los que el agente escribió: la ficha no inventa datos de un inmueble
+    que no está en el inventario. Texto sin escapar: quien lo pinta escapa
+    (el PDF con `_safe_text`; una plantilla Jinja2, con su autoescape), para
+    que la vista previa pueda mostrar exactamente lo mismo que el PDF.
+    """
+    # El título ("Piso en Calle Mayor 3, Jaén") ya lleva tipo, dirección y
+    # población, como "Tipo de vivienda" en la ficha de una del inventario
+    rows = [("Tipo de vivienda:", property_item.title)]
+    for label, value in (
+        ("Zona:", property_item.zona),
+        ("Operación:", property_item.business_type),
+    ):
+        if value not in (None, ""):
+            rows.append((label, str(value)))
+
+    business_type = property_item.business_type
+    if business_type == BusinessType.VENTA:
+        price_label = "Precio de venta:"
+    elif business_type == BusinessType.ALQUILER:
+        price_label = "Precio de alquiler:"
+    else:
+        price_label = "Precio:"
+    price = property_item.price
+    rows.append((price_label, f"{format_es_decimal(price)} €" if price else "No especificado"))
+
+    features = []
+    if property_item.num_dormitorios is not None:
+        features.append(f"{property_item.num_dormitorios} dormitorios")
+    if property_item.num_banos_aseos is not None:
+        features.append(f"{property_item.num_banos_aseos} baños")
+    if property_item.m2_construidos:
+        features.append(f"{format_es_decimal(property_item.m2_construidos)} m²")
+    if features:
+        rows.append(("Características:", " · ".join(features)))
+
+    if property_item.source:
+        rows.append(("Origen:", property_item.source))
+    contact = " · ".join(
+        part for part in (
+            (property_item.contact_name or "").strip(),
+            phone_display(property_item.contact_phone) if property_item.contact_phone else "",
+        )
+        if part
+    )
+    if contact:
+        rows.append(("Contacto del inmueble:", contact))
+    return rows
+
+
 def generate_visit_sheet(
     property_item,
     visit,
@@ -186,7 +245,17 @@ def generate_visit_sheet(
     tercera columna con su firma registrada (PLAN_FIRMA_AGENTES_VISITA.md §3.4).
     Sin acompañante, la tabla de firmas es la de siempre (dos columnas).
     `company` es opcional: por defecto la de la visita (`visit_brand_company`).
+
+    Visita a una propiedad externa (`visit.is_external`): `property_item` es
+    `visit.subject` (si llega None se toma de la visita) y la ficha lleva los
+    datos escritos a mano, marcados como "PROPIEDAD EXTERNA" (no es del
+    inventario de la agencia), con su origen y contacto si los hay. Los
+    textos legales y RGPD no cambian.
     """
+
+    if property_item is None:
+        property_item = visit.subject
+    external = is_external_subject(property_item)
 
     company = company or visit_brand_company(visit, property_item)
     brand = branding_for(company)
@@ -286,13 +355,29 @@ def generate_visit_sheet(
 
     elements.append(Spacer(1, 5))
 
-    # Dirección del inmueble
+    # Dirección del inmueble (externa: con la población, escrita a mano)
+    address = property_item.address
+    if external:
+        address = ", ".join(
+            part.strip() for part in (property_item.address, property_item.city)
+            if part and part.strip()
+        )
     elements.append(
         Paragraph(
-            f"<b>DIRECCIÓN DEL INMUEBLE VISITADO:</b> {_safe_text(property_item.address)}",
+            f"<b>DIRECCIÓN DEL INMUEBLE VISITADO:</b> {_safe_text(address)}",
             body_style
         )
     )
+
+    if external:
+        elements.append(Spacer(1, 5))
+        elements.append(
+            Paragraph(
+                f"<b>PROPIEDAD EXTERNA:</b> inmueble que no forma parte del inventario de "
+                f"{_safe_text(brand.name)}. Sus datos se han tomado en la visita.",
+                body_style
+            )
+        )
 
     elements.append(Spacer(1, 15))
 
@@ -342,18 +427,35 @@ def generate_visit_sheet(
 
     elements.append(
         Paragraph(
-            "DATOS DEL INMUEBLE VISITADO",
+            "DATOS DEL INMUEBLE VISITADO (PROPIEDAD EXTERNA)" if external else "DATOS DEL INMUEBLE VISITADO",
             section_style
         )
     )
 
-    property_data = [
-        ["Tipo de vivienda:", _safe_text(property_item.title)],
-        ["Precio de venta:", f"€{property_item.price:,.2f}" if property_item.price else "No especificado"],
-        ["Honorarios en caso de compra:", _safe_text(visit.purchase_fees_display, "Según condiciones establecidas")],
-    ]
+    if external:
+        # Párrafos: los datos escritos a mano pueden ser largos y deben partir línea
+        cell_style = ParagraphStyle(
+            "PropertyCellStyle",
+            parent=body_style,
+            fontSize=10,
+            leading=12,
+            alignment=TA_LEFT,
+        )
+        property_data = [
+            [label, Paragraph(_safe_text(value), cell_style)]
+            for label, value in external_property_rows(property_item)
+        ]
+        property_data.append(
+            ["Honorarios en caso de compra:", _safe_text(visit.purchase_fees_display, "Según condiciones establecidas")]
+        )
+    else:
+        property_data = [
+            ["Tipo de vivienda:", _safe_text(property_item.title)],
+            ["Precio de venta:", f"€{property_item.price:,.2f}" if property_item.price else "No especificado"],
+            ["Honorarios en caso de compra:", _safe_text(visit.purchase_fees_display, "Según condiciones establecidas")],
+        ]
     # Propiedad de otra empresa (PLAN_VISITAS_OTRA_EMPRESA.md §5): debe
-    # coincidir con templates/visits/preview.html
+    # coincidir con templates/visits/preview.html. Una externa no tiene empresa.
     if marketed_by:
         property_data.append(["Comercialización:", f"Inmueble comercializado por {_safe_text(marketed_by)}"])
 
@@ -670,7 +772,9 @@ def generate_visit_sheet(
             ip_masked = f"{ip_parts[0]}.{ip_parts[1]}.xxx.xxx"
             validation_metadata += f"IP de validación: {ip_masked}<br/>"
 
-    validation_metadata += f"ID de documento: {_safe_text(brand.document_id(visit.id, property_item.id))}<br/>"
+    # Externa: sin id de propiedad; "EXT" en su lugar (PREFIJO-VISIT-<visita>-EXT)
+    document_property = "EXT" if external else property_item.id
+    validation_metadata += f"ID de documento: {_safe_text(brand.document_id(visit.id, document_property))}<br/>"
 
     validation_style = ParagraphStyle(
         "ValidationStyle",

@@ -1,0 +1,99 @@
+{# Bloque "Propiedad externa" (alta en properties/visit_form.html y edición en
+   visits/edit_form.html): inmueble que no está en el inventario, escrito a mano.
+   Contexto: `ext` (valores a pintar, ver external_form_values en
+   web/routes/visits.py), `ext_errors` ({campo: mensaje} del servidor),
+   `external_business_choices` y `external_source_choices`.
+   Dirección y población obligatorias y siempre a la vista; el resto, opcional,
+   dentro del desplegable "Más datos de la propiedad". El teléfono del
+   contacto usa el mismo selector de país que el del visitante. #}
+{% import "components/ui_macros.html" as ui %}
+{% import "components/phone_macros.html" as phone %}
+<div class="col-span-full border border-gray-200 rounded-xl p-3 sm:p-4" id="external-property" role="group" aria-labelledby="external-property-title">
+
+    <p id="external-property-title" class="text-xs sm:text-sm font-semibold text-gray-800">
+        Propiedad externa
+    </p>
+    <p class="text-xs text-gray-500 mt-1 mb-3">
+        No está en el inventario. Lo que escribas aquí sale en la ficha de visita.
+    </p>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+
+        <div class="sm:col-span-2">
+            {{ ui.field("external_address", "Dirección", value=ext.external_address, required=True, placeholder="Calle, número, piso", error=ext_errors.get("external_address"), attrs='autocomplete="off" maxlength="255"') }}
+        </div>
+
+        <div class="sm:col-span-2">
+            {{ ui.field("external_city", "Población", value=ext.external_city, required=True, placeholder="Ej: Jaén", error=ext_errors.get("external_city"), attrs='autocomplete="off" maxlength="120"') }}
+        </div>
+
+    </div>
+
+    {# Datos opcionales: plegados para que a primera vista solo se vean los dos
+       obligatorios. Se abren solos si ya hay algo escrito (edición) o si el
+       servidor devolvió un error en alguno. Plegados se envían igual. #}
+    {% set optional_names = ["external_zone", "external_property_type", "external_business_type", "external_price",
+                             "external_m2", "external_bedrooms", "external_bathrooms", "external_contact_name",
+                             "contact_phone_number", "external_source", "external_url"] %}
+    {% set optional_state = namespace(filled=0, error=false) %}
+    {% for name in optional_names %}
+    {% if ext[name] is not none and (ext[name] | string | trim) %}{% set optional_state.filled = optional_state.filled + 1 %}{% endif %}
+    {% endfor %}
+    {% for name in ext_errors %}
+    {% if name not in ("external_address", "external_city") %}{% set optional_state.error = true %}{% endif %}
+    {% endfor %}
+
+    <details class="group mt-3 sm:mt-4 rounded-xl border border-gray-200" id="external-property-more"
+             {% if optional_state.filled or optional_state.error %}open{% endif %}>
+        <summary class="flex items-center justify-between gap-3 min-h-[2.75rem] px-3 sm:px-4 py-2 cursor-pointer select-none rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20 [&::-webkit-details-marker]:hidden list-none">
+            <span>
+                Más datos de la propiedad
+                <span class="font-normal text-gray-500">· opcional{% if optional_state.filled %} · {{ optional_state.filled }} {{ "rellenado" if optional_state.filled == 1 else "rellenados" }}{% endif %}</span>
+            </span>
+            <svg class="w-5 h-5 shrink-0 text-gray-500 transition-transform group-open:rotate-180" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5"/></svg>
+        </summary>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 px-3 sm:px-4 pb-3 sm:pb-4 pt-1">
+
+        <p class="sm:col-span-2 text-xs text-gray-500">Zona, tipo, operación, precio, características, contacto, origen y enlace del anuncio. Lo que rellenes sale en la ficha de visita.</p>
+
+        {{ ui.field("external_zone", "Zona", value=ext.external_zone, placeholder="Barrio o zona", error=ext_errors.get("external_zone"), attrs='autocomplete="off" maxlength="120"') }}
+
+        {{ ui.field("external_property_type", "Tipo de inmueble", value=ext.external_property_type, placeholder="Ej: Piso, Casa, Local", error=ext_errors.get("external_property_type"), attrs='list="externalPropertyTypeOptions" autocomplete="off" maxlength="60"') }}
+        <datalist id="externalPropertyTypeOptions">
+            <option value="Piso"></option>
+            <option value="Casa"></option>
+            <option value="Chalet"></option>
+            <option value="Ático"></option>
+            <option value="Dúplex"></option>
+            <option value="Local"></option>
+            <option value="Nave"></option>
+            <option value="Oficina"></option>
+            <option value="Garaje"></option>
+            <option value="Terreno"></option>
+        </datalist>
+
+        {{ ui.select("external_business_type", "Operación", external_business_choices, value=ext.external_business_type, error=ext_errors.get("external_business_type")) }}
+
+        {{ ui.field("external_price", "Precio (€)", value=ext.external_price, placeholder="Ej: 185.000", help="Decimales con coma; el punto solo para los miles.", error=ext_errors.get("external_price"), attrs='inputmode="decimal" autocomplete="off"') }}
+
+        {{ ui.field("external_m2", "Metros (m²)", value=ext.external_m2, placeholder="Ej: 90", error=ext_errors.get("external_m2"), attrs='inputmode="decimal" autocomplete="off"') }}
+
+        {{ ui.field("external_bedrooms", "Dormitorios", type="number", value=ext.external_bedrooms, placeholder="Ej: 3", error=ext_errors.get("external_bedrooms"), attrs='min="0" max="99" step="1" inputmode="numeric"') }}
+
+        {{ ui.field("external_bathrooms", "Baños", type="number", value=ext.external_bathrooms, placeholder="Ej: 2", error=ext_errors.get("external_bathrooms"), attrs='min="0" max="99" step="1" inputmode="numeric"') }}
+
+        {# Quien enseña el inmueble o es su dueño (particular u otra agencia) #}
+        {{ ui.field("external_contact_name", "Contacto", value=ext.external_contact_name, placeholder="Propietario o agencia", error=ext_errors.get("external_contact_name"), attrs='autocomplete="off" maxlength="120"') }}
+
+        {{ phone.phone_field("external_contact_phone_", ext.contact_phone_country_code, ext.contact_phone_number, label="Teléfono del contacto", id="externalContactPhone", error=ext_errors.get("external_contact_phone_number")) }}
+
+        {{ ui.select("external_source", "Origen", external_source_choices, value=ext.external_source, error=ext_errors.get("external_source")) }}
+
+        {{ ui.field("external_url", "Enlace del anuncio", type="url", value=ext.external_url, placeholder="https://…", help="Debe empezar por http:// o https://", error=ext_errors.get("external_url"), attrs='inputmode="url" autocomplete="off" maxlength="2000"') }}
+
+        </div>
+
+    </details>
+
+</div>

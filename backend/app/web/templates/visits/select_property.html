@@ -90,6 +90,20 @@ Seleccionar Propiedad
 
 </div>
 
+{# Inmueble que no está en el inventario: sus datos se escriben a mano en el alta #}
+<div class="mb-6 bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+    <div class="flex items-start gap-3 flex-1 min-w-0">
+        <div class="w-10 h-10 rounded-lg bg-gray-100 text-gray-600 flex items-center justify-center shrink-0" aria-hidden="true">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z"/></svg>
+        </div>
+        <div class="min-w-0">
+            <h2 class="text-base font-bold text-gray-900">Visita a una propiedad externa</h2>
+            <p class="text-sm text-gray-500 mt-0.5">¿El inmueble no está en el inventario? Escribe sus datos a mano y registra la visita con su ficha y firma.</p>
+        </div>
+    </div>
+    {{ ui.button("Registrar visita externa", "secondary", href="/visits/new-external", full_mobile=True, extra="shrink-0") }}
+</div>
+
 <div class="mb-6">
     <input
         type="search"

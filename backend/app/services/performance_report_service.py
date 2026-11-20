@@ -545,8 +545,9 @@ class PerformanceReportService:
     def _visits_query(self, query, agent_id: int, period_start: datetime, period_end: datetime):
         """Visitas en las que participó el agente (principal o acompañante)
         registradas en la empresa (`PropertyVisit.company_id`), a propiedades
-        de cualquier empresa (PLAN_VISITAS_OTRA_EMPRESA.md §2); el captador
-        que no estuvo no suma."""
+        de cualquier empresa (PLAN_VISITAS_OTRA_EMPRESA.md §2) o externas
+        (`property_id` NULL: sin join con la propiedad, cuentan igual); el
+        captador que no estuvo no suma."""
         return (
             scope_visits(visits_for_agent(query, agent_id), self._require_company())
             .filter(
@@ -811,6 +812,13 @@ class PerformanceReportService:
                     visit.property.company
                     if visit.property is not None and visit.property.company_id != self.company_id
                     else None
+                ),
+                # Propiedad externa (fuera del inventario): cuenta igual; sin
+                # ficha que enlazar, con el título y la población escritos a mano
+                "property_external": visit.is_external,
+                **(
+                    {"property_title": visit.subject.title, "property_city": visit.subject.city}
+                    if visit.is_external else {}
                 ),
             }
 

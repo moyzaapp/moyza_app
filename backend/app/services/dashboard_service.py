@@ -1255,7 +1255,8 @@ class DashboardService:
         return {}
 
     def _visit_event_href(self, visit) -> str:
-        """Ficha de la propiedad si es de la empresa; si no (no se abre), Visitas."""
+        """Ficha de la propiedad si es de la empresa; si no (no se abre, o es
+        una propiedad externa sin ficha), Visitas."""
         if visit.property is not None and visit.property.company_id == self.company_id:
             return f"/properties/{visit.property_id}"
         return "/visits"
@@ -1299,10 +1300,12 @@ class DashboardService:
             else:
                 title = "Visita registrada"
             extra = f" · con {visit.companion_agent.name}" if visit.companion_agent else ""
+            # `subject`: la del inventario o la externa escrita a mano (sin captador)
             events.append({
                 "kind": "visit", "icon": "calendar", "tone": "blue", "cross": cross,
+                "external": visit.is_external,
                 "title": title,
-                "text": f"{prop.title if prop else 'Propiedad'} · visitante: {visit.visitor_name}{extra}",
+                "text": f"{visit.subject.title or 'Propiedad'} · visitante: {visit.visitor_name}{extra}",
                 "when": visit.created_at, "href": self._visit_event_href(visit),
                 **self._visit_event_company(visit),
             })
@@ -1328,8 +1331,9 @@ class DashboardService:
             agent = visit.signing_agent
             events.append({
                 "kind": "signed", "icon": "document", "tone": "green", "cross": False,
+                "external": visit.is_external,
                 "title": "Ficha de visita firmada",
-                "text": f"{visit.property.title if visit.property else 'Propiedad'} · {visit.visitor_name}"
+                "text": f"{visit.subject.title or 'Propiedad'} · {visit.visitor_name}"
                         + (f" · {agent.name}" if agent else ""),
                 "when": visit.signature_captured_at, "href": self._visit_event_href(visit),
                 **self._visit_event_company(visit),

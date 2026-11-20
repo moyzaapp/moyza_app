@@ -27,7 +27,12 @@ Vista Previa del Documento - Visita
     <!-- Fecha y Dirección -->
     <div class="mb-6 text-sm">
         <p class="mb-2"><strong>FECHA:</strong> {{ visit_date }}</p>
-        <p><strong>DIRECCIÓN DEL INMUEBLE VISITADO:</strong> {{ property.address }}</p>
+        {# Externa: «dirección, población», como la ficha PDF #}
+        <p><strong>DIRECCIÓN DEL INMUEBLE VISITADO:</strong> {% if visit.is_external %}{{ property_address }}{% else %}{{ property.address }}{% endif %}</p>
+        {# Propiedad externa: mismo texto que la ficha PDF (visit_sheet_generator) #}
+        {% if visit.is_external %}
+        <p class="mt-2"><strong>PROPIEDAD EXTERNA:</strong> inmueble que no forma parte del inventario de {{ brand.name }}. Sus datos se han tomado en la visita.</p>
+        {% endif %}
     </div>
 
     <hr class="my-6 border-gray-300">
@@ -59,8 +64,17 @@ Vista Previa del Documento - Visita
 
     <!-- DATOS DEL INMUEBLE VISITADO -->
     <div class="mb-6">
-        <h2 class="text-lg font-bold text-gray-800 mb-4">DATOS DEL INMUEBLE VISITADO</h2>
+        <h2 class="text-lg font-bold text-gray-800 mb-4">DATOS DEL INMUEBLE VISITADO{% if external_rows %} (PROPIEDAD EXTERNA){% endif %}</h2>
         <table class="w-full text-sm">
+            {% if external_rows %}
+            {# Filas de external_property_rows: solo lo que el agente escribió #}
+            {% for label, value in external_rows %}
+            <tr class="border-b">
+                <td class="py-2 pr-2 font-semibold w-48 align-top">{{ label }}</td>
+                <td class="py-2 break-words">{{ value }}</td>
+            </tr>
+            {% endfor %}
+            {% else %}
             <tr class="border-b">
                 <td class="py-2 font-semibold w-48">Tipo de vivienda:</td>
                 <td class="py-2">{{ property.title }}</td>
@@ -69,6 +83,7 @@ Vista Previa del Documento - Visita
                 <td class="py-2 font-semibold">Precio de venta:</td>
                 <td class="py-2">€{{ "{:,.2f}".format(property.price) if property.price else 'No especificado' }}</td>
             </tr>
+            {% endif %}
             <tr {% if marketed_by %}class="border-b"{% endif %}>
                 <td class="py-2 font-semibold">Honorarios en caso de compra:</td>
                 <td class="py-2">{{ visit.purchase_fees_display or 'Según condiciones establecidas' }}</td>
