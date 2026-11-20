@@ -186,6 +186,23 @@ class GaragePreference:
         return ((cls.ANY, "Indiferente"), (cls.YES, "Con garaje"))
 
 
+class ExternalPropertySource:
+    """Origen de una propiedad externa visitada (visitas a inmuebles que no
+    están en el inventario; `property_visits.external_source`)."""
+    PRIVATE = "Particular"
+    AGENCY = "Otra agencia"
+    PORTAL = "Portal inmobiliario"
+    OTHER = "Otro"
+
+    @classmethod
+    def values(cls) -> tuple:
+        return (cls.PRIVATE, cls.AGENCY, cls.PORTAL, cls.OTHER)
+
+    @classmethod
+    def is_valid(cls, value) -> bool:
+        return value in cls.values()
+
+
 class PropertyInteractionType:
     INQUIRY = "CONSULTA"
     VISIT = "VISITA"

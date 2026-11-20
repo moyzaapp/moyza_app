@@ -4,6 +4,8 @@ from datetime import datetime
 
 from sqlalchemy import Column
 from sqlalchemy import Integer
+from sqlalchemy import Numeric
+from sqlalchemy import SmallInteger
 from sqlalchemy import String
 from sqlalchemy import Text
 from sqlalchemy import DateTime
@@ -18,6 +20,101 @@ from app.core.numbers import format_es_decimal, parse_es_decimal
 from app.db.base import Base
 
 
+class ExternalProperty:
+    """Vista de solo lectura de la propiedad externa de una visita.
+
+    Imita los atributos de `Property` que usan las plantillas de visitas y
+    `visit_sheet_generator` para que `visit.subject` se pinte igual venga de
+    donde venga. No es un modelo: no se guarda ni se consulta.
+    """
+
+    is_external = True
+    is_available = True
+    id = None
+    agent = None
+    agent_id = None
+    company = None
+    company_id = None
+    client = None
+    referencia = None
+    moneda = "EUR"
+    status = None
+    estado_inmueble = None
+
+    def __init__(self, visit):
+        self._visit = visit
+
+    @builtins.property
+    def address(self):
+        return self._visit.external_address
+
+    @builtins.property
+    def street(self):
+        """La dirección completa: el agente la escribió a mano para esta visita."""
+        return self._visit.external_address or ""
+
+    @builtins.property
+    def city(self):
+        return self._visit.external_city
+
+    @builtins.property
+    def zona(self):
+        return self._visit.external_zone
+
+    @builtins.property
+    def property_type(self):
+        return self._visit.external_property_type
+
+    @builtins.property
+    def business_type(self):
+        return self._visit.external_business_type
+
+    @builtins.property
+    def price(self):
+        return self._visit.external_price
+
+    @builtins.property
+    def num_dormitorios(self):
+        return self._visit.external_bedrooms
+
+    @builtins.property
+    def num_banos_aseos(self):
+        return self._visit.external_bathrooms
+
+    @builtins.property
+    def m2_construidos(self):
+        return self._visit.external_m2
+
+    m2_utiles = None
+
+    @builtins.property
+    def title(self):
+        """Título legible: "Piso en Calle Mayor 3, Jaén" (sin tipo: "Propiedad en …")."""
+        kind = (self._visit.external_property_type or "").strip() or "Propiedad"
+        place = ", ".join(
+            part.strip() for part in (self._visit.external_address, self._visit.external_city)
+            if part and part.strip()
+        )
+        return f"{kind} en {place}" if place else f"{kind} externa"
+
+    # Datos que solo tiene la externa
+    @builtins.property
+    def contact_name(self):
+        return self._visit.external_contact_name
+
+    @builtins.property
+    def contact_phone(self):
+        return self._visit.external_contact_phone
+
+    @builtins.property
+    def source(self):
+        return self._visit.external_source
+
+    @builtins.property
+    def url(self):
+        return self._visit.external_url
+
+
 class PropertyVisit(Base):
 
     __tablename__ = "property_visits"
@@ -28,11 +125,31 @@ class PropertyVisit(Base):
         index=True
     )
 
+    # NULL = visita a una propiedad EXTERNA (no está en el inventario): sus
+    # datos se escriben a mano en las columnas `external_*` de más abajo.
+    # Leer la propiedad siempre con `visit.subject` (ver esa propiedad).
     property_id = Column(
         Integer,
         ForeignKey("properties.id"),
-        nullable=False
+        nullable=True
     )
+
+    # ---- Propiedad externa (solo con property_id NULL) ----
+    # Dirección y población son obligatorias en el alta; el resto, opcional.
+    external_address = Column(String, nullable=True)
+    external_city = Column(String, nullable=True)
+    external_zone = Column(String, nullable=True)
+    external_property_type = Column(String, nullable=True)    # Piso, Casa…
+    external_business_type = Column(String, nullable=True)    # Venta, Alquiler
+    external_price = Column(Numeric, nullable=True)
+    external_bedrooms = Column(SmallInteger, nullable=True)
+    external_bathrooms = Column(SmallInteger, nullable=True)
+    external_m2 = Column(Numeric(10, 2), nullable=True)
+    # Quien enseña o es dueño del inmueble (particular u otra agencia)
+    external_contact_name = Column(String, nullable=True)
+    external_contact_phone = Column(String, nullable=True)    # canónico, como `phone`
+    external_source = Column(String, nullable=True)           # ExternalPropertySource
+    external_url = Column(String, nullable=True)              # enlace del anuncio
 
     # Empresa de la visita: la desde la que se registra (la agencia del
     # agente), no siempre la de la propiedad (PLAN_VISITAS_OTRA_EMPRESA.md):
@@ -236,6 +353,29 @@ class PropertyVisit(Base):
         DateTime,
         default=datetime.utcnow
     )
+
+    # builtins.property porque el atributo 'property' (relación) tapa al decorador
+    @builtins.property
+    def is_external(self) -> bool:
+        """Visita a una propiedad que no está en el inventario."""
+        return self.property_id is None and self.property is None
+
+    @builtins.property
+    def subject(self):
+        """La propiedad visitada, sea del inventario o externa.
+
+        Del inventario: el `Property` de siempre. Externa: un
+        `ExternalProperty` con los mismos nombres de atributo que usan las
+        plantillas y la hoja de visita (title, address, street, city, zona,
+        property_type, business_type, price, moneda, num_dormitorios,
+        num_banos_aseos, m2_construidos…), de modo que quien solo pinta no
+        tiene que distinguir. `id`, `agent`, `agent_id`, `company` y
+        `company_id` son None en la externa: quien necesite el captador o la
+        empresa de la propiedad debe mirar antes `visit.is_external`.
+        """
+        if self.property is not None:
+            return self.property
+        return ExternalProperty(self)
 
     # Relaciones
     property = relationship("Property", back_populates="visits")

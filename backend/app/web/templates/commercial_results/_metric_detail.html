@@ -11,6 +11,8 @@
     (decisión §4, nota).
   - Cierres: registros manuales del admin (fecha sin hora, operación,
     propiedad opcional y nota). PLAN_CIERRES_MANUALES_Y_DIRECCIONES.md §2.1.
+  - Hojas de visita: las de una propiedad externa (fuera del inventario)
+    llevan el distintivo "Propiedad externa" y no enlazan.
   - Contactos: alertas del agente de cualquier empresa
     (PLAN_LISTAS_AGENTES_POR_EMPRESA.md §3-2); las de otra empresa llevan su
     distintivo y no enlazan (no se abren desde la empresa activa).
@@ -50,6 +52,10 @@
   {# La referencia no se repite cuando el título ya es la referencia #}
   {% set meta = [r.property_ref if r.property_ref != r.property_title else none, r.property_city] | select | list %}
   {% if meta %}<span class="block text-xs text-gray-500">{{ meta | join(' · ') }}</span>{% endif %}
+  {% elif r.property_external %}
+  {# Hoja de visita a una propiedad externa (fuera del inventario): sin ficha que abrir #}
+  <span class="font-medium text-gray-900">{{ r.property_title }}</span>
+  <span class="block mt-1">{{ ui.badge('Propiedad externa', 'gray', extra="whitespace-nowrap") }}</span>
   {% else %}
   <span class="text-gray-500">{{ search_label }}</span>
   {% endif %}

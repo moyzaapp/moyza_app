@@ -144,6 +144,11 @@ _RULES = [
     ("GET", r"/visits/select-property", "Visitas", "Empezó una visita (elegir propiedad)"),
     ("GET", r"/visits/new/(\d+)", "Visitas", "Abrió el formulario de visita"),
     ("POST", r"/visits/create/(\d+)", "Visitas", "Registró una visita"),
+    # Visita a una propiedad externa (fuera del inventario): el alta puede
+    # enviarse a la misma ruta del formulario o a /visits/create-external
+    ("GET", r"/visits/new-external", "Visitas", "Abrió el formulario de visita a una propiedad externa"),
+    ("POST", r"/visits/new-external", "Visitas", "Registró una visita a una propiedad externa"),
+    ("POST", r"/visits/create-external", "Visitas", "Registró una visita a una propiedad externa"),
     ("GET", r"/visits/edit/(\d+)", "Visitas", "Abrió una visita para editarla"),
     ("POST", r"/visits/update/(\d+)", "Visitas", "Editó una visita"),
     ("POST", r"/visits/delete", "Visitas", "Eliminó una visita"),

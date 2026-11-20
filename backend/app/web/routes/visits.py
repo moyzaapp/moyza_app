@@ -1,9 +1,11 @@
 import logging
 import re
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from time import perf_counter
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import APIRouter
@@ -29,7 +31,10 @@ from app.core.business_calendar import fmt_madrid
 from app.core.config import settings
 from app.web.utils.flash import set_flash
 from app.web.dependencies.auth import is_admin, get_agent_from_user
-from app.core.numbers import parse_es_decimal
+from app.core.constants import BusinessType
+from app.core.constants import ExternalPropertySource
+from app.core.constants import PhoneCountryCodes
+from app.core.numbers import format_es_decimal, parse_es_decimal
 from app.core.phone import PhoneValidationError, canonical_phone, phone_from_form, split_phone
 from app.services.visit_whatsapp_log_service import log_whatsapp_attempt
 from app.services.notification_service import notify_visit_created
@@ -113,6 +118,228 @@ def visit_phone_from_form(form) -> str | None:
     )
 
 
+class VisitFormError(ValueError):
+    """Dato del visitante no aceptable, con el mensaje listo para el usuario."""
+
+
+def visit_details_from_form(form) -> dict:
+    """Datos del visitante y su feedback del formulario de alta, listos para
+    `PropertyVisit(**datos)`. Comunes a la visita a una propiedad del
+    inventario y a una externa.
+
+    Lanza VisitFormError si falta un obligatorio (nombre, teléfono,
+    honorarios y observaciones) o el teléfono o los honorarios no son válidos.
+    """
+    interest_level = None
+    raw_interest = form.get("interest_level")
+    if raw_interest not in (None, ""):
+        try:
+            interest_level = int(raw_interest)
+        except (TypeError, ValueError):
+            interest_level = None
+
+    try:
+        phone = visit_phone_from_form(form)
+    except PhoneValidationError as error:
+        raise VisitFormError(str(error)) from error
+
+    visitor_name = (form.get("visitor_name") or "").strip()
+    purchase_fees = purchase_fees_from_form(form)
+    notes = (form.get("notes") or "").strip()
+
+    if not visitor_name or not phone or not purchase_fees or not notes:
+        raise VisitFormError("Nombre, teléfono, honorarios y observaciones son obligatorios")
+
+    fees_error = purchase_fees_error(purchase_fees)
+    if fees_error:
+        raise VisitFormError(fees_error)
+
+    return {
+        "visitor_name": visitor_name,
+        "dni": form.get("dni"),
+        "phone": phone,
+        "email": form.get("email"),
+        "purchase_fees": PropertyVisit.normalize_purchase_fees(purchase_fees),
+        "interest_level": interest_level,
+        "price_feedback": form.get("price_feedback"),
+        "location_feedback": form.get("location_feedback"),
+        "condition_feedback": form.get("condition_feedback"),
+        "lighting_feedback": form.get("lighting_feedback"),
+        "elevator_feedback": form.get("elevator_feedback"),
+        "garage_feedback": form.get("garage_feedback"),
+        "notes": notes,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Propiedad externa (no está en el inventario): sus datos se escriben a mano
+# ---------------------------------------------------------------------------
+
+# Prefijo del macro phone_field para el teléfono del contacto de la externa
+EXTERNAL_CONTACT_PHONE_PREFIX = "external_contact_phone_"
+
+# Dormitorios y baños: SmallInteger; un número razonable para una vivienda
+EXTERNAL_MAX_ROOMS = 99
+
+# Metros: Numeric(10, 2)
+EXTERNAL_MAX_M2 = Decimal("99999999.99")
+
+
+def _external_text(form, name):
+    return (form.get(name) or "").strip() or None
+
+
+def _external_decimal(raw, label, maximum=None):
+    """Decimal en formato español (sin "€" ni espacios), o None si va vacío.
+
+    Lanza ValueError con el mensaje para el campo.
+    """
+    text = (raw or "").replace("€", "").replace(" ", "").strip()
+    if not text:
+        return None
+    try:
+        number = parse_es_decimal(text)
+    except ValueError as error:
+        raise ValueError(f"Revisa {label}: {error}") from error
+    if maximum is not None and number > maximum:
+        raise ValueError(f"Revisa {label}: el número es demasiado grande")
+    return number
+
+
+def _external_rooms(raw, label):
+    text = (raw or "").strip()
+    if not text:
+        return None
+    if not text.isdigit() or int(text) > EXTERNAL_MAX_ROOMS:
+        raise ValueError(f"{label} deben ser un número entero entre 0 y {EXTERNAL_MAX_ROOMS}")
+    return int(text)
+
+
+def external_url_error(url: str):
+    """Mensaje de error del enlace del anuncio, o None si vale (o va vacío)."""
+    if not url:
+        return None
+    parts = urlsplit(url)
+    if parts.scheme.lower() not in ("http", "https") or not parts.netloc or any(c.isspace() for c in url):
+        return "El enlace debe ser una dirección web que empiece por http:// o https://"
+    return None
+
+
+def external_property_from_form(form) -> tuple[dict, dict]:
+    """Columnas `external_*` de una visita a partir del formulario.
+
+    Devuelve (valores, errores): `errores` es {nombre del campo: mensaje} y
+    va vacío si todo es válido. Dirección y población son obligatorias; el
+    resto, opcional. El teléfono del contacto se compone como el del
+    visitante (macro phone_field con prefijo `external_contact_phone_`).
+    """
+    errors = {}
+    values = {
+        "external_address": _external_text(form, "external_address"),
+        "external_city": _external_text(form, "external_city"),
+        "external_zone": _external_text(form, "external_zone"),
+        "external_property_type": _external_text(form, "external_property_type"),
+        "external_business_type": _external_text(form, "external_business_type"),
+        "external_contact_name": _external_text(form, "external_contact_name"),
+        "external_source": _external_text(form, "external_source"),
+        "external_url": _external_text(form, "external_url"),
+    }
+
+    if not values["external_address"]:
+        errors["external_address"] = "Escribe la dirección de la propiedad"
+    if not values["external_city"]:
+        errors["external_city"] = "Escribe la población"
+    if values["external_business_type"] and not BusinessType.is_valid(values["external_business_type"]):
+        errors["external_business_type"] = "Elige Venta o Alquiler"
+    if values["external_source"] and not ExternalPropertySource.is_valid(values["external_source"]):
+        errors["external_source"] = "Elige un origen de la lista"
+    url_error = external_url_error(values["external_url"])
+    if url_error:
+        errors["external_url"] = url_error
+
+    for column, field, label, maximum in (
+        ("external_price", "external_price", "el precio", None),
+        ("external_m2", "external_m2", "los metros", EXTERNAL_MAX_M2),
+    ):
+        try:
+            values[column] = _external_decimal(form.get(field), label, maximum)
+        except ValueError as error:
+            values[column] = None
+            errors[field] = str(error)
+
+    for column, field, label in (
+        ("external_bedrooms", "external_bedrooms", "Los dormitorios"),
+        ("external_bathrooms", "external_bathrooms", "Los baños"),
+    ):
+        try:
+            values[column] = _external_rooms(form.get(field), label)
+        except ValueError as error:
+            values[column] = None
+            errors[field] = str(error)
+
+    try:
+        values["external_contact_phone"] = phone_from_form(
+            form.get(EXTERNAL_CONTACT_PHONE_PREFIX + "country_code"),
+            form.get(EXTERNAL_CONTACT_PHONE_PREFIX + "number"),
+            other_code=form.get(EXTERNAL_CONTACT_PHONE_PREFIX + "country_code_other"),
+        )
+    except PhoneValidationError as error:
+        values["external_contact_phone"] = None
+        errors[EXTERNAL_CONTACT_PHONE_PREFIX + "number"] = f"Teléfono del contacto: {error}"
+
+    return values, errors
+
+
+def _form_phone_parts(form, prefix):
+    """(indicativo, número) tal cual se escribieron, para volver a pintar el campo."""
+    code = (form.get(prefix + "country_code") or "").strip()
+    if code == PhoneCountryCodes.OTHER:
+        code = (form.get(prefix + "country_code_other") or "").strip().lstrip("+")
+    return code or None, (form.get(prefix + "number") or "").strip()
+
+
+def external_form_values(form=None, visit=None) -> dict:
+    """Valores para pintar el bloque "Propiedad externa": lo escrito en el
+    formulario (tras un error) o, en la edición, lo guardado en la visita."""
+    names = (
+        "external_address", "external_city", "external_zone", "external_property_type",
+        "external_business_type", "external_price", "external_bedrooms", "external_bathrooms",
+        "external_m2", "external_contact_name", "external_source", "external_url",
+    )
+    if form is not None:
+        values = {name: (form.get(name) or "").strip() for name in names}
+        code, number = _form_phone_parts(form, EXTERNAL_CONTACT_PHONE_PREFIX)
+    elif visit is not None:
+        values = {name: getattr(visit, name) for name in names}
+        for name in ("external_price", "external_m2"):
+            if values[name] is not None:
+                values[name] = format_es_decimal(values[name])
+        for name in ("external_bedrooms", "external_bathrooms"):
+            if values[name] is not None:
+                values[name] = str(values[name])
+        values = {name: value if value is not None else "" for name, value in values.items()}
+        code, number = split_phone(visit.external_contact_phone) if visit.external_contact_phone else (None, "")
+    else:
+        values = {name: "" for name in names}
+        code, number = None, ""
+    values["contact_phone_country_code"] = code
+    values["contact_phone_number"] = number
+    return values
+
+
+def _external_form_options() -> dict:
+    """Opciones de los selects del bloque "Propiedad externa"."""
+    return {
+        "external_business_choices": [(value, value) for value in BusinessType.values()],
+        "external_source_choices": [(value, value) for value in ExternalPropertySource.values()],
+    }
+
+
+def visit_sheet_filename(visit) -> str:
+    """Nombre de archivo de la ficha PDF; "externa" en lugar del id de propiedad."""
+    return f"ficha_visita_{visit.property_id or 'externa'}_{visit.id}_{uuid4().hex[:8]}.pdf"
+
+
 # Select "Empresa" del alta de visita (agente en vista unificada con varias empresas)
 VISIT_COMPANY_FIELD = "visit_company_id"
 
@@ -192,7 +419,8 @@ def _visit_agents_context(request: Request, db: Session, property_item, visit=No
     - `principal_agent`: el que figura como "Realizada por" para un usuario
       agente (él mismo en el alta; el de la visita en la edición).
     - `selected_agent_id` / `selected_companion_agent_id`: valores iniciales
-      de los selects (el admin parte del captador en el alta).
+      de los selects (el admin parte del captador en el alta; en una visita
+      externa, `property_item` None, sin preselección).
     """
     current_user = request.state.user
     current_agent = get_agent_from_user(current_user, db)
@@ -219,13 +447,15 @@ def _visit_agents_context(request: Request, db: Session, property_item, visit=No
     ):
         companion_agents.append({"label": "Dado de baja", "agents": [visit.companion_agent]})
 
+    # Propiedad externa (o None): sin captador del que partir
+    captador_id = getattr(property_item, "agent_id", None)
     if visit is not None:
         principal_agent = visit.agent or current_agent
-        selected_agent_id = visit.agent_id or property_item.agent_id
+        selected_agent_id = visit.agent_id or captador_id
         selected_companion_agent_id = visit.companion_agent_id
     else:
         principal_agent = current_agent
-        selected_agent_id = property_item.agent_id
+        selected_agent_id = captador_id
         selected_companion_agent_id = None
 
     return {
@@ -243,8 +473,11 @@ def _visit_agents_context(request: Request, db: Session, property_item, visit=No
 @router.get("/visits", response_class=HTMLResponse)
 async def visits_page(
     request: Request,
+    filtro: str = "",
     db: Session = Depends(get_db)
 ):
+    """Listado de visitas. `filtro=externas`: solo las visitas a propiedades
+    externas (sin propiedad del inventario); cualquier otro valor, todas."""
     current_user = request.state.user
     current_agent = None
 
@@ -280,7 +513,16 @@ async def visits_page(
             # Si no tiene agente, no mostrar nada
             visits_query = visits_query.filter(PropertyVisit.id == -1)
 
+    # Las externas (property_id NULL) entran por la empresa de la visita o por
+    # su agente: las cláusulas sobre la propiedad son EXISTS y el joinedload
+    # es LEFT OUTER, así que ninguna se pierde por no tener propiedad.
     visits = visits_query.order_by(PropertyVisit.created_at.desc()).all()
+
+    total_count = len(visits)
+    external_count = sum(1 for visit in visits if visit.property_id is None)
+    visit_filter = "externas" if filtro == "externas" else "todas"
+    if visit_filter == "externas":
+        visits = [visit for visit in visits if visit.property_id is None]
 
     return templates.TemplateResponse(
         request=request,
@@ -288,6 +530,11 @@ async def visits_page(
         context={
             "request": request,
             "visits": visits,
+            "visit_filter": visit_filter,
+            "visit_filter_tabs": [
+                ("todas", "Todas", "/visits", total_count),
+                ("externas", "Externas", "/visits?filtro=externas", external_count),
+            ],
             "current_user": current_user,
             "current_agent": current_agent
         }
@@ -380,34 +627,62 @@ async def select_property(
     )
 
 
-@router.get("/visits/new/{property_id}", response_class=HTMLResponse)
-async def new_visit(
-    property_id: int,
-    request: Request,
-    db: Session = Depends(get_db)
-):
-    company_ids = get_company_ids(request)
-    # Propiedad de cualquier empresa (PLAN_VISITAS_OTRA_EMPRESA.md, fase B)
-    property_item = get_visitable_property(db, property_id, company_ids)
+def _int_or_none(value):
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
 
-    if not property_item:
-        response = RedirectResponse(url="/visits/select-property", status_code=302)
-        set_flash(response, "error", "Propiedad no encontrada")
-        return response
+
+# Campos del visitante que se vuelven a pintar tras un error (alta)
+VISIT_FORM_FIELDS = (
+    "visitor_name", "dni", "email", "purchase_fees", "purchase_fees_unit", "interest_level",
+    "price_feedback", "location_feedback", "condition_feedback", "lighting_feedback",
+    "elevator_feedback", "garage_feedback", "notes",
+)
+
+
+def _visit_form_response(
+    request: Request,
+    db: Session,
+    property_item=None,
+    *,
+    form=None,
+    form_error=None,
+    external_errors=None,
+):
+    """Formulario de alta de visita (`properties/visit_form.html`).
+
+    `property_item` None: visita a una propiedad externa, con el bloque
+    "Propiedad externa" y envío a /visits/create-external. Con `form` (tras
+    un error de validación) se vuelve a pintar lo escrito, con `form_error`
+    arriba y `external_errors` junto a cada campo de la externa (400).
+    """
+    company_ids = get_company_ids(request)
+    external = property_item is None
 
     # Empresa de la visita: la preseleccionada (la principal o la activa);
     # un agente en varias empresas la puede cambiar en el select "Empresa"
-    visit_company = resolve_visit_company(request)
+    try:
+        visit_company = resolve_visit_company(request, form)
+    except VisitAgentsError:
+        visit_company = resolve_visit_company(request)
     agents_context = _visit_agents_context(request, db, property_item, company=visit_company)
     current_agent = agents_context["current_agent"]
 
-    # La ficha de la propiedad solo se abre si es de una empresa del usuario;
-    # si no, "Volver" lleva al selector de propiedad
-    property_in_scope = property_item.company_id in company_ids
+    form_values = {}
+    if form is not None:
+        form_values = {name: form.get(name) or "" for name in VISIT_FORM_FIELDS}
+        form_values["phone_country_code"], form_values["phone_number"] = _form_phone_parts(form, "phone_")
+        if agents_context["is_admin"]:
+            agents_context["selected_agent_id"] = _int_or_none(form.get("agent_id"))
+        if form.get("visit_mode") == "acompanado":
+            agents_context["selected_companion_agent_id"] = _int_or_none(form.get("companion_agent_id"))
 
     # Propiedad captada por otro agente: se avisa, pero no se bloquea
     is_foreign_property = (
-        not agents_context["is_admin"]
+        not external
+        and not agents_context["is_admin"]
         and current_agent is not None
         and property_item.agent_id != current_agent.id
     )
@@ -415,19 +690,94 @@ async def new_visit(
     return templates.TemplateResponse(
         request=request,
         name="properties/visit_form.html",
+        status_code=400 if (form_error or external_errors) else 200,
         context={
             "request": request,
             "property": property_item,
+            "external": external,
+            "form_action": "/visits/create-external" if external else f"/visits/create/{property_item.id}",
             "current_user": request.state.user,
             "is_foreign_property": is_foreign_property,
             "visit_company": visit_company,
-            "property_in_scope": property_in_scope,
-            "street_visible": _street_visible(request, property_item),
+            # La ficha de la propiedad solo se abre si es de una empresa del
+            # usuario; si no (o es externa), "Volver" lleva al selector
+            "property_in_scope": not external and property_item.company_id in company_ids,
+            "street_visible": not external and _street_visible(request, property_item),
             "visit_company_choices": [(c.id, c.name) for c in visit_company_options(request)],
             "visit_company_field": VISIT_COMPANY_FIELD,
+            "form_values": form_values,
+            "form_error": form_error,
+            "ext": external_form_values(form) if external else None,
+            "ext_errors": external_errors or {},
+            **_external_form_options(),
             **agents_context
         }
     )
+
+
+def _save_new_visit(request: Request, db: Session, visit, *, generate_sheet: bool, back_url: str, event_data: dict):
+    """Guarda una visita nueva en borrador y sigue el flujo legal.
+
+    Común al alta de una visita del inventario y de una externa: auditoría
+    `draft_created`, avisos in-app (`notify_visit_created`; sin propiedad no
+    hay captador al que avisar) y vista previa. Sin `generate_sheet` (flujo
+    antiguo) se completa sin firma y vuelve a `back_url`.
+    """
+    from app.services.visit_audit_service import log_visit_event
+
+    db.add(visit)
+    db.commit()
+    db.refresh(visit)
+
+    log_visit_event(
+        visit=visit,
+        event_type='draft_created',
+        db=db,
+        request=request,
+        event_data={
+            **event_data,
+            'visitor_name': visit.visitor_name,
+            'generate_sheet': generate_sheet,
+            'agent_id': visit.agent_id,
+            'companion_agent_id': visit.companion_agent_id
+        }
+    )
+
+    # Aviso in-app al captador (si no participó) y al acompañante.
+    # Nunca rompe el alta: los errores quedan en el log.
+    notify_visit_created(db, visit, actor=request.state.user)
+
+    # El PDF no se genera aquí: se genera después de que el cliente revise
+    # el documento, acepte términos y firme (nuevo flujo legal)
+    if generate_sheet:
+        response = RedirectResponse(url=f"/visits/preview/{visit.id}", status_code=302)
+        set_flash(response, "info", "Por favor, revise el documento antes de firmar")
+        return response
+
+    # Si no se solicita generar ficha, comportamiento antiguo (para compatibilidad)
+    visit.visit_status = 'completed'  # Completar directamente sin flujo legal
+    db.commit()
+
+    response = RedirectResponse(url=back_url, status_code=302)
+    set_flash(response, "success", "Visita registrada")
+    return response
+
+
+@router.get("/visits/new/{property_id}", response_class=HTMLResponse)
+async def new_visit(
+    property_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    # Propiedad de cualquier empresa (PLAN_VISITAS_OTRA_EMPRESA.md, fase B)
+    property_item = get_visitable_property(db, property_id, get_company_ids(request))
+
+    if not property_item:
+        response = RedirectResponse(url="/visits/select-property", status_code=302)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
+
+    return _visit_form_response(request, db, property_item)
 
 
 @router.post("/visits/create/{property_id}")
@@ -436,8 +786,6 @@ async def create_visit(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    from app.services.visit_audit_service import log_visit_event
-
     company_ids = get_company_ids(request)
     property_item = get_visitable_property(db, property_id, company_ids)
 
@@ -447,121 +795,126 @@ async def create_visit(
         return response
 
     form = await request.form()
-
-    interest_level_raw = form.get("interest_level")
-    interest_level = None
-    if interest_level_raw not in (None, ""):
-        try:
-            interest_level = int(interest_level_raw)
-        except (TypeError, ValueError):
-            interest_level = None
-
     generate_sheet = form.get("generate_sheet") == "true"
 
     try:
-        phone = visit_phone_from_form(form)
-    except PhoneValidationError as error:
-        response = RedirectResponse(url=f"/visits/new/{property_id}", status_code=302)
-        set_flash(response, "error", str(error))
-        return response
-
-    visitor_name = (form.get("visitor_name") or "").strip()
-    purchase_fees = purchase_fees_from_form(form)
-    notes = (form.get("notes") or "").strip()
-
-    if not visitor_name or not phone or not purchase_fees or not notes:
-        response = RedirectResponse(url=f"/visits/new/{property_id}", status_code=302)
-        set_flash(response, "error", "Nombre, teléfono, honorarios y observaciones son obligatorios")
-        return response
-
-    fees_error = purchase_fees_error(purchase_fees)
-    if fees_error:
-        response = RedirectResponse(url=f"/visits/new/{property_id}", status_code=302)
-        set_flash(response, "error", fees_error)
-        return response
-    purchase_fees = PropertyVisit.normalize_purchase_fees(purchase_fees)
-
-    try:
+        details = visit_details_from_form(form)
         # La visita es de la empresa desde la que se registra; el principal
         # se valida contra ella, no contra la de la propiedad
         visit_company = resolve_visit_company(request, form)
         agent_id, companion_agent_id = parse_visit_agents(
             form, request, db, property_item, company=visit_company
         )
-    except VisitAgentsError as e:
+    except (VisitFormError, VisitAgentsError) as e:
         response = RedirectResponse(url=f"/visits/new/{property_id}", status_code=302)
         set_flash(response, "error", str(e))
         return response
 
+    back_url = _property_back_url(property_item, company_ids)
     try:
         # Crear visita en estado 'draft' para seguir el nuevo flujo legal
         visit = PropertyVisit(
             property_id=property_id,
             company_id=visit_company.id,
-            visitor_name=visitor_name,
-            dni=form.get("dni"),
-            phone=phone,
-            email=form.get("email"),
-            purchase_fees=purchase_fees,
-            interest_level=interest_level,
-            price_feedback=form.get("price_feedback"),
-            location_feedback=form.get("location_feedback"),
-            condition_feedback=form.get("condition_feedback"),
-            lighting_feedback=form.get("lighting_feedback"),
-            elevator_feedback=form.get("elevator_feedback"),
-            garage_feedback=form.get("garage_feedback"),
-            notes=notes,
             created_by=request.state.user.id,
             agent_id=agent_id,
             companion_agent_id=companion_agent_id,
-            visit_status='draft'  # Nuevo flujo: inicia en draft
+            visit_status='draft',
+            **details
         )
-
-        db.add(visit)
-        db.commit()
-        db.refresh(visit)
-
-        # Registrar evento de auditoría
-        log_visit_event(
-            visit=visit,
-            event_type='draft_created',
-            db=db,
-            request=request,
-            event_data={
-                'property_id': property_id,
-                'visitor_name': visit.visitor_name,
-                'generate_sheet': generate_sheet,
-                'agent_id': visit.agent_id,
-                'companion_agent_id': visit.companion_agent_id
-            }
+        return _save_new_visit(
+            request, db, visit,
+            generate_sheet=generate_sheet,
+            back_url=back_url,
+            event_data={'property_id': property_id},
         )
-
-        # Aviso in-app al captador (si no participó) y al acompañante.
-        # Nunca rompe el alta: los errores quedan en el log.
-        notify_visit_created(db, visit, actor=request.state.user)
-
-        # Redirigir al preview en vez de generar PDF inmediatamente
-        if generate_sheet:
-            response = RedirectResponse(url=f"/visits/preview/{visit.id}", status_code=302)
-            set_flash(response, "info", "Por favor, revise el documento antes de firmar")
-            return response
-
-        # El PDF no se genera aquí. Se generará después de que el cliente
-        # revise el documento, acepte términos y firme (nuevo flujo legal)
-
-        # Si no se solicita generar ficha, comportamiento antiguo (para compatibilidad)
-        if not generate_sheet:
-            visit.visit_status = 'completed'  # Completar directamente sin flujo legal
-            db.commit()
-
-            response = RedirectResponse(url=_property_back_url(property_item, company_ids), status_code=302)
-            set_flash(response, "success", "Visita registrada")
-            return response
 
     except Exception:
         db.rollback()
         logger.exception("Error registrando visita: property_id=%s", property_id)
-        response = RedirectResponse(url=_property_back_url(property_item, company_ids), status_code=302)
+        response = RedirectResponse(url=back_url, status_code=302)
+        set_flash(response, "error", "Ocurrió un error al registrar la visita")
+        return response
+
+
+@router.get("/visits/new-external", response_class=HTMLResponse)
+async def new_external_visit(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Alta de una visita a una propiedad externa (no está en el inventario):
+    el mismo formulario con el bloque "Propiedad externa" para escribir sus datos."""
+    return _visit_form_response(request, db)
+
+
+@router.post("/visits/create-external")
+async def create_external_visit(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Registra una visita a una propiedad externa.
+
+    Mismo flujo que una visita del inventario (borrador → vista previa →
+    firma → ficha), sin propiedad: `property_id` NULL y los datos del
+    inmueble en las columnas `external_*`. La empresa de la visita sigue la
+    regla del alta (`resolve_visit_company`) y los agentes, la de
+    `parse_visit_agents`; no hay captador al que avisar. Si algo no es
+    válido se vuelve a pintar el formulario con lo escrito.
+    """
+    form = await request.form()
+    generate_sheet = form.get("generate_sheet") == "true"
+
+    external_values, external_errors = external_property_from_form(form)
+
+    form_error = None
+    try:
+        details = visit_details_from_form(form)
+    except VisitFormError as e:
+        form_error = str(e)
+
+    try:
+        visit_company = resolve_visit_company(request, form)
+        agent_id, companion_agent_id = parse_visit_agents(
+            form, request, db, None, company=visit_company
+        )
+    except VisitAgentsError as e:
+        form_error = form_error or str(e)
+
+    if form_error or external_errors:
+        return _visit_form_response(
+            request, db,
+            form=form,
+            form_error=form_error or "Revisa los datos de la propiedad externa",
+            external_errors=external_errors,
+        )
+
+    try:
+        visit = PropertyVisit(
+            property_id=None,
+            company_id=visit_company.id,
+            created_by=request.state.user.id,
+            agent_id=agent_id,
+            companion_agent_id=companion_agent_id,
+            visit_status='draft',
+            **external_values,
+            **details
+        )
+        return _save_new_visit(
+            request, db, visit,
+            generate_sheet=generate_sheet,
+            back_url="/visits",
+            event_data={
+                'property_id': None,
+                'external': True,
+                'external_address': visit.external_address,
+                'external_city': visit.external_city,
+            },
+        )
+
+    except Exception:
+        db.rollback()
+        logger.exception("Error registrando visita a propiedad externa")
+        response = RedirectResponse(url="/visits/new-external", status_code=302)
         set_flash(response, "error", "Ocurrió un error al registrar la visita")
         return response
 
@@ -610,12 +963,8 @@ async def send_visit_sheet_whatsapp(
         set_flash(response, "error", "Visita no encontrada")
         return response
 
-    property_item = db.query(Property).filter(Property.id == visit.property_id).first()
-
-    if not property_item:
-        response = RedirectResponse(url=redirect_url, status_code=302)
-        set_flash(response, "error", "Propiedad no encontrada")
-        return response
+    # La del inventario o la externa (mismos atributos; id None en la externa)
+    property_item = visit.subject
 
     if not visit.visit_sheet_filepath:
         response = RedirectResponse(url=redirect_url, status_code=302)
@@ -754,14 +1103,8 @@ async def preview_visit(
         set_flash(response, "error", "Visita no encontrada")
         return response
 
-    property_item = db.query(Property).filter(
-        Property.id == visit.property_id
-    ).first()
-
-    if not property_item:
-        response = RedirectResponse(url="/visits", status_code=302)
-        set_flash(response, "error", "Propiedad no encontrada")
-        return response
+    # La del inventario o la externa (mismos atributos; id None en la externa)
+    property_item = visit.subject
 
     # Verificar que la visita está en estado draft o preview
     if visit.visit_status not in ['draft', 'preview']:
@@ -794,6 +1137,18 @@ async def preview_visit(
     brand = branding_for(brand_company)
     marketed_by = marketed_by_name(brand_company, property_item)
 
+    # Propiedad externa: los mismos datos y textos que la ficha PDF
+    # (`external_property_rows` y la dirección con la población)
+    external_rows = None
+    property_address = property_item.address
+    if visit.is_external:
+        from app.services.visit_sheet_generator import external_property_rows
+        external_rows = external_property_rows(property_item)
+        property_address = ", ".join(
+            part.strip() for part in (property_item.address, property_item.city)
+            if part and part.strip()
+        )
+
     # Preparar datos para el template
     # Hora de España, igual que la ficha en PDF (PLAN_CEDER_COMPRADORES.md §4)
     visit_date = fmt_madrid(visit.created_at or datetime.utcnow(), "%d/%m/%Y")
@@ -820,6 +1175,8 @@ async def preview_visit(
             "logo_exists": logo_exists,
             "brand": brand,
             "marketed_by": marketed_by,
+            "external_rows": external_rows,
+            "property_address": property_address,
             "current_user": request.state.user
         }
     )
@@ -882,14 +1239,8 @@ async def complete_visit_page(
         set_flash(response, "error", "Visita no encontrada")
         return response
 
-    property_item = db.query(Property).filter(
-        Property.id == visit.property_id
-    ).first()
-
-    if not property_item:
-        response = RedirectResponse(url="/visits", status_code=302)
-        set_flash(response, "error", "Propiedad no encontrada")
-        return response
+    # La del inventario o la externa (mismos atributos; id None en la externa)
+    property_item = visit.subject
 
     # Verificar que tiene firma
     if not visit.signature_filepath:
@@ -980,7 +1331,7 @@ async def agent_signatures_page(
         context={
             "request": request,
             "visit": visit,
-            "property": visit.property,
+            "property": visit.subject,
             "cards": cards,
             "missing_agents": visit.agents_missing_signature,
             "is_admin": admin,
@@ -1075,6 +1426,10 @@ async def edit_visit(
             "phone_country_code": phone_country_code,
             "phone_local_number": phone_local_number,
             "agents_locked": visit_agents_locked(visit),
+            # Visita externa: bloque "Propiedad externa" con lo guardado
+            "ext": external_form_values(visit=visit) if visit.is_external else None,
+            "ext_errors": {},
+            **_external_form_options(),
             **_visit_agents_context(request, db, visit.property, visit=visit)
         }
     )
@@ -1144,6 +1499,15 @@ async def update_visit(
         set_flash(response, "error", str(e))
         return response
 
+    # Propiedad externa: sus datos se corrigen aquí, con las reglas del alta
+    external_values = {}
+    if visit.is_external:
+        external_values, external_errors = external_property_from_form(form)
+        if external_errors:
+            response = RedirectResponse(url=f"/visits/edit/{visit_id}", status_code=302)
+            set_flash(response, "error", next(iter(external_errors.values())))
+            return response
+
     previous_agents = (visit.agent_id, visit.companion_agent_id)
 
     try:
@@ -1162,6 +1526,8 @@ async def update_visit(
         visit.elevator_feedback = form.get("elevator_feedback") or None
         visit.garage_feedback = form.get("garage_feedback") or None
         visit.notes = notes
+        for column, value in external_values.items():
+            setattr(visit, column, value)
 
         db.commit()
 
@@ -1184,9 +1550,10 @@ async def update_visit(
         # Si tenía PDF, regenerarlo automáticamente con los datos actualizados
         if had_pdf:
             try:
-                property_item = db.query(Property).filter(Property.id == visit.property_id).first()
+                # La del inventario o la externa (con los datos recién corregidos)
+                property_item = visit.subject
 
-                if property_item:
+                if property_item is not None:
                     visits_dir = Path("storage/visit_sheets")
                     visits_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1198,7 +1565,7 @@ async def update_visit(
                             logger.info("PDF anterior eliminado antes de regenerar: %s", visit.visit_sheet_filepath)
 
                     # Generar nuevo PDF con datos actualizados
-                    filename = f"ficha_visita_{property_item.id}_{visit.id}_{uuid4().hex[:8]}.pdf"
+                    filename = visit_sheet_filename(visit)
                     output_path = visits_dir / filename
 
                     generate_visit_sheet(
@@ -1294,12 +1661,8 @@ async def generate_visit_pdf(
         set_flash(response, "error", "Visita no encontrada")
         return response
 
-    property_item = db.query(Property).filter(Property.id == visit.property_id).first()
-
-    if not property_item:
-        response = RedirectResponse(url=redirect_url, status_code=302)
-        set_flash(response, "error", "Propiedad no encontrada")
-        return response
+    # La del inventario o la externa (mismos atributos; id None en la externa)
+    property_item = visit.subject
 
     try:
         visits_dir = Path("storage/visit_sheets")
@@ -1312,7 +1675,7 @@ async def generate_visit_pdf(
                 old_path.unlink()
                 logger.info("PDF anterior eliminado: %s", visit.visit_sheet_filepath)
 
-        filename = f"ficha_visita_{property_item.id}_{visit.id}_{uuid4().hex[:8]}.pdf"
+        filename = visit_sheet_filename(visit)
         output_path = visits_dir / filename
 
         generate_visit_sheet(

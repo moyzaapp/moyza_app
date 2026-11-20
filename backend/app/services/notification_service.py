@@ -201,14 +201,15 @@ def safe_notify(db: Session, **kwargs) -> list:
 
 
 def _visit_place(visit) -> str:
-    prop = visit.property
+    # `subject`: la propiedad del inventario o la externa escrita a mano
+    prop = visit.subject
     title = prop.title if prop is not None and prop.title else "Propiedad"
     return f"{title} · visitante: {visit.visitor_name}" if visit.visitor_name else title
 
 
 def _visit_company_id(visit) -> int:
     """Empresa de la visita (PLAN_VISITAS_OTRA_EMPRESA.md); la de la propiedad si falta."""
-    if getattr(visit, "company_id", None) is not None:
+    if getattr(visit, "company_id", None) is not None or visit.property is None:
         return visit.company_id
     return visit.property.company_id
 
@@ -217,10 +218,11 @@ def _visit_url(visit) -> str:
     """Ficha de la propiedad si es de la empresa de la visita; si no, Visitas.
 
     Una visita cruzada (propiedad de otra empresa) se avisa en la empresa de
-    la visita, donde la ficha de la propiedad puede no abrirse.
+    la visita, donde la ficha de la propiedad puede no abrirse. Una visita a
+    una propiedad externa no tiene ficha de propiedad: Visitas.
     """
     prop = visit.property
-    if prop.company_id == _visit_company_id(visit):
+    if prop is not None and prop.company_id == _visit_company_id(visit):
         return f"/properties/{prop.id}"
     return "/visits"
 
@@ -232,22 +234,21 @@ def notify_visit_created(db: Session, visit, actor=None) -> list:
     Va a la empresa de la propiedad (la del captador), con la ficha de su
     propiedad, también si la visita la registró otra empresa.
     `visit_as_companion`: hay acompañante; va a la empresa de la visita.
+    Una visita a una propiedad externa no tiene captador: solo el aviso al
+    acompañante.
     """
     try:
         prop = visit.property
-        if prop is None:
-            return []
-        company_id = prop.company_id
         visitor_agent = visit.signing_agent
         visitor_name = visitor_agent.name if visitor_agent is not None else "Otro agente"
         created = []
 
-        owner = prop.agent
+        owner = prop.agent if prop is not None else None
         if owner is not None and owner.id not in visit.participating_agent_ids:
             created += notify(
                 db,
                 users=users_for_agent(db, owner),
-                company_id=company_id,
+                company_id=prop.company_id,
                 kind=NotificationKind.VISIT_ON_MY_PROPERTY,
                 title=f"{visitor_name} visitó tu inmueble",
                 body=_visit_place(visit),
@@ -278,11 +279,11 @@ def notify_visit_created(db: Session, visit, actor=None) -> list:
 
 
 def notify_visit_completed(db: Session, visit, actor=None, sent: bool = True) -> list:
-    """Ficha firmada (y enviada si `sent`): al agente principal y al acompañante, en la empresa de la visita."""
+    """Ficha firmada (y enviada si `sent`): al agente principal y al acompañante, en la empresa de la visita.
+
+    También en una visita a una propiedad externa (sin propiedad del inventario).
+    """
     try:
-        prop = visit.property
-        if prop is None:
-            return []
         users = users_for_agent(db, visit.signing_agent) + users_for_agent(db, visit.companion_agent)
         created = notify(
             db,
@@ -304,11 +305,11 @@ def notify_visit_completed(db: Session, visit, actor=None, sent: bool = True) ->
 
 
 def notify_visit_sheet_failed(db: Session, visit, actor=None) -> list:
-    """WhatsApp de la ficha en ERROR: al agente principal (el admin lo ve en "Requiere atención")."""
+    """WhatsApp de la ficha en ERROR: al agente principal (el admin lo ve en "Requiere atención").
+
+    También en una visita a una propiedad externa (sin propiedad del inventario).
+    """
     try:
-        prop = visit.property
-        if prop is None:
-            return []
         created = notify(
             db,
             users=users_for_agent(db, visit.signing_agent),

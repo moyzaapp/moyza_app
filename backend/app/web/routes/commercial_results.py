@@ -383,6 +383,9 @@ def _csv_day(value) -> str:
 
 
 def _csv_property(row, empty: str = "Búsqueda general") -> str:
+    if row.get("property_external"):
+        # Visita a una propiedad externa (fuera del inventario): sin referencia
+        return f"{row['property_title']} (propiedad externa)"
     if row["property_id"] is None:
         return empty
     return " · ".join(p for p in (row["property_ref"], row["property_title"]) if p)

@@ -1,3 +1,4 @@
+{% import "components/ui_macros.html" as ui %}
 <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
 
     <table class="w-full">
@@ -33,6 +34,10 @@
                         >
                             {{ log.property.title }}
                         </a>
+                        {% elif log.visit and log.visit.is_external %}
+                        {# Visita a una propiedad externa (fuera del inventario): sin ficha que enlazar #}
+                        <span class="font-medium text-gray-900">{{ log.visit.subject.title }}</span>
+                        <span class="block mt-1">{{ ui.badge("Propiedad externa", "gray") }}</span>
                         {% else %}
                         <span class="font-medium text-gray-900">Visita #{{ log.visit_id }}</span>
                         {% endif %}

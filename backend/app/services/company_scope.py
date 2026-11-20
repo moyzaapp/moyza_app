@@ -125,6 +125,8 @@ def visible_visit_clause(company_id: CompanyIds):
 
     Las segundas (registradas por otra empresa a una propiedad suya) se ven
     en solo lectura (PLAN_VISITAS_OTRA_EMPRESA.md §5, decisión 2).
+    Una visita a una propiedad externa (`property_id` NULL) entra solo por la
+    primera: el EXISTS de `has()` es falso (nunca NULL) sin propiedad.
     """
     return or_(
         company_match(PropertyVisit.company_id, company_id),

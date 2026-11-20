@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% import "components/ui_macros.html" as ui %}
 
 {% block title %}
 Visitas
@@ -30,6 +31,11 @@ Visitas
         Registrar visita
     </a>
 
+</div>
+
+{# Filtro: todas o solo las visitas a propiedades externas (`?filtro=externas`) #}
+<div class="mb-4">
+    {{ ui.tabs(visit_filter_tabs, visit_filter, label="Filtrar visitas") }}
 </div>
 
 {% include 'visits/table.html' %}
