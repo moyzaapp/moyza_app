@@ -301,10 +301,11 @@ def test_pestana_otra_empresa_lista_solo_inventario_disponible(moyza, moes, db, 
     assert status == 200 and f"{tag} PROP" not in body
 
     # El detalle sigue fuera de alcance desde MOYZA; el alta de visita no
-    # (PLAN_VISITAS_OTRA_EMPRESA.md), salvo la propiedad no disponible
+    # (PLAN_VISITAS_OTRA_EMPRESA.md), tampoco el de la propiedad No disponible
+    # (2026-11-19: sigue en el inventario aunque no esté publicada)
     assert moyza.get(f"/properties/{prop.id}")[0] == 302
     assert moyza.get(f"/visits/new/{prop.id}")[0] == 200
-    assert moyza.get(f"/visits/new/{no_disponible.id}")[0] == 302
+    assert moyza.get(f"/visits/new/{no_disponible.id}")[0] == 200
 
     # Desde MOES la pestaña muestra MOYZA, no su propio inventario
     status, body, _ = moes.get("/properties?tab=other_company")

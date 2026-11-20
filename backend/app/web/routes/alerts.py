@@ -1219,7 +1219,8 @@ async def search_properties(
 
     query = db.query(Property).options(joinedload(Property.agent), selectinload(Property.company)).filter(
         Property.status != PropertyStatus.ARCHIVED,
-        Property.available_clause(),
+        # Las "No disponible" también se ofrecen (inventario sin publicar): el
+        # resultado lleva `available` para que el buscador lo indique
         or_(
             Property.title.ilike(like),
             Property.address.ilike(like),
@@ -1256,6 +1257,7 @@ async def search_properties(
             # muestra y la alerta irá a esa empresa)
             "company_id": p.company_id,
             "company_name": p.company.name if p.company else "",
+            "available": p.is_available,
         }
         if link_alert is not None:
             item["company"] = _company_json(p.company, link_alert.company_id)
@@ -2079,12 +2081,8 @@ async def create_alert(
                     return response
                 message = append_note(message, search_duplicate_note(existing))
     else:
-        # La propiedad ya está comprobada arriba (empresas del usuario)
-        if not property_item.is_available:
-            db.rollback()
-            response = RedirectResponse(url="/alerts", status_code=302)
-            set_flash(response, "error", "La propiedad está marcada como No disponible")
-            return response
+        # La propiedad ya está comprobada arriba (empresas del usuario). Una
+        # "No disponible" también admite alertas: sigue en el inventario.
 
         # El agente solo puede crear alertas sobre sus propiedades asignadas. El
         # buscador y la ficha del comprador ya no le ofrecen otras; esto es la red
@@ -2428,7 +2426,7 @@ async def link_property_to_alert(
 
     label = property_label(property_item, alert.company_id)
 
-    if not property_item.is_available or property_item.status == PropertyStatus.ARCHIVED:
+    if property_item.status == PropertyStatus.ARCHIVED:
         response = RedirectResponse(url=f"{detail_url}?step=proposal", status_code=302)
         set_flash(response, "error", f"{label} no está disponible")
         return response
@@ -2582,7 +2580,7 @@ async def add_interest_properties(
             response = RedirectResponse(url=proposal_url, status_code=302)
             set_flash(response, "error", "Propiedad no encontrada")
             return response
-        if not prop.is_available or prop.status == PropertyStatus.ARCHIVED:
+        if prop.status == PropertyStatus.ARCHIVED:
             response = RedirectResponse(url=proposal_url, status_code=302)
             set_flash(response, "error", f"{property_label(prop, alert.company_id)} no está disponible")
             return response
@@ -2788,7 +2786,7 @@ def _send_property(db: Session, alert: PropertyAlert, property_id: Optional[int]
         return _send_error(back_url, "Propiedad no encontrada")
 
     label = property_label(prop, alert.company_id)
-    if not prop.is_available or prop.status == PropertyStatus.ARCHIVED:
+    if prop.status == PropertyStatus.ARCHIVED:
         return _send_error(back_url, f"{label} no está disponible")
 
     link = property_public_url(prop)

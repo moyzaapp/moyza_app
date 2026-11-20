@@ -1331,7 +1331,7 @@ function setBuyerMode(mode) {
         activeIndex = -1;
         if (!results.length) { showMessage('Sin coincidencias'); return; }
         list.innerHTML = results.map(function (p, i) {
-            const meta = [p.address, p.city, SHOW_COMPANY ? p.company_name : ''].filter(Boolean).join(' · ');
+            const meta = [p.address, p.city, SHOW_COMPANY ? p.company_name : '', p.available === false ? 'No disponible' : ''].filter(Boolean).join(' · ');
             return '<li data-index="' + i + '" class="property-option px-4 py-2 cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0">'
                 + '<p class="text-sm font-medium text-gray-800">' + escapeHtml(p.title) + '</p>'
                 + (meta ? '<p class="text-xs text-gray-500">' + escapeHtml(meta) + '</p>' : '')
@@ -1354,7 +1354,7 @@ function setBuyerMode(mode) {
         input.value = '';
         input.classList.add('hidden');
         selectedTitle.textContent = property.title;
-        selectedMeta.textContent = [property.address, property.city, SHOW_COMPANY ? property.company_name : ''].filter(Boolean).join(' · ');
+        selectedMeta.textContent = [property.address, property.city, SHOW_COMPANY ? property.company_name : '', property.available === false ? 'No disponible' : ''].filter(Boolean).join(' · ');
         selected.classList.remove('hidden');
         hideResults();
         if (assign) assign.setOwner(property.agent_id, property.agent);

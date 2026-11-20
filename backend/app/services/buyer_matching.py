@@ -290,14 +290,14 @@ def province_clause(province: str):
 def _matching_filters(query, criteria: BuyerSearchCriteria, company_id: Optional[int] = None):
     """Filtros del perfil sobre una consulta de `Property` (sin opciones de carga ni orden).
 
-    Propiedades activas y disponibles, de cualquier agente (decisión cerrada
-    3), con captador (las que no lo tienen quedan fuera, como siempre en la
+    Propiedades activas, de cualquier agente (decisión cerrada 3), también
+    las marcadas "No disponible" (2026-11-19: están en el inventario aunque no
+    publicadas; la tarjeta lo indica con un distintivo), con captador (las que no lo tienen quedan fuera, como siempre en la
     ficha del comprador). De las dos empresas salvo que se pida `company_id`
     (PLAN_SUGERENCIAS_MULTIEMPRESA.md).
     """
     query = query.filter(
         Property.status == PropertyStatus.ACTIVE,
-        Property.available_clause(),
         Property.agent_id.isnot(None),
     )
     if company_id is not None:
@@ -341,7 +341,7 @@ def _matching_filters(query, criteria: BuyerSearchCriteria, company_id: Optional
 
 
 def matching_properties_query(db: Session, criteria: BuyerSearchCriteria, company_id: Optional[int] = None):
-    """Consulta de propiedades activas y disponibles que cumplen el perfil.
+    """Consulta de propiedades activas (también las "No disponible") que cumplen el perfil.
 
     PLAN_SUGERENCIAS_MULTIEMPRESA.md: de las DOS empresas (las sugerencias son
     la única excepción al aislamiento); con `company_id`, solo las de esa

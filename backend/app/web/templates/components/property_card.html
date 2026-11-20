@@ -51,10 +51,13 @@
             {% if prop.business_type %}<span class="shrink-0">{{ ui.status_badge("business", prop.business_type, dot=False) }}</span>{% endif %}
         </div>
 
-        {% if current or active_company_id is not none %}
+        {# "No disponible": en el inventario pero sin publicar; se sugiere igual y se avisa #}
+        {% set unavailable = prop.is_available is defined and not prop.is_available %}
+        {% if current or active_company_id is not none or unavailable %}
         <p class="flex flex-wrap items-center gap-2">
             {% if active_company_id is not none %}{{ ui.company_badge(prop.company) }}{% endif %}
             {% if current %}{{ ui.badge("En su lista", "blue", dot=True) }}{% endif %}
+            {% if unavailable %}{{ ui.badge("No disponible", "amber", dot=True) }}{% endif %}
         </p>
         {% endif %}
 

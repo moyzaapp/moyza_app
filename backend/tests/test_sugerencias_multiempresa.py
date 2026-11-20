@@ -93,10 +93,8 @@ def _buyer_html(env, user, tab):
 # Servicio: sugerencias, desglose y cascada
 # ---------------------------------------------------------------------------
 
-def test_sugerencias_de_las_dos_empresas_sin_archivadas_ni_no_disponibles(env):
+def test_sugerencias_de_las_dos_empresas_sin_archivadas_y_con_no_disponibles(env):
     _prop(env, "MOES Archivada", env.moes, status="Archivada")
-    _prop(env, "MOES No disponible", env.moes, estado="No disponible")
-    _prop(env, "MOYZA No disponible", env.moyza, estado="No disponible")
     _prop(env, "MOES Reservada", env.moes, status="Reservada")       # no activa: tampoco se sugiere
 
     titles = [p.title for p in buyer_matching.matching_properties(env.db, _criteria())]
@@ -105,6 +103,14 @@ def test_sugerencias_de_las_dos_empresas_sin_archivadas_ni_no_disponibles(env):
     # Con empresa: solo esa (filtro "Solo {empresa activa}")
     assert [p.title for p in buyer_matching.matching_properties(env.db, _criteria(), env.moyza.id)] == [
         "Piso Centro", "Piso Bea"]
+
+    # Las "No disponible" (inventario sin publicar) también se sugieren (2026-11-19)
+    _prop(env, "MOES No disponible", env.moes, estado="No disponible")
+    _prop(env, "MOYZA No disponible", env.moyza, estado="No disponible")
+    titles = {p.title for p in buyer_matching.matching_properties(env.db, _criteria())}
+    assert titles == {"Piso Centro", "Piso MOES", "Piso Bea", "MOES No disponible", "MOYZA No disponible"}
+    moyza_only = {p.title for p in buyer_matching.matching_properties(env.db, _criteria(), env.moyza.id)}
+    assert moyza_only == {"Piso Centro", "Piso Bea", "MOYZA No disponible"}
 
 
 def test_empresa_y_agente_cargados_sin_n_mas_1(env):
@@ -181,16 +187,25 @@ def test_asociar_propiedad_de_la_otra_empresa(env):
     assert "Cambio de propiedad: de Piso MOES (MOES PREMIUM) a Piso Centro" in notes
 
 
-def test_asociar_archivada_o_no_disponible_de_la_otra_empresa_rechazada(env):
+def test_asociar_archivada_de_la_otra_empresa_rechazada_y_no_disponible_aceptada(env):
     alert = _search_alert(env, "ana")
     _complete_profile(env)
-    for key, prop in (("archivada", _prop(env, "MOES Archivada", env.moes, status="Archivada")),
-                      ("no_disp", _prop(env, "MOES Fuera", env.moes, estado="No disponible"))):
-        env.props[key] = prop
-        response = _link(env, env.users["ana"], alert, key)
-        assert response.headers["location"] == f"/alerts/{alert.id}?step=proposal"
-        assert _flash(response) == {"category": "error", "message": f"{prop.title} (MOES PREMIUM) no está disponible"}
+    prop = _prop(env, "MOES Archivada", env.moes, status="Archivada")
+    env.props["archivada"] = prop
+    response = _link(env, env.users["ana"], alert, "archivada")
+    assert response.headers["location"] == f"/alerts/{alert.id}?step=proposal"
+    assert _flash(response) == {"category": "error", "message": f"{prop.title} (MOES PREMIUM) no está disponible"}
     assert _reload(env, alert).property_id is None
+
+    # "No disponible": en el inventario sin publicar, se puede asociar (2026-11-19)
+    env.props["no_disp"] = _prop(env, "MOES Fuera", env.moes, estado="No disponible")
+    response = _link(env, env.users["ana"], alert, "no_disp")
+    assert _flash(response)["category"] == "success"
+    assert _reload(env, alert).property_id == env.props["no_disp"].id
+    # Se deja la alerta como estaba para el caso de la inexistente
+    stored = _reload(env, alert)
+    stored.property_id = None
+    env.db.commit()
 
     # Inexistente
     env.props["nada"] = type("P", (), {"id": 999999})()

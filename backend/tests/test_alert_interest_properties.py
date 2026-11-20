@@ -109,27 +109,30 @@ def test_alerta_con_referencia_anade_a_su_propiedad(env):
     assert _titles(stored) == ["Piso Centro", "Piso Bea"]
 
 
-def test_no_disponible_o_archivada_no_anade_ninguna(env):
+def test_no_disponible_se_anade_y_archivada_no_anade_ninguna(env):
     alert = _search_alert(env, "ana")
     _complete_profile(env)
-    env.props["moes"].estado_inmueble = "No disponible"
+    # Archivada: no se añade ninguna de las marcadas
+    env.props["moes"].status = "Archivada"
     env.db.commit()
-
     response = _add(env, env.users["ana"], alert, "bea", "moes")
     assert _flash(response) == {"category": "error", "message": "Piso MOES (MOES PREMIUM) no está disponible"}
     assert _titles(_reload(env, alert)) == []
 
-    env.props["moes"].estado_inmueble = None
-    env.props["moes"].status = "Archivada"
+    # "No disponible" (en el inventario, sin publicar) sí se puede añadir
+    env.props["moes"].status = "Activa"
+    env.props["moes"].estado_inmueble = "No disponible"
     env.db.commit()
     response = _add(env, env.users["ana"], alert, "moes")
-    assert _flash(response)["category"] == "error"
+    assert _flash(response)["category"] == "success"
+    assert _titles(_reload(env, alert)) == ["Piso MOES"]
 
     response = _add(env, env.users["ana"], alert, ids=[])
     assert _flash(response) == {"category": "error", "message": "Marca al menos una propiedad"}
     response = _add(env, env.users["ana"], alert, ids=["99999"])
     assert _flash(response) == {"category": "error", "message": "Propiedad no encontrada"}
-    assert _notes(env, _reload(env, alert)) == []
+    # Solo queda la nota de la propiedad No disponible añadida
+    assert _notes(env, _reload(env, alert)) == ["Propiedad de interés: Piso MOES (MOES PREMIUM)"]
 
 
 def test_exige_perfil_y_ser_el_agente_de_la_alerta(env):

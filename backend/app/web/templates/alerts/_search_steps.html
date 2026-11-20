@@ -394,7 +394,7 @@
                     t.className = 'text-sm font-medium text-gray-900';
                     t.textContent = p.title;
                     li.appendChild(t);
-                    var m = [p.address, p.city].filter(Boolean).join(' · ');
+                    var m = [p.address, p.city, p.available === false ? 'No disponible' : ''].filter(Boolean).join(' · ');
                     if (m) {
                         var pm = document.createElement('p');
                         pm.className = 'text-xs text-gray-500';
@@ -432,7 +432,7 @@
             function choose(p) {
                 hidden.value = p.id;
                 title.textContent = p.title;
-                meta.textContent = [p.address, p.city, p.agent ? 'Agente: ' + p.agent : ''].filter(Boolean).join(' · ');
+                meta.textContent = [p.address, p.city, p.agent ? 'Agente: ' + p.agent : '', p.available === false ? 'No disponible' : ''].filter(Boolean).join(' · ');
                 companySlot.textContent = '';
                 if (p.company && p.company.name) companySlot.appendChild(companyBadge(p.company));
                 form.classList.remove('hidden');
