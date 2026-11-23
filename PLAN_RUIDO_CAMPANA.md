@@ -98,6 +98,11 @@ Despliegue: `alembic upgrade head` + reinicio. Sin cambios de modelo ni de plant
       `test_check_automatic_reports_con_propiedad_activa`, es el conocido y ajeno); Inicio del
       agente renderiza con la ventana filtrada; linter sin avisos. Sin commitear.
 
+> **2026-11-23 · ver `PLAN_SIN_ACTIVIDAD_AGENTES.md`:** la variante «Sin actividad» de R1 se retira
+> para los agentes (campana, email, badge, banner y reloj del detalle); el admin la sigue viendo en el
+> listado y el detalle de la alerta. Los avisos pendientes se marcan leídos con la migración
+> `q3x4y5z6a7b8`. Del Inicio del agente sale además la línea «Sin respuesta desde hace más de 3 días».
+
 ## 5. Fuera de alcance
 
 - Resumen diario agrupado en la campana (se descartó al mantener avisos individuales).

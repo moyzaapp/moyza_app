@@ -606,6 +606,24 @@ docker restart moyza_backend
 - La ventana de inicio del agente solo muestra "sin gestionar" (nunca gestionado) y
   "volver a llamar"; sin cambios en el email ni en la ventana del admin.
 
+### Fuera «Sin actividad» para los agentes (PLAN_SIN_ACTIVIDAD_AGENTES.md, 2026-11-23)
+
+```bash
+docker exec moyza_backend alembic upgrade head      # q3x4y5z6a7b8: marca leídas las «Comprador sin actividad» (buyer_no_action)
+docker restart moyza_backend
+# Una vez: marca leídos también los avisos de alertas paradas anteriores al 10/11, que se
+# titulaban «Comprador sin gestión» y la migración no reconoce (si no, caen en el job de las 08:00)
+docker exec moyza_backend python -c "from app.db.session import SessionLocal; from app.services.notification_service import resolve_buyer_notifications; db = SessionLocal(); print(resolve_buyer_notifications(db), 'avisos marcados leídos'); db.close()"
+```
+
+- Migración solo de datos, downgrade sin efecto. Los «Comprador sin gestionar» no se tocan.
+- R1 «Sin actividad» deja de avisar al agente (campana, email, badge, banner y reloj del
+  detalle); el admin la sigue viendo en el listado y el detalle de la alerta. El email
+  diario se queda con la sección «Sin gestionar». Sale del Inicio del agente la línea
+  «Sin respuesta desde hace más de 3 días».
+- Ojo al integrar con la rama de captaciones: `q3c4p5t6a7b8_acquisitions` también cuelga de
+  `p2w3x4y5z6a7`, así que habrá dos heads y hará falta un `alembic merge` (o re-encadenar una).
+
 ```bash
 # Tests (servicio y canales con base de datos; rutas en SQLite en memoria o contra la app levantada)
 docker exec moyza_backend python -m pytest tests/test_buyer_attention_service.py tests/test_buyer_attention_channels.py tests/test_alert_search.py -q

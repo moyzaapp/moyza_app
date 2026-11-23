@@ -921,7 +921,9 @@ async def alerts_page(
     # Compradores que requieren atención (PLAN_RECORDATORIO_SIN_RESPUESTA.md):
     # badge «Volver a llamar · intento N de 3», «Sin gestionar» o «Sin actividad» en horas hábiles.
     # Se calcula sobre los seguimientos ya cargados de la página, sin consultas nuevas.
-    alert_attention = buyer_attention_service.evaluate_alerts(alerts)
+    # «Sin actividad» (gestionada y luego nada) solo la ve el admin
+    # (PLAN_SIN_ACTIVIDAD_AGENTES.md D1 y D2).
+    alert_attention = buyer_attention_service.evaluate_alerts(alerts, include_stalled=admin_view)
 
     # Ceder desde el listado (PLAN_CEDER_COMPRADORES.md §5): solo el agente y
     # solo en las filas que aún puede ceder (abiertas, suyas y en plazo). Los
@@ -1824,9 +1826,19 @@ async def alert_detail(
 
     # Plazo en horas hábiles (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.1): la regla
     # que gobierna la alerta, vencida (banner "Venció el …") o aún no ("Vence el …").
-    clock = buyer_attention_service.alert_clock(alert)
+    # El agente no tiene reloj en una alerta ya gestionada (ni banner «Sin
+    # actividad» ni «Plazo de gestión»); el admin sí (PLAN_SIN_ACTIVIDAD_AGENTES.md D1 y D2).
+    clock = buyer_attention_service.alert_clock(alert, include_stalled=admin_view)
     attention = clock if clock is not None and clock.overdue else None
     upcoming_clocks = [clock] if clock is not None and not clock.overdue else []
+
+    # Hasta cuándo puede ceder: el reloj de la cesión sigue contando desde la
+    # última gestión aunque el agente ya no vea «Plazo de gestión»
+    # (PLAN_SIN_ACTIVIDAD_AGENTES.md §3.2), así que la fecha va junto al botón.
+    cession_deadline = None
+    if can_cede:
+        cession_clock = buyer_attention_service.alert_clock(alert, include_stalled=True)
+        cession_deadline = cession_clock.due_label if cession_clock is not None else None
 
     return templates.TemplateResponse(
         request=request,
@@ -1852,6 +1864,7 @@ async def alert_detail(
             "show_cede": show_cede,
             "can_cede": can_cede,
             "cession_groups": cession_groups,
+            "cession_deadline": cession_deadline,
             "cession_expired_message": assignment.CESSION_EXPIRED_MESSAGE,
             "attention": attention,
             "upcoming_clocks": upcoming_clocks,

@@ -220,7 +220,7 @@ def test_hojas_de_visita_por_participacion_y_tendencia(ctx):
     assert visits[-1] == 1 and visits[-2] == 1
 
 
-def test_agenda_proxima_accion_vencida_y_sin_respuesta(ctx):
+def test_agenda_proxima_accion_vencida_y_sin_leer(ctx):
     from app.models.alert_follow_up import AlertFollowUp
     from app.models.property_alert import PropertyAlert
 
@@ -255,7 +255,10 @@ def test_agenda_proxima_accion_vencida_y_sin_respuesta(ctx):
     assert agenda["due"][0]["alert_id"] == due.id
     assert agenda["due"][0]["overdue"] is True
     assert agenda["unread"] == 1
-    assert agenda["no_response"] == 1
+    # Fuera la línea «Sin respuesta desde hace más de N días»: duplicaba R3
+    # (PLAN_SIN_ACTIVIDAD_AGENTES.md D5); el «Sin respuesta» antiguo no cuenta
+    assert "no_response" not in agenda and "no_response_days" not in agenda
+    assert agenda["is_empty"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -367,9 +370,10 @@ def test_unmanaged_by_agent_solo_sin_gestionar_y_reasignadas(ctx):
     assert laura["oldest_hours"] == int(oldest)
     assert laura["oldest_label"] == bc.format_business_duration(oldest)
 
-    # "Requiere atención" sigue contando las cuatro de Laura en MOYZA y la de Carlos
+    # "Requiere atención" cuenta las de Laura en MOYZA salvo la parada, que ya
+    # no llega a los Inicios (PLAN_SIN_ACTIVIDAD_AGENTES.md §3.1), y la de Carlos
     pending = {g["agent_id"]: g for g in svc.pending_buyers_by_agent(agents, now=now)}
-    assert pending[ctx.laura.id]["count"] == 4 and pending[ctx.carlos.id]["count"] == 1
+    assert pending[ctx.laura.id]["count"] == 3 and pending[ctx.carlos.id]["count"] == 1
 
     # En MOES, solo la suya de MOES
     moes = {g["agent_id"]: g for g in DashboardService(ctx.db, ctx.moes.id).unmanaged_by_agent(agents, now=now)}

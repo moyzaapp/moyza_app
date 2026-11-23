@@ -400,7 +400,8 @@
                                         <div class="mt-2">{{ ui.badge("Sin perfil", "gray", extra="whitespace-nowrap") }}</div>
                                         {% endif %}
                                         {# Requiere atención en horas hábiles: «Volver a llamar · intento N de 3»
-                                           (rojo el tercero), «Sin gestionar» o «Sin actividad» (PLAN_RECORDATORIO_SIN_RESPUESTA.md) #}
+                                           (rojo el tercero), «Sin gestionar» o «Sin actividad» (PLAN_RECORDATORIO_SIN_RESPUESTA.md).
+                                           «Sin actividad» solo le llega al admin (PLAN_SIN_ACTIVIDAD_AGENTES.md) #}
                                         {% set attn = alert_attention.get(alert.id) %}
                                         {% if attn %}
                                         <div class="mt-2" title="Venció el {{ attn.due_label }}">
