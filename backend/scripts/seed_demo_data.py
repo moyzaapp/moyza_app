@@ -442,6 +442,51 @@ FEEDBACK = {
 # Borrado
 # ---------------------------------------------------------------------------
 
+_FK_QUERY = """
+SELECT tc.table_name, kcu.column_name, ccu.table_name AS ref, c.is_nullable
+FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name
+JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
+JOIN information_schema.columns c ON c.table_name = tc.table_name AND c.column_name = kcu.column_name
+WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+  AND ccu.table_name IN ('users', 'agents')
+"""
+
+# Tablas N:M: caen en cascada al borrar, no se reapuntan
+_CASCADE_TABLES = {"user_companies", "agent_companies"}
+
+
+def _detach_foreign_rows(db, demo_agent_ids: list, demo_user_ids: list) -> None:
+    """Desengancha de los agentes/usuarios demo las filas que aún los referencien.
+
+    Se ejecuta después de borrar todo lo demo, así que lo que queda son datos
+    reales creados o asignados con una cuenta demo. Columna opcional → NULL;
+    obligatoria hacia `users` → el primer admin; obligatoria hacia `agents` →
+    se deja (el borrado fallará con un mensaje claro).
+    """
+    admin_id = db.execute(text(
+        "SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id "
+        "WHERE r.name = 'admin' AND u.is_active IS NOT FALSE ORDER BY u.id LIMIT 1"
+    )).scalar()
+    targets = {"agents": demo_agent_ids or [0], "users": demo_user_ids or [0]}
+    for table, column, ref, nullable in db.execute(text(_FK_QUERY)).all():
+        if table in _CASCADE_TABLES:
+            continue
+        params = {"ids": targets[ref]}
+        count = db.execute(text(f"SELECT count(*) FROM {table} WHERE {column} = ANY(:ids)"), params).scalar()
+        if not count:
+            continue
+        if nullable == "YES":
+            db.execute(text(f"UPDATE {table} SET {column} = NULL WHERE {column} = ANY(:ids)"), params)
+            print(f"Aviso: {count} filas de {table}.{column} apuntaban a un {ref[:-1]} demo; quedan vacías.")
+        elif ref == "users" and admin_id is not None:
+            db.execute(text(f"UPDATE {table} SET {column} = :admin WHERE {column} = ANY(:ids)"),
+                       dict(params, admin=admin_id))
+            print(f"Aviso: {count} filas de {table}.{column} eran de un usuario demo; pasan al admin {admin_id}.")
+        else:
+            print(f"Aviso: {count} filas de {table}.{column} apuntan a un {ref[:-1]} demo y no se pueden desenganchar.")
+
+
 def reset(db) -> None:
     """Borra todo lo creado por este script, en orden de dependencias."""
     agent_email_clause = or_(*[Agent.email.like(f"%{d}") for d in AGENT_DOMAINS])
@@ -510,6 +555,13 @@ def reset(db) -> None:
     db.execute(text("DELETE FROM alert_reminder_logs WHERE agent_id = ANY(:ids)"), {"ids": ids(demo_agent_ids)})
     db.query(Notification).filter(Notification.user_id.in_(ids(demo_user_ids))).delete(synchronize_session=False)
     db.execute(text("DELETE FROM user_activity_logs WHERE user_id = ANY(:ids)"), {"ids": ids(demo_user_ids)})
+
+    # Datos no demo que apuntan a un agente o usuario demo (una propiedad asignada
+    # a mano, una captación creada entrando como agente demo, etc.), en cualquier
+    # tabla, también las de otras ramas: no se borran. Las columnas opcionales se
+    # vacían y las obligatorias hacia `users` pasan al primer admin.
+    _detach_foreign_rows(db, demo_agent_ids, demo_user_ids)
+
     db.query(Agent).filter(Agent.id.in_(ids(demo_agent_ids))).delete(synchronize_session=False)
     db.query(User).filter(User.id.in_(ids(demo_user_ids))).delete(synchronize_session=False)
 

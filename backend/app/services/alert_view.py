@@ -118,6 +118,31 @@ def real_follow_ups_since(follow_ups: Iterable, since: Optional[datetime]) -> li
     ]
 
 
+def current_stage(follow_ups: Iterable, since: Optional[datetime]) -> Optional[dict]:
+    """Etapa actual de una alerta: {"value", "label", "color"}, o None si no hay
+    seguimientos reales desde `since` (se muestra «Sin iniciar»).
+
+    Regla del listado: el último seguimiento real que no sea repetible
+    (`REPEATABLE_ACTIONS`, p. ej. SIN_RESPUESTA, para no retroceder la etapa
+    visible); si solo hay repetibles, el último de ellos. Las notas del sistema
+    (reasignación) no son una etapa. La usan el listado de alertas y el Excel
+    de compradores (PLAN_EXPORT_EXCEL_COMPRADORES.md).
+    """
+    real = real_follow_ups_since(follow_ups, since)
+    if not real:
+        return None
+    progression = [
+        f for f in real
+        if f.action_type not in FollowUpActionType.REPEATABLE_ACTIONS
+    ]
+    latest = max(progression if progression else real, key=lambda f: f.created_at)
+    return {
+        "value": latest.action_type,
+        "label": FollowUpActionType.labels().get(latest.action_type, latest.action_type),
+        "color": FollowUpActionType.stage_badge_color(latest.action_type),
+    }
+
+
 def visible_follow_ups(follow_ups: Iterable, alert, is_admin: bool) -> list:
     """Seguimientos que ve cada rol, conservando el orden de la lista.
 

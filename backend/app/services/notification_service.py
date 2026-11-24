@@ -408,7 +408,11 @@ def buyer_reminder_due(last_created_at: Optional[datetime], now: datetime, repea
 
 
 def _buyer_notification_text(item) -> tuple[str, str]:
-    """(título, cuerpo) del aviso de una regla vencida."""
+    """(título, cuerpo) del aviso de una regla vencida.
+
+    R1 solo llega como «Comprador sin gestionar · Nombre»: los `items` del job
+    ya no traen «Sin actividad» (PLAN_SIN_ACTIVIDAD_AGENTES.md §3.3).
+    """
     name = item.alert.lead_name or "Comprador"
     if item.is_callback:
         body = (f"Intento {item.attempts} de {item.max_attempts} sin respuesta desde el {item.since_label}"
@@ -503,7 +507,9 @@ def resolve_buyer_notifications(db: Session, items: Optional[Iterable] = None, a
     de aplicar si la alerta ya no tiene esa regla vencida (se cerró, se
     gestionó, se reasignó o se borró) o si su reloj se reinició después de
     crearla (otro «Sin respuesta» abre un intento nuevo). Las antiguas
-    `buyer_stage_stall` ya no aplican nunca. No se borran: quedan en el historial como
+    `buyer_stage_stall` ya no aplican nunca, ni los «Comprador sin actividad»
+    (`find_buyers_needing_attention` ya no los trae, PLAN_SIN_ACTIVIDAD_AGENTES.md
+    §3.3). No se borran: quedan en el historial como
     leídas y dejan de contar en la campana.
 
     - Con `items` (la pasada completa del job): revisa todas.

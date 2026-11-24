@@ -3,7 +3,8 @@ Servicio de recordatorio de compradores que requieren atención.
 
 Usa `buyer_attention_service` (PLAN_ALERTAS_DIAS_HABILES.md, ajustado por
 PLAN_RECORDATORIO_SIN_RESPUESTA.md): R3 "volver a llamar" tras un «Sin
-respuesta» y R1 "sin gestión", en horas hábiles de Jaén. Envía un único
+respuesta» y R1 "sin gestionar" (solo alertas sin ninguna gestión desde la
+asignación, PLAN_SIN_ACTIVIDAD_AGENTES.md), en horas hábiles de Jaén. Envía un único
 email diario por agente con las dos secciones, solo en días hábiles, y en la
 misma pasada crea los avisos in-app. Una pasada horaria solo in-app
 (`run_buyer_callback_notifications`) avisa de R3 en cuanto vence.
@@ -123,10 +124,12 @@ def _build_email_body(
     hours_threshold: int,
     system_name: str = "sistema MOYZA",
 ) -> str:
-    """Email diario con dos secciones: "Pendientes de volver a llamar" (R3) y "Sin gestionar o sin actividad" (R1).
+    """Email diario con dos secciones: "Pendientes de volver a llamar" (R3) y "Sin gestionar" (R1).
 
     Horas hábiles (lunes a viernes sin festivos de Jaén). Cada comprador sale
-    una sola vez, en la sección de su regla.
+    una sola vez, en la sección de su regla. R1 solo trae alertas sin ninguna
+    gestión desde la asignación: «Sin actividad» ya no llega al agente
+    (PLAN_SIN_ACTIVIDAD_AGENTES.md D1 y D4), así que sobra la columna «Situación».
     """
     by_age = sorted(buyers, key=lambda b: -b["business_hours_elapsed"])
     callback = [b for b in by_age if b["rule"] == RULE_CALLBACK]
@@ -143,12 +146,10 @@ def _build_email_body(
         ],
         callback,
     ) + _section(
-        "Sin gestionar o sin actividad",
+        "Sin gestionar",
         f"Llevan más de <strong>{hours_threshold} horas hábiles</strong> sin ninguna gestión desde que se "
-        "asignaron («Sin gestionar») o sin nada nuevo desde la última («Sin actividad»). "
-        "Registra un seguimiento (también «Sin respuesta» si no contestan).",
+        "asignaron. Registra un seguimiento (también «Sin respuesta» si no contestan).",
         [
-            ("Situación", lambda b: b.get("rule_label") or "Sin gestionar", False),
             ("Horas hábiles", lambda b: b["elapsed_label"], True),
             ("Venció el", lambda b: b["due_label"], False),
         ],

@@ -130,21 +130,19 @@ def long_date_es(value) -> str:
 
 
 def attention_summary(buyers: list) -> str:
-    """'2 pendientes de volver a llamar · 1 sin gestionar · 1 sin actividad' (filas de `get_pending_buyers_by_agent`).
+    """'2 pendientes de volver a llamar · 1 sin gestionar' (filas de `get_pending_buyers_by_agent`).
 
-    R1 se parte en «sin gestionar» (ninguna gestión desde la asignación) y «sin
-    actividad» (hubo gestión y luego nada), como el badge del listado.
+    R1 es siempre «sin gestionar»: `get_pending_buyers_by_agent` ya no trae
+    las R1 «sin actividad» (hubo gestión y luego nada), que solo ve el admin
+    en /alerts (PLAN_SIN_ACTIVIDAD_AGENTES.md §3.3).
     """
     callback = sum(1 for b in buyers if b["rule"] == RULE_CALLBACK)
-    unmanaged = sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION and b.get("never_managed"))
-    stalled = sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION and not b.get("never_managed"))
+    unmanaged = sum(1 for b in buyers if b["rule"] == RULE_NO_ACTION)
     parts = []
     if callback:
         parts.append(f"{callback} {'pendiente' if callback == 1 else 'pendientes'} de volver a llamar")
     if unmanaged:
         parts.append(f"{unmanaged} sin gestionar")
-    if stalled:
-        parts.append(f"{stalled} sin actividad")
     return " · ".join(parts)
 
 
@@ -542,17 +540,20 @@ class DashboardService:
         return query
 
     def agenda(self, agent: Agent, now: Optional[datetime] = None) -> dict:
-        """Hoy y pendiente: próximas acciones vencidas o de hoy, sin leer y sin respuesta.
+        """Hoy y pendiente: próximas acciones vencidas o de hoy y sin leer.
 
         `next_action_date` se guarda como la hora local que el agente escribe
         (input datetime-local), así que se compara con el final del día de
         hoy en Madrid.
 
-        Próximas acciones y "sin respuesta" solo cuentan seguimientos desde la
-        asignación de cada alerta y solo de alertas que el agente puede abrir:
-        las bloqueadas por su cola no salen (PLAN_ALERTA_COMO_NUEVA.md). "Sin
+        Las próximas acciones solo cuentan seguimientos desde la asignación de
+        cada alerta y solo de alertas que el agente puede abrir: las
+        bloqueadas por su cola no salen (PLAN_ALERTA_COMO_NUEVA.md). "Sin
         leer" es un contador que lleva al listado, donde las bloqueadas ya se
         muestran sin datos, así que sigue contando toda la cola.
+
+        Ya no cuenta los compradores en «Sin respuesta» desde hace más de N
+        días: duplicaba a R3 «volver a llamar» (PLAN_SIN_ACTIVIDAD_AGENTES.md D5).
         """
         local_now = madrid_now(now)
         end_of_today = datetime.combine(local_now.date(), time(23, 59, 59))
@@ -597,25 +598,11 @@ class DashboardService:
             .count()
         )
 
-        no_response_cutoff = (now or datetime.utcnow()) - timedelta(days=DashboardThresholds.NO_RESPONSE_DAYS)
-        no_response = (
-            self._agent_open_alerts(agent.id, exclude_ids=locked)
-            .join(latest, latest.c.alert_id == PropertyAlert.id)
-            .join(AlertFollowUp, AlertFollowUp.id == latest.c.follow_up_id)
-            .filter(
-                AlertFollowUp.action_type == FollowUpActionType.SIN_RESPUESTA,
-                AlertFollowUp.created_at < no_response_cutoff,
-            )
-            .count()
-        )
-
         return {
             "due": due,
             "due_total": due_total,
             "unread": unread,
-            "no_response": no_response,
-            "no_response_days": DashboardThresholds.NO_RESPONSE_DAYS,
-            "is_empty": not due_total and not unread and not no_response,
+            "is_empty": not due_total and not unread,
         }
 
     def pending_buyers_for_agent(self, agent_id: int, now: Optional[datetime] = None) -> list:
@@ -623,10 +610,10 @@ class DashboardService:
 
         PLAN_RUIDO_CAMPANA.md D1: solo R3 "volver a llamar" (intento N de 3) y
         R1 **sin gestionar** (ningún seguimiento real desde la asignación,
-        `never_managed`). Las R1 "sin actividad" (hubo gestión y luego nada) no
-        salen en la ventana: el agente ya actuó y las percibía como ruido;
-        siguen contando para la campana, el email y el listado. Mismo criterio
-        que la ventana del admin (PLAN_VENTANA_SIN_GESTION.md).
+        `never_managed`). Mismo criterio que la ventana del admin
+        (PLAN_VENTANA_SIN_GESTION.md). Desde PLAN_SIN_ACTIVIDAD_AGENTES.md las
+        R1 "sin actividad" ya no llegan de `get_pending_buyers_by_agent` (ni a
+        la campana ni al email); el filtro de abajo queda como red de seguridad.
 
         Horas hábiles; una fila por alerta. Cada fila trae `rule`, `text`,
         `tone`, `due_label`, `since_label`… Con varias empresas, las filas de
@@ -649,6 +636,8 @@ class DashboardService:
                 if row_agent_id == agent_id and company_id in companies
                 for b in rows
             ]
+        # Red de seguridad: con `include_stalled=False` (por defecto) ya no hay
+        # R1 sin `never_managed` (PLAN_SIN_ACTIVIDAD_AGENTES.md §3.3)
         buyers = [b for b in buyers if b["never_managed"] or b["rule"] == RULE_CALLBACK]
         return sorted(buyers, key=lambda b: b["hours_elapsed"], reverse=True)
 
@@ -1072,8 +1061,8 @@ class DashboardService:
 
         PLAN_VENTANA_SIN_GESTION.md: solo R1 con `never_managed` (ninguna
         gestión desde la asignación; en las reasignadas, desde la última
-        reasignación). Fuera los "volver a llamar" y las "paradas", que siguen
-        en "Requiere atención". Por grupo: `count`, el más antiguo en horas
+        reasignación). Fuera los "volver a llamar", que siguen en "Requiere
+        atención" (las "paradas" ya no llegan: PLAN_SIN_ACTIVIDAD_AGENTES.md). Por grupo: `count`, el más antiguo en horas
         hábiles y `reassigned`, cuántas llegaron al agente por una
         reasignación o cesión (`previous_agent_id`, ver `BuyerAttention.as_dict`)
         y siguen sin gestión. `raw`: resultado de `_pending_buyers` ya calculado.

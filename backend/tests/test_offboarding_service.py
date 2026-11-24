@@ -248,8 +248,8 @@ def test_reasigna_alertas_abiertas_con_historial_y_aviso(db, ctx):
     summary = svc.summary_for_user(db, user)
     moyza = next(p for p in summary.pending if p.company.id == ctx["moyza_id"])
     assert moyza.open_alerts == 2 and moyza.live_properties == 0
-    assert target.id in {a.id for a in moyza.targets}
-    assert leaving.id not in {a.id for a in moyza.targets}
+    assert target.id in _target_ids(moyza.targets)
+    assert leaving.id not in _target_ids(moyza.targets)
 
     # Claves y valores como llegan del formulario (texto)
     summary = svc.deactivate(db, user=user, by_user=_admin(db, ctx),
@@ -316,7 +316,15 @@ def _assert_untouched(db, user, agent, alert_ids):
         assert db.query(AlertAssignmentLog).filter_by(alert_id=alert_id).count() == 0
 
 
-def test_destino_ausente_inactivo_otra_empresa_o_el_propio(db, ctx):
+def _target_ids(groups) -> set:
+    """Ids de agente de los grupos de destino de `CompanyPending.targets`."""
+    return {a.id for group in groups for a in group["agents"]}
+
+
+def test_destino_de_otra_empresa_vale_y_se_rechazan_ausente_inactivo_inexistente_o_el_propio(db, ctx):
+    """PLAN_BAJA_DESTINOS_TODAS_EMPRESAS.md D1-D2: el destino puede ser de cualquier
+    empresa activa; la alerta conserva su empresa."""
+    from app.models.property_alert import PropertyAlert
     from app.services import offboarding_service as svc
 
     user, leaving = _person(db, ctx, "rechazos", codes=("MOYZA", "MOES"))
@@ -331,17 +339,17 @@ def test_destino_ausente_inactivo_otra_empresa_o_el_propio(db, ctx):
     summary = svc.summary_for_user(db, user)
     by_company = {p.company.id: p for p in summary.pending}
     assert by_company[moyza].open_alerts == 1 and by_company[moes].open_alerts == 1
-    assert inactive.id not in {a.id for a in by_company[moyza].targets}
-    assert ok_moes.id not in {a.id for a in by_company[moyza].targets}
+    moyza_targets = _target_ids(by_company[moyza].targets)
+    assert inactive.id not in moyza_targets and leaving.id not in moyza_targets
+    assert {ok_moyza.id, ok_moes.id} <= moyza_targets   # MOES también vale para MOYZA
 
     cases = [
         ({}, "Elige a quién reasignar"),
         ({moyza: ok_moyza.id}, "Elige a quién reasignar sus compradores abiertos de MOES PREMIUM"),
         ({moyza: "", moes: ok_moes.id}, "Elige a quién reasignar sus compradores abiertos de MOYZA"),
-        ({moyza: inactive.id, moes: ok_moes.id}, "no es un agente activo de esa empresa"),
-        ({moyza: ok_moes.id, moes: ok_moes.id}, "no es un agente activo de esa empresa"),
-        ({moyza: leaving.id, moes: ok_moes.id}, "no es un agente activo de esa empresa"),
-        ({moyza: 999999999, moes: ok_moes.id}, "no es un agente activo de esa empresa"),
+        ({moyza: inactive.id, moes: ok_moes.id}, "El agente elegido para MOYZA no existe o está dado de baja"),
+        ({moyza: leaving.id, moes: ok_moes.id}, "El agente elegido para MOYZA no existe o está dado de baja"),
+        ({moyza: 999999999, moes: ok_moes.id}, "El agente elegido para MOYZA no existe o está dado de baja"),
     ]
     for reassign_to, text in cases:
         with pytest.raises(svc.OffboardingError) as exc:
@@ -349,10 +357,45 @@ def test_destino_ausente_inactivo_otra_empresa_o_el_propio(db, ctx):
         assert text in str(exc.value), (reassign_to, str(exc.value))
         _assert_untouched(db, user, leaving, [a1.id, a2.id])
 
-    # Con los dos destinos correctos sí
-    summary = svc.deactivate(db, user=user, by_user=admin, reassign_to={moyza: ok_moyza.id, moes: ok_moes.id})
-    assert sorted((r.company.id, r.agent.id) for r in summary.reassigned) == sorted(
-        [(moyza, ok_moyza.id), (moes, ok_moes.id)])
+    # Un agente solo de MOES recibe también los de MOYZA; cada alerta conserva su empresa
+    summary = svc.deactivate(db, user=user, by_user=admin, reassign_to={moyza: ok_moes.id, moes: ok_moes.id})
+    assert sorted((r.company.id, r.agent.id, r.count) for r in summary.reassigned) == sorted(
+        [(moyza, ok_moes.id, 1), (moes, ok_moes.id, 1)])
+    db.expire_all()
+    assert (db.get(PropertyAlert, a1.id).agent_id, db.get(PropertyAlert, a1.id).company_id) == (ok_moes.id, moyza)
+    assert (db.get(PropertyAlert, a2.id).agent_id, db.get(PropertyAlert, a2.id).company_id) == (ok_moes.id, moes)
+    assert [c.code for c in ok_moes.companies] == ["MOES"]   # asignar no amplía sus empresas
+    assert user.is_active is False and leaving.is_active is False
+
+
+def test_target_groups_sin_el_saliente_ni_grupos_vacios(db, ctx):
+    from app.services import offboarding_service as svc
+
+    _, leaving = _person(db, ctx, "grupos", codes=("MOYZA", "MOES"))
+    _, moyza_only = _person(db, ctx, "gruposmoyza")
+    _, moes_only = _person(db, ctx, "gruposmoes", codes=("MOES",))
+
+    groups = svc._target_groups(db, ctx["moes_id"], leaving.id)
+    ids = _target_ids(groups)
+    assert leaving.id not in ids and {moyza_only.id, moes_only.id} <= ids
+    assert all(group["agents"] for group in groups)
+    assert all(set(group) == {"label", "agents"} for group in groups)
+    assert "MOES PREMIUM" in groups[0]["label"]   # la empresa de las alertas, primero
+    labels = [group["label"] for group in groups]
+    assert len(labels) == len(set(labels))
+
+
+def test_target_groups_descarta_el_grupo_que_solo_tenia_al_saliente(db, ctx, monkeypatch):
+    from app.services import offboarding_service as svc
+
+    _, leaving = _person(db, ctx, "solo", codes=("MOYZA", "MOES"))
+    _, other = _person(db, ctx, "solootro")
+    monkeypatch.setattr(svc, "companion_agent_groups", lambda _db, _cid: [
+        {"label": "MOYZA", "agents": [other]},
+        {"label": "MOYZA, MOES PREMIUM", "agents": [leaving]},
+    ])
+    groups = svc._target_groups(db, ctx["moyza_id"], leaving.id)
+    assert groups == [{"label": "MOYZA", "agents": [other]}]
 
 
 def test_no_puede_darse_de_baja_a_si_mismo_ni_dos_veces(db, ctx):
@@ -462,9 +505,13 @@ def test_summary_to_dict(db, ctx):
     assert moyza["id"] == ctx["moyza_id"] and moyza["name"] == "MOYZA"
     assert moyza["live_properties"] == 1 and moyza["open_alerts"] == 1
     assert moyza["properties_url"] == f"/properties?search={quote(agent.name)}"
-    target_ids = {t["id"] for t in moyza["targets"]}
+    # Destinos por grupos de empresa (como «Reasignar»), la de las alertas primero
+    assert moyza["targets"] and all(set(g) == {"label", "agents"} for g in moyza["targets"])
+    assert "MOYZA" in moyza["targets"][0]["label"].split(", ")
+    assert all(g["agents"] for g in moyza["targets"])
+    target_ids = {t["id"] for g in moyza["targets"] for t in g["agents"]}
     assert target.id in target_ids and agent.id not in target_ids
-    assert all(set(t) == {"id", "name"} for t in moyza["targets"])
+    assert all(set(t) == {"id", "name"} for g in moyza["targets"] for t in g["agents"])
     assert by_code["MOES"]["live_properties"] == 0 and by_code["MOES"]["open_alerts"] == 0
 
     # Usuario sin ficha de agente: sin empresas ni enlace

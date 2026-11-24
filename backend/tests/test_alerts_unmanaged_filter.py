@@ -9,6 +9,9 @@ contra la app levantada (se omite si no responde).
   Nombre"; el filtro de estado no aplica; chip para quitarlo y el filtro se
   conserva en los formularios.
 - Un agente que manda el parámetro ve su listado de siempre.
+- «Sin actividad» (gestionada y luego nada) solo la ve el admin en el listado
+  y el detalle; el agente no ve ni el badge, ni el banner, ni el «Plazo de
+  gestión» (PLAN_SIN_ACTIVIDAD_AGENTES.md D1 y D2).
 - Aislamiento por empresa.
 - La reasignación de fila desde el listado filtrado vuelve a ese listado.
 - Fase C: casillas y "Reasignar" de varias solo en el listado filtrado;
@@ -400,3 +403,97 @@ def test_reasignar_varias_next_externo_vuelve_al_listado(data):
     })
     assert status == 302 and headers.get("location") == "/alerts?attention=sin_gestion"
     assert _flashes(headers)[0]["message"] == "Selecciona al menos un comprador para reasignar"
+
+
+# ---------------------------------------------------------------------------
+# «Sin actividad» solo para el admin (PLAN_SIN_ACTIVIDAD_AGENTES.md D1 y D2)
+# ---------------------------------------------------------------------------
+
+def _row(table: str, name: str) -> str:
+    """HTML de la fila de la tabla de alertas con ese comprador."""
+    start = table.index(name)
+    return table[start:table.index("</tr>", start)]
+
+
+@pytest.fixture(scope="module")
+def stalled_data(data):
+    """Agente propio (DORA) con una PARADA (Contactado y luego nada) y una
+    NUNCA posterior: la PARADA va primero en su cola y ya está iniciada, así
+    que ninguna de las dos sale bloqueada. `_cleanup` lo borra al terminar."""
+    from app.db.session import SessionLocal
+    from app.models.agent import Agent
+    from app.models.company import Company
+    from app.models.role import Role
+    from app.models.user import User
+
+    db = SessionLocal()
+    moyza = db.get(Company, data["moyza_id"])
+    role = db.query(Role).filter(Role.name.ilike("agent")).first()
+    agent = Agent(name=f"{TAG} DORA", email=EMAIL.format("dora"))
+    agent.companies.append(moyza)
+    user = User(email=EMAIL.format("dora"), full_name=f"{TAG} dora", hashed_password="pytest-sin-login",
+                role_id=role.id if role else None, is_active=True)
+    user.companies.append(moyza)
+    db.add_all([agent, user])
+    db.flush()
+    out = dict(data, dora=agent.id)
+    now = datetime.utcnow()
+    stalled = _add_alert(db, out, "DORA PARADA", "dora", now - timedelta(days=9),
+                         follow_ups=[("CONTACTADO", now - timedelta(days=8))])
+    never = _add_alert(db, out, "DORA NUNCA", "dora", now - timedelta(days=6))
+    db.commit()
+    out.update(stalled=stalled.id, never=never.id)
+    db.close()
+    return out
+
+
+def test_sin_actividad_solo_la_ve_el_admin_en_el_listado(stalled_data):
+    parada, nunca = f"{TAG} DORA PARADA", f"{TAG} DORA NUNCA"
+
+    _, body, _ = _Client(ADMIN_EMAIL, "MOYZA").get(f"/alerts?agent_id={stalled_data['dora']}")
+    table = _alerts_table(body)
+    assert "Sin actividad · " in _row(table, parada)
+    assert "Sin gestionar · " in _row(table, nunca)
+
+    status, body, _ = _Client(EMAIL.format("dora"), "MOYZA").get("/alerts")
+    assert status == 200
+    table = _alerts_table(body)
+    assert "Sin actividad" not in _row(table, parada) and "Venció el" not in _row(table, parada)
+    assert "Sin gestionar · " in _row(table, nunca)
+
+
+def test_sin_actividad_solo_la_ve_el_admin_en_el_detalle(stalled_data):
+    status, body, _ = _Client(ADMIN_EMAIL, "MOYZA").get(f"/alerts/{stalled_data['stalled']}")
+    assert status == 200
+    assert "Sin actividad · " in body and "Venció el " in body
+
+    agent = _Client(EMAIL.format("dora"), "MOYZA")
+    status, body, _ = agent.get(f"/alerts/{stalled_data['stalled']}")
+    assert status == 200
+    # Ni banner ni «Plazo de gestión»: la alerta ya está gestionada
+    assert "Sin actividad" not in body
+    assert "Plazo de gestión" not in body and "Venció el " not in body
+    status, body, _ = agent.get(f"/alerts/{stalled_data['never']}")
+    assert status == 200
+    assert "Sin gestionar · " in body and "Venció el " in body
+
+
+def test_exportar_excel_solo_lo_ve_el_admin(data):
+    """Botón y modal «Exportar Excel» (PLAN_EXPORT_EXCEL_COMPRADORES.md §2.3)."""
+    from app.core.business_calendar import madrid_today
+    today = madrid_today()
+
+    status, body, _ = _Client(ADMIN_EMAIL, "MOYZA").get("/alerts")
+    assert status == 200
+    assert "Exportar Excel" in body
+    assert 'data-modal-open="exportExcelModal"' in body
+    assert 'action="/alerts/export.xlsx"' in body
+    # Por defecto el mes en curso: del día 1 a hoy (Madrid)
+    assert f'name="desde" value="{today.replace(day=1).isoformat()}"' in body
+    assert f'name="hasta" value="{today.isoformat()}"' in body
+
+    status, body, _ = _Client(EMAIL.format("ana"), "MOYZA").get("/alerts")
+    assert status == 200
+    assert "Exportar Excel" not in body
+    assert "exportExcelModal" not in body
+    assert "/alerts/export.xlsx" not in body

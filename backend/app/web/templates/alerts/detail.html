@@ -369,7 +369,8 @@
 
                         {# Plazo en horas hábiles (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.2): la regla
                            vencida en un aviso (ámbar; rojo el tercer intento) o, si aún no
-                           ha vencido, su fecha #}
+                           ha vencido, su fecha. En una alerta ya gestionada (R1 «Sin actividad»)
+                           solo el admin recibe reloj (PLAN_SIN_ACTIVIDAD_AGENTES.md) #}
                         {% if attention %}
                         {% if attention.rule == RULE_CALLBACK %}
                         {{ ui.banner(attention.badge, attention.tone,
@@ -471,6 +472,9 @@
                         {% if show_cede %}
                         {% if can_cede and cession_groups %}
                         {{ ui.button("Ceder comprador", "secondary", attrs='data-modal-open="cedeModal"', extra="w-full") }}
+                        {% if cession_deadline %}
+                        <p class="text-xs text-gray-500">Puedes ceder hasta el {{ cession_deadline }}</p>
+                        {% endif %}
                         {% else %}
                         {{ ui.button("Ceder comprador", "secondary", attrs='disabled aria-describedby="cedeDisabledHint"', extra="w-full") }}
                         <p id="cedeDisabledHint" class="text-xs text-gray-500">

@@ -13,6 +13,7 @@ from fastapi import Query
 from fastapi.responses import HTMLResponse
 from fastapi.responses import RedirectResponse
 from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 
 from app.web.template_env import templates
 
@@ -68,6 +69,7 @@ from app.services.company_service import branding_for
 from app.services import alert_assignment_service as assignment
 from app.services import alert_view
 from app.services import buyer_attention_service
+from app.services.buyer_export_service import build_buyers_workbook
 from app.services.buyer_rename import BuyerNameError
 from app.services.property_link import property_public_url
 from app.services.property_link import share_message
@@ -899,29 +901,18 @@ async def alerts_page(
     # (PLAN_ALERTA_COMO_NUEVA.md); el admin ve la etapa con todo el historial.
     # `follow_ups` ya viene cargado con selectinload: se filtra en Python.
     alert_stages = {}
-    labels = FollowUpActionType.labels()
     for alert in alerts:
         since = None if admin_view else alert_view.assignment_start(alert)
-        real = alert_view.real_follow_ups_since(alert.follow_ups, since)
-        if real:
-            progression = [
-                f for f in real
-                if f.action_type not in FollowUpActionType.REPEATABLE_ACTIONS
-            ]
-            latest = max(
-                progression if progression else real,
-                key=lambda f: f.created_at,
-            )
-            alert_stages[alert.id] = {
-                "value": latest.action_type,
-                "label": labels.get(latest.action_type, latest.action_type),
-                "color": FollowUpActionType.stage_badge_color(latest.action_type),
-            }
+        stage = alert_view.current_stage(alert.follow_ups, since)
+        if stage:
+            alert_stages[alert.id] = stage
 
     # Compradores que requieren atención (PLAN_RECORDATORIO_SIN_RESPUESTA.md):
     # badge «Volver a llamar · intento N de 3», «Sin gestionar» o «Sin actividad» en horas hábiles.
     # Se calcula sobre los seguimientos ya cargados de la página, sin consultas nuevas.
-    alert_attention = buyer_attention_service.evaluate_alerts(alerts)
+    # «Sin actividad» (gestionada y luego nada) solo la ve el admin
+    # (PLAN_SIN_ACTIVIDAD_AGENTES.md D1 y D2).
+    alert_attention = buyer_attention_service.evaluate_alerts(alerts, include_stalled=admin_view)
 
     # Ceder desde el listado (PLAN_CEDER_COMPRADORES.md §5): solo el agente y
     # solo en las filas que aún puede ceder (abiertas, suyas y en plazo). Los
@@ -990,6 +981,10 @@ async def alerts_page(
             "attention_filter": UNMANAGED_FILTER if unmanaged_view else None,
             # Casillas y "Reasignar" de varias (PLAN_VENTANA_SIN_GESTION.md fase C)
             "bulk_reassign": unmanaged_view,
+            # Modal "Exportar Excel" (admin, PLAN_EXPORT_EXCEL_COMPRADORES.md §2.3):
+            # por defecto el mes en curso, del día 1 a hoy (Madrid)
+            "export_default_from": madrid_today().replace(day=1).isoformat(),
+            "export_default_to": madrid_today().isoformat(),
         }
     )
 
@@ -1724,6 +1719,49 @@ async def alert_assignments_page(
     )
 
 
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+# Antes de /alerts/{alert_id}: si no, "export.xlsx" se tomaría por un id
+@router.get("/alerts/export.xlsx")
+async def export_buyers_excel(
+    request: Request,
+    desde: Optional[str] = Query(default=None),
+    hasta: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db)
+):
+    """Excel de compradores y alertas dados de alta en el periodo (solo admin).
+
+    PLAN_EXPORT_EXCEL_COMPRADORES.md §2.1: empresa activa, rango de días de
+    Madrid inclusivo (por defecto el mes en curso hasta hoy); si `desde` es
+    posterior a `hasta` se intercambian.
+    """
+    admin_user = require_admin_role(request, db)
+    if isinstance(admin_user, RedirectResponse):
+        return admin_user
+
+    company = get_active_company(request)
+    today = madrid_today()
+    day_from = _parse_day(desde) if desde else today.replace(day=1)
+    day_to = _parse_day(hasta) if hasta else today
+    # Años fuera de rango (p. ej. 9999) desbordarían al sumar un día al límite
+    if (day_from is None or day_to is None
+            or not (2000 <= day_from.year <= 2100 and 2000 <= day_to.year <= 2100)):
+        response = RedirectResponse(url="/alerts", status_code=303)
+        set_flash(response, "error", "Fecha no válida para exportar el Excel de compradores")
+        return response
+    if day_from > day_to:
+        day_from, day_to = day_to, day_from
+
+    content = build_buyers_workbook(db, company, day_from, day_to)
+    filename = f"compradores_{company.code.lower()}_{day_from.isoformat()}_{day_to.isoformat()}.xlsx"
+    return Response(
+        content=content,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/alerts/{alert_id}", response_class=HTMLResponse)
 async def alert_detail(
     alert_id: int,
@@ -1824,9 +1862,19 @@ async def alert_detail(
 
     # Plazo en horas hábiles (PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.1): la regla
     # que gobierna la alerta, vencida (banner "Venció el …") o aún no ("Vence el …").
-    clock = buyer_attention_service.alert_clock(alert)
+    # El agente no tiene reloj en una alerta ya gestionada (ni banner «Sin
+    # actividad» ni «Plazo de gestión»); el admin sí (PLAN_SIN_ACTIVIDAD_AGENTES.md D1 y D2).
+    clock = buyer_attention_service.alert_clock(alert, include_stalled=admin_view)
     attention = clock if clock is not None and clock.overdue else None
     upcoming_clocks = [clock] if clock is not None and not clock.overdue else []
+
+    # Hasta cuándo puede ceder: el reloj de la cesión sigue contando desde la
+    # última gestión aunque el agente ya no vea «Plazo de gestión»
+    # (PLAN_SIN_ACTIVIDAD_AGENTES.md §3.2), así que la fecha va junto al botón.
+    cession_deadline = None
+    if can_cede:
+        cession_clock = buyer_attention_service.alert_clock(alert, include_stalled=True)
+        cession_deadline = cession_clock.due_label if cession_clock is not None else None
 
     return templates.TemplateResponse(
         request=request,
@@ -1852,6 +1900,7 @@ async def alert_detail(
             "show_cede": show_cede,
             "can_cede": can_cede,
             "cession_groups": cession_groups,
+            "cession_deadline": cession_deadline,
             "cession_expired_message": assignment.CESSION_EXPIRED_MESSAGE,
             "attention": attention,
             "upcoming_clocks": upcoming_clocks,

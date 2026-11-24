@@ -6,7 +6,8 @@
   Reparto de los compradores abiertos de un agente antes de darlo de baja (solo admin).
   GET/POST /agents/{id}/handover. Una sección por empresa (groups: HandoverGroup de
   offboarding_service): tabla con casillas y una barra para reasignar las marcadas a un
-  agente activo de esa empresa o eliminarlas. Cada envío se aplica al momento y vuelve
+  agente activo de cualquier empresa activa (agrupados por empresa, como en «Reasignar»;
+  PLAN_BAJA_DESTINOS_TODAS_EMPRESAS.md) o eliminarlas. Cada envío se aplica al momento y vuelve
   aquí con lo que queda; sin nada pendiente, se vuelve a Usuarios/Agentes a dar de baja.
 #}
 {% import "components/ui_macros.html" as ui %}
@@ -151,8 +152,12 @@
                         <label for="handoverTarget{{ cid }}" class="block text-sm font-medium text-gray-700 mb-1">Reasignar los marcados a</label>
                         <select id="handoverTarget{{ cid }}" name="target_agent_id" class="{{ ui.input_class }} bg-white" aria-describedby="handoverTargetHelp{{ cid }}">
                             <option value="">Elige un agente…</option>
-                            {% for t in group.targets %}
-                            <option value="{{ t.agent.id }}">{{ t.agent.name }} · {{ t.open_alerts }} {{ "abierto" if t.open_alerts == 1 else "abiertos" }}</option>
+                            {% for target_group in group.targets %}
+                            <optgroup label="{{ target_group.label }}">
+                                {% for t in target_group.agents %}
+                                <option value="{{ t.agent.id }}">{{ t.agent.name }} · {{ t.open_alerts }} {{ "abierto" if t.open_alerts == 1 else "abiertos" }}</option>
+                                {% endfor %}
+                            </optgroup>
                             {% endfor %}
                         </select>
                     </div>
@@ -166,12 +171,12 @@
                     </button>
                 </div>
                 <p id="handoverTargetHelp{{ cid }}" class="text-xs text-gray-500 mt-2">
-                    Junto a cada agente, los compradores abiertos que ya tiene en {{ group.company.name }}.
+                    Junto a cada agente, los compradores abiertos que ya tiene (todas las empresas).
                 </p>
                 {% else %}
                 <div class="flex flex-col sm:flex-row sm:items-center gap-3">
                     <p class="text-sm text-red-600 flex-1">
-                        No hay ningún otro agente activo en {{ group.company.name }} que pueda recibir sus compradores. Da de alta o reactiva uno antes.
+                        No hay ningún otro agente activo que pueda recibir sus compradores. Da de alta o reactiva uno antes.
                     </p>
                     <button type="button" data-modal-open="handoverDelete{{ cid }}" data-handover-delete disabled
                         class="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-red-700 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600/40 disabled:opacity-50 disabled:cursor-not-allowed">

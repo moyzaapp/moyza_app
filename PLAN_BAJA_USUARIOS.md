@@ -178,6 +178,11 @@ Reglas de `deactivate`:
 - Por cada empresa con `open_alerts > 0`, `reassign_to[company.id]` es obligatorio y debe ser un
   agente **activo de esa empresa distinto del saliente** (`scope_active_agents` +
   `get_agent_in_company`); si falta o no vale → `OffboardingError`.
+  **Cambiado el 2026-11-24** (`PLAN_BAJA_DESTINOS_TODAS_EMPRESAS.md`): los destinos ya no se
+  limitan a la empresa. Modal y "Repartir compradores" usan la lista de «Reasignar» (agentes
+  activos de cualquier empresa activa, agrupados por empresa; `targets` pasa a ser
+  `[{"label", "agents": [{"id", "name"}]}]`) y se valida con `get_agent_in_any_company`; la
+  alerta conserva su empresa.
 - Reasigna cada alerta abierta con `alert_assignment_service.validate_reassignment` +
   `assign(db, alert, target, by_user, reason or f"Baja de {nombre}", is_new=False)`. Solo
   `flush`; un único `commit` al final.

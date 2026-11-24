@@ -20,6 +20,14 @@ PLAN_ALERTAS_DIAS_HABILES.md, ajustado por PLAN_RECORDATORIO_SIN_RESPUESTA.md
   y como **«Sin actividad»** si la hubo y luego nada (otra gestión como último
   seguimiento, o más de 3 «Sin respuesta» seguidos).
 
+**«Sin actividad» solo para el admin** (PLAN_SIN_ACTIVIDAD_AGENTES.md, D1 y
+D2, 2026-11-23): por defecto (`include_stalled=False`) una alerta con alguna
+gestión real desde la asignación no tiene reloj R1, así que el job diario
+(email y campana), el horario (R3), la limpieza de avisos y los Inicios solo
+ven «Sin gestionar» y R3. El listado y el detalle de /alerts piden
+`include_stalled=True` cuando quien mira es el admin, y el plazo para ceder
+también (el reloj de la cesión no cambia).
+
 La antigua R2 «sin avance de Primera llamada» ya no existe.
 
 Una alerta cae en una sola regla a la vez: nunca dos avisos distintos por el
@@ -57,7 +65,9 @@ RULE_NO_ACTION = "no_action"
 
 # R1 se nombra según haya habido o no alguna gestión desde la asignación
 # (petición del 2026-11-10: «Sin gestión» bajo una etapa «Contactado» confundía):
-# «Sin gestionar» = ninguna; «Sin actividad» = hubo gestión y luego nada.
+# «Sin gestionar» = ninguna; «Sin actividad» = hubo gestión y luego nada. Desde
+# PLAN_SIN_ACTIVIDAD_AGENTES.md «Sin actividad» solo llega con
+# `include_stalled=True` (vista del admin).
 RULE_LABELS = {
     RULE_CALLBACK: "Volver a llamar",
     RULE_NO_ACTION: "Sin gestionar",
@@ -94,7 +104,8 @@ class BuyerAttention:
 
     `never_managed` (PLAN_VENTANA_SIN_GESTION.md): R1 sin ningún seguimiento
     real desde la asignación (la ventana empieza en la última reasignación).
-    False en R3 y en R1 «parada» (hubo gestión y luego nada).
+    False en R3 y en R1 «parada» (hubo gestión y luego nada), que solo existe
+    con `include_stalled=True` (PLAN_SIN_ACTIVIDAD_AGENTES.md).
     """
 
     alert: PropertyAlert
@@ -239,6 +250,7 @@ def alert_clock(
     callback_hours: Optional[int] = None,
     max_attempts: Optional[int] = None,
     since=_FROM_SETTINGS,
+    include_stalled: bool = False,
 ) -> Optional[BuyerAttention]:
     """El reloj de la regla que gobierna una alerta abierta (vencido o no).
 
@@ -246,6 +258,11 @@ def alert_clock(
     máximo de intentos; si no, R1. None si la alerta está cerrada, no tiene
     agente ni fecha, o su ventana de asignación empieza antes del corte
     (`attention_since`).
+
+    `include_stalled` (PLAN_SIN_ACTIVIDAD_AGENTES.md D1): R1 «parada» (hubo
+    gestión desde la asignación y luego nada, «Sin actividad») solo con True;
+    por defecto esas alertas no tienen reloj, para no avisar al agente cada
+    48 h hábiles de un comprador que ya está en marcha.
     """
     now = now or datetime.utcnow()
     no_action_hours, callback_hours, max_attempts = _thresholds(no_action_hours, callback_hours, max_attempts)
@@ -274,6 +291,11 @@ def alert_clock(
             now=now,
         )
 
+    # Hubo gestión real desde la asignación y no es R3: «Sin actividad», que
+    # solo ve el admin (PLAN_SIN_ACTIVIDAD_AGENTES.md D1 y D2)
+    if window and not include_stalled:
+        return None
+
     last_action = max((f.created_at for f in window), default=None)
     since = max(start, last_action) if last_action else start
     return BuyerAttention(
@@ -288,20 +310,35 @@ def alert_clock(
     )
 
 
-def evaluate_alert(alert, now: Optional[datetime] = None, **thresholds) -> Optional[BuyerAttention]:
+def evaluate_alert(
+    alert,
+    now: Optional[datetime] = None,
+    include_stalled: bool = False,
+    **thresholds,
+) -> Optional[BuyerAttention]:
     """La regla de la alerta si ya venció, o None (una sola regla por alerta).
 
     `thresholds` admite también `since` (corte; por defecto el de settings).
+    `include_stalled`: ver `alert_clock` (True solo en la vista del admin).
     """
-    clock = alert_clock(alert, now=now, **thresholds)
+    clock = alert_clock(alert, now=now, include_stalled=include_stalled, **thresholds)
     return clock if clock is not None and clock.overdue else None
 
 
-def evaluate_alerts(alerts: Iterable, now: Optional[datetime] = None, **thresholds) -> dict:
-    """{alert.id: BuyerAttention} de las alertas vencidas (listado de /alerts)."""
+def evaluate_alerts(
+    alerts: Iterable,
+    now: Optional[datetime] = None,
+    include_stalled: bool = False,
+    **thresholds,
+) -> dict:
+    """{alert.id: BuyerAttention} de las alertas vencidas (listado de /alerts).
+
+    `include_stalled=True` en el listado del admin, que sigue viendo «Sin
+    actividad» (PLAN_SIN_ACTIVIDAD_AGENTES.md D2).
+    """
     result = {}
     for alert in alerts:
-        item = evaluate_alert(alert, now=now, **thresholds)
+        item = evaluate_alert(alert, now=now, include_stalled=include_stalled, **thresholds)
         if item is not None:
             result[alert.id] = item
     return result
@@ -321,6 +358,7 @@ def find_buyers_needing_attention(
     callback_hours: Optional[int] = None,
     max_attempts: Optional[int] = None,
     since=_FROM_SETTINGS,
+    include_stalled: bool = False,
 ) -> list:
     """Alertas abiertas con su regla vencida, una fila por alerta, de más a menos antigua.
 
@@ -329,6 +367,10 @@ def find_buyers_needing_attention(
     hace menos del umbral menor no puede haber vencido. También en SQL, el
     corte: fuera las alertas asignadas antes de `attention_since(since)`. Los
     seguimientos se cargan en lote.
+
+    Por defecto sin «Sin actividad» (`include_stalled`, PLAN_SIN_ACTIVIDAD_AGENTES.md
+    D1): el job diario, el horario, la limpieza de avisos y los Inicios solo
+    reciben «Sin gestionar» y R3.
     """
     now = now or datetime.utcnow()
     cutoff = attention_since(since)
@@ -357,7 +399,8 @@ def find_buyers_needing_attention(
         query = query.filter(PropertyAlert.id.in_(list(alert_ids)))
 
     items = [
-        item for item in (evaluate_alert(alert, now=now, since=cutoff, **thresholds) for alert in query.all())
+        item for item in (evaluate_alert(alert, now=now, since=cutoff, include_stalled=include_stalled, **thresholds)
+                     for alert in query.all())
         if item is not None
     ]
     items.sort(key=lambda item: (-item.business_hours_elapsed, item.alert.id))

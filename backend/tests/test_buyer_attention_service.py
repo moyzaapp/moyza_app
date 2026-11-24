@@ -5,6 +5,9 @@ PLAN_ALERTAS_DIAS_HABILES.md §2.2, ajustado por PLAN_RECORDATORIO_SIN_RESPUESTA
 R1 «sin gestión» (se mantiene) y R3 «volver a llamar» (nueva, con prioridad);
 la antigua R2 «sin avance de Primera llamada» ya no existe.
 
+- «Sin actividad» (R1 tras una gestión) solo con `include_stalled=True`, la
+  vista del admin (PLAN_SIN_ACTIVIDAD_AGENTES.md D1 y D2): por defecto esas
+  alertas no tienen reloj.
 - Unitarios (sin base de datos, alertas de mentira): R1 con fin de semana y
   lunes festivo; R3 con 1er, 2º y 3er intento, el 4º cae en R1 a las 48 h, un
   seguimiento posterior la resuelve, la reasignación reinicia los intentos,
@@ -52,12 +55,17 @@ def _alert(assigned, follow_ups=(), status=AlertStatus.IN_PROGRESS, created=None
 THRESHOLDS = dict(no_action_hours=48, callback_hours=24, max_attempts=3)
 
 
-def _eval(alert, now):
-    return svc.evaluate_alert(alert, now=now, **THRESHOLDS)
+def _eval(alert, now, include_stalled=False):
+    return svc.evaluate_alert(alert, now=now, include_stalled=include_stalled, **THRESHOLDS)
 
 
-def _clock(alert, now):
-    return svc.alert_clock(alert, now=now, **THRESHOLDS)
+def _clock(alert, now, include_stalled=False):
+    return svc.alert_clock(alert, now=now, include_stalled=include_stalled, **THRESHOLDS)
+
+
+def _admin_eval(alert, now):
+    """Vista del admin: incluye «Sin actividad» (PLAN_SIN_ACTIVIDAD_AGENTES.md D2)."""
+    return _eval(alert, now, include_stalled=True)
 
 
 # ---------------------------------------------------------------------------
@@ -80,15 +88,45 @@ def test_r1_con_fin_de_semana_por_medio():
 
 
 def test_r1_parada_tras_una_gestion_se_llama_sin_actividad():
-    # Hubo gestión (Contactado) y luego nada: «Sin actividad», no «Sin gestionar»
+    # Hubo gestión (Contactado) y luego nada: «Sin actividad», no «Sin gestionar» (solo admin)
     alert = _alert(L(2026, 10, 12, 9, 0), [_fu("CONTACTADO", L(2026, 10, 16, 12, 0))])   # viernes 12:00
-    assert _eval(alert, L(2026, 10, 20, 11, 59)) is None
-    item = _eval(alert, L(2026, 10, 20, 12, 0))                  # martes 12:00
+    assert _admin_eval(alert, L(2026, 10, 20, 11, 59)) is None
+    item = _admin_eval(alert, L(2026, 10, 20, 12, 0))            # martes 12:00
     assert item.rule == RULE_NO_ACTION and item.never_managed is False
     assert item.rule_label == "Sin actividad"
     assert item.text == "2 d hábiles sin actividad"
     assert item.badge == "Sin actividad · 2 d hábiles"
     assert item.as_dict()["rule_label"] == "Sin actividad"
+
+
+def test_sin_actividad_por_defecto_no_tiene_reloj():
+    """PLAN_SIN_ACTIVIDAD_AGENTES.md D1: con gestión desde la asignación y 48 h
+    hábiles sin nada, por defecto (agente, job, Inicio) no hay reloj; con
+    `include_stalled=True` (admin) sí, como «Sin actividad»."""
+    alert = _alert(L(2026, 10, 12, 9, 0), [_fu("CONTACTADO", L(2026, 10, 16, 12, 0))])   # viernes 12:00
+    now = L(2026, 10, 20, 12, 0)                                 # martes: 48 h hábiles
+    assert _clock(alert, now) is None
+    assert _eval(alert, now) is None
+    assert svc.evaluate_alerts([alert], now=now, **THRESHOLDS) == {}
+    clock = _clock(alert, now, include_stalled=True)
+    assert clock.overdue and clock.rule_label == "Sin actividad"
+    assert svc.evaluate_alerts([alert], now=now, include_stalled=True, **THRESHOLDS)[alert.id].badge == (
+        "Sin actividad · 2 d hábiles")
+    # Ni siquiera el reloj aún no vencido («Plazo de gestión» del detalle)
+    assert _clock(alert, L(2026, 10, 19, 12, 0)) is None
+    assert not _clock(alert, L(2026, 10, 19, 12, 0), include_stalled=True).overdue
+
+
+def test_sin_gestionar_y_r3_no_cambian_sin_include_stalled():
+    now = L(2026, 10, 20, 12, 0)
+    never = _alert(L(2026, 10, 16, 12, 0))
+    assert _eval(never, now) == _eval(never, now, include_stalled=True)
+    assert _eval(never, now).rule_label == "Sin gestionar"
+    callback = _alert(L(2026, 10, 13, 9, 0), [_fu("SIN_RESPUESTA", L(2026, 10, 16, 17, 0))])
+    assert _eval(callback, now).rule == RULE_CALLBACK
+    assert _eval(callback, now).attempts == _eval(callback, now, include_stalled=True).attempts == 1
+    # Reloj aún no vencido de R3: sigue saliendo
+    assert _clock(callback, L(2026, 10, 19, 12, 0)).rule == RULE_CALLBACK
 
 
 def test_r1_con_lunes_festivo():
@@ -111,22 +149,25 @@ def test_alerta_cerrada_no_tiene_reloj():
 
 
 def test_r1_con_otra_gestion_como_ultimo_seguimiento():
-    # Contactado tras un «Sin respuesta»: ya no es R3, R1 desde Contactado
+    # Contactado tras un «Sin respuesta»: ya no es R3, R1 desde Contactado (solo admin)
     alert = _alert(L(2026, 10, 13, 9, 0), [
         _fu("SIN_RESPUESTA", L(2026, 10, 13, 10, 0)),
         _fu("CONTACTADO", L(2026, 10, 14, 10, 0)),
     ])
-    clock = _clock(alert, L(2026, 10, 15, 11, 0))
+    clock = _clock(alert, L(2026, 10, 15, 11, 0), include_stalled=True)
     assert clock.rule == RULE_NO_ACTION and not clock.overdue
     assert clock.since == L(2026, 10, 14, 10, 0)
-    assert _eval(alert, L(2026, 10, 16, 10, 0)).rule == RULE_NO_ACTION
+    assert _admin_eval(alert, L(2026, 10, 16, 10, 0)).rule == RULE_NO_ACTION
+    assert _clock(alert, L(2026, 10, 15, 11, 0)) is None
 
 
 def test_perfil_guardado_y_propiedad_asociada_reinician_r1():
     for action in ("PERFIL_GUARDADO", "PROPIEDAD_ASOCIADA"):
         alert = _alert(L(2026, 10, 13, 9, 0), [_fu(action, L(2026, 10, 15, 9, 0))])
-        assert _eval(alert, L(2026, 10, 16, 9, 0)) is None
-        assert _eval(alert, L(2026, 10, 19, 9, 0)).rule == RULE_NO_ACTION
+        assert _admin_eval(alert, L(2026, 10, 16, 9, 0)) is None
+        assert _admin_eval(alert, L(2026, 10, 19, 9, 0)).rule == RULE_NO_ACTION
+        # Cuentan como gestión: para el agente ya no hay reloj
+        assert _eval(alert, L(2026, 10, 19, 9, 0)) is None
 
 
 def test_nota_reasignada_no_cuenta_como_gestion():
@@ -195,11 +236,15 @@ def test_r3_segundo_y_tercer_intento():
 def test_r3_cuarto_sin_respuesta_cae_en_r1_a_las_48_horas():
     follow_ups = [_fu("SIN_RESPUESTA", L(2026, 10, d, 10, 0)) for d in (12, 13, 14, 15)]
     alert = _alert(L(2026, 10, 12, 9, 0), follow_ups)
-    clock = _clock(alert, L(2026, 10, 16, 10, 0))
+    clock = _clock(alert, L(2026, 10, 16, 10, 0), include_stalled=True)
     assert clock.rule == RULE_NO_ACTION and not clock.overdue           # 24 h: ya no hay R3
     assert clock.since == L(2026, 10, 15, 10, 0)
-    item = _eval(alert, L(2026, 10, 19, 10, 0))                          # lunes: 48 h hábiles
+    item = _admin_eval(alert, L(2026, 10, 19, 10, 0))                    # lunes: 48 h hábiles
     assert item.rule == RULE_NO_ACTION and item.attempts == 0
+    assert item.rule_label == "Sin actividad"
+    # Por defecto (agente): fuera de R3 y con gestión, sin reloj (PLAN_SIN_ACTIVIDAD_AGENTES.md)
+    assert _clock(alert, L(2026, 10, 16, 10, 0)) is None
+    assert _eval(alert, L(2026, 10, 19, 10, 0)) is None
 
 
 def test_r3_seguimiento_posterior_la_resuelve():
@@ -268,9 +313,9 @@ def test_never_managed_r1_sin_ninguna_gestion():
 
 
 def test_never_managed_falso_en_r1_parada():
-    # Gestionada y luego nada en más de 48 h hábiles
+    # Gestionada y luego nada en más de 48 h hábiles (solo existe en la vista del admin)
     alert = _alert(L(2026, 10, 13, 9, 0), [_fu("CONTACTADO", L(2026, 10, 13, 10, 0))])
-    item = _eval(alert, L(2026, 10, 16, 10, 0))
+    item = _admin_eval(alert, L(2026, 10, 16, 10, 0))
     assert item.rule == RULE_NO_ACTION and not item.never_managed
     assert item.as_dict()["never_managed"] is False
 
@@ -371,12 +416,15 @@ def test_sin_respuesta_en_bd_da_r3_y_el_cuarto_r1(ctx):
         _db_follow_up(ctx, alert, "SIN_RESPUESTA", L(2026, 10, day, 10, 0))
     [item] = svc.find_buyers_needing_attention(ctx.db, agent_id=ctx.ana.id, now=NOW)
     assert item.rule == RULE_CALLBACK and item.attempts == 3 and item.is_last_attempt
-    # Cuarto «Sin respuesta» el lunes 10:00: R1 a las 48 h hábiles (miércoles 10:00)
+    # Cuarto «Sin respuesta» el lunes 10:00: R1 «Sin actividad» a las 48 h hábiles
+    # (miércoles 10:00), solo para el admin (PLAN_SIN_ACTIVIDAD_AGENTES.md)
     _db_follow_up(ctx, alert, "SIN_RESPUESTA", L(2026, 10, 19, 10, 0))
     ctx.db.expire(alert, ["follow_ups"])
-    assert svc.find_buyers_needing_attention(ctx.db, agent_id=ctx.ana.id, now=NOW) == []
-    [item] = svc.find_buyers_needing_attention(ctx.db, agent_id=ctx.ana.id, now=L(2026, 10, 21, 10, 0))
-    assert item.rule == RULE_NO_ACTION
+    assert svc.find_buyers_needing_attention(ctx.db, agent_id=ctx.ana.id, now=NOW, include_stalled=True) == []
+    later = L(2026, 10, 21, 10, 0)
+    [item] = svc.find_buyers_needing_attention(ctx.db, agent_id=ctx.ana.id, now=later, include_stalled=True)
+    assert item.rule == RULE_NO_ACTION and not item.never_managed
+    assert svc.find_buyers_needing_attention(ctx.db, agent_id=ctx.ana.id, now=later) == []
 
 
 def test_envoltorio_conserva_la_forma(ctx):

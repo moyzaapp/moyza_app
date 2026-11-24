@@ -600,8 +600,6 @@ class DashboardThresholds:
     los recordatorios por email (`settings.BUYER_REMINDER_HOURS`, 48 h).
     """
 
-    # Agente: compradores con último seguimiento "sin respuesta" hace más de N días
-    NO_RESPONSE_DAYS = 3
     # Agente: propiedades activas sin ninguna visita en N días
     STALE_PROPERTY_DAYS = 30
     # Admin: compradores PENDING abandonados (misma regla que Resultados Comerciales)

@@ -92,6 +92,7 @@ Bloques del agente:
 2. **KPIs con objetivo**: las 5 métricas de `calculate_metrics` + anillo de progreso SVG contra `agent_performance_targets`. El anillo solo aparece en las métricas que son objetivo para ese tipo de período (`OBJECTIVE_KEYS_BY_PERIOD`: semana = captaciones y bajadas; mes y año = captaciones, bajadas y cierres); las demás se muestran como resultado sin anillo. Captaciones, bajadas y cierres llevan el desglose "venta · alquiler" como subtítulo. Delta contra el período anterior.
 3. **Novedades**: notificaciones del usuario (ver §4), no leídas primero, máximo 8, con "Marcar todas como leídas" y enlace a `/notifications` (lista completa).
 4. **Hoy y pendiente**: seguimientos con `next_action_date` vencida o de hoy (de sus compradores), compradores `PENDING` sin leer, compradores en `SIN_RESPUESTA` con más de N días. Enlaces directos a `/alerts`.
+   *Retirado el 2026-11-23 (`PLAN_SIN_ACTIVIDAD_AGENTES.md` D5): la línea «Sin respuesta desde hace más de 3 días» (`NO_RESPONSE_DAYS`) duplicaba a R3 «volver a llamar».*
 5. **Tendencia**: dos series de 8 semanas (hojas de visita, contactos) con línea de objetivo. Gráfica ligera (ver decisión §6-4).
 6. **Mi cartera**: conteo por estado de sus propiedades y "sin visitas en 30 días" (candidatas a bajada/acción).
 7. **Observaciones del admin**: `admin_notes` del período actual si existen.

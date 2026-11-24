@@ -54,6 +54,10 @@ hay, desde la asignación; umbral `BUYER_REMINDER_HOURS` (48 h hábiles); cadenc
 `BUYER_REMINDER_REPEAT_BUSINESS_DAYS` (2). Cubre: alertas nunca gestionadas, alertas cuyo último seguimiento no
 es "Sin respuesta", y alertas con más de 3 "Sin respuesta" seguidos sin otra gestión.
 
+> **2026-11-23 (`PLAN_SIN_ACTIVIDAD_AGENTES.md`):** la variante «Sin actividad» de R1 (hubo gestión y luego
+> 48 h hábiles sin nada) solo la ve el admin, en el listado y el detalle de la alerta; ya no genera avisos
+> de campana ni email. Para el agente R1 queda solo como «Sin gestionar» (nunca gestionada desde la asignación).
+
 **R2 · Sin avance de Primera llamada**: **se elimina** (`RULE_STAGE_STALL`, `first_stage_label`,
 `first_stage_since`, `BUYER_STAGE_STALL_HOURS`).
 

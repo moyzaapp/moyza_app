@@ -71,6 +71,10 @@ los avisos (§4-4).
 | **R1 · Sin gestión** (la de hoy, corregida) | Desde la última gestión real (`alert_view.real_follow_ups_clause`: excluye notas del sistema como `REASIGNADA`) o, si no hay, desde la asignación. | `BUYER_REMINDER_HOURS` = 48 **h hábiles** | Alerta asignada el viernes 12:00, nadie la toca → vence el martes 12:00. |
 | **R2 · Sin avance de etapa** (nueva) | Desde el último seguimiento que **avanzó la etapa** (`STAGE_ORDER` ≥ 1, no repetible) o, si no hay ninguno, desde la asignación. "Sin respuesta" **no** reinicia este reloj. | `BUYER_STAGE_STALL_HOURS` = 48 h hábiles (§4-5) | Comprador en "Primera llamada" con tres "sin respuesta" en una semana: R1 no salta (hay gestión), **R2 sí**: "4 días hábiles sin avanzar de Primera llamada". |
 
+> **2026-11-23 (`PLAN_SIN_ACTIVIDAD_AGENTES.md`):** R1 en su variante «Sin actividad» (hubo gestión y luego
+> 48 h hábiles sin nada) solo la ve el admin, en el listado y el detalle de la alerta; no genera avisos de
+> campana ni email. Para el agente R1 queda solo como «Sin gestionar».
+
 Servicio nuevo `services/buyer_attention_service.py` (sustituye a `get_pending_buyers_by_agent`, que pasa a
 ser un envoltorio para no romper el Inicio ni el email):
 

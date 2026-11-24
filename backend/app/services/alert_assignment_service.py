@@ -239,12 +239,16 @@ def cession_window_open(alert, now: Optional[datetime] = None, since=_FROM_SETTI
     R1 «sin gestión» o R3 «volver a llamar»): abierto mientras no haya
     vencido. Una alerta sin reloj por el corte `BUYER_ATTENTION_SINCE` usa
     `BUYER_REMINDER_HOURS` horas hábiles desde la asignación. Cerrada: no.
+
+    Con `include_stalled=True`: aunque el agente ya no vea «Sin actividad»
+    (PLAN_SIN_ACTIVIDAD_AGENTES.md D1), el plazo para ceder una alerta
+    gestionada sigue contando desde su última gestión, como antes.
     """
     now = now or datetime.utcnow()
     if alert.status not in REASSIGNABLE_STATUSES:
         return False
     clock_kwargs = {} if since is _FROM_SETTINGS else {"since": since}
-    clock = buyer_attention_service.alert_clock(alert, now=now, **clock_kwargs)
+    clock = buyer_attention_service.alert_clock(alert, now=now, include_stalled=True, **clock_kwargs)
     if clock is not None:
         return not clock.overdue
     start = alert_view.assignment_start(alert)

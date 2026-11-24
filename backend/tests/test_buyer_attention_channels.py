@@ -11,7 +11,9 @@ ajustado por PLAN_RECORDATORIO_SIN_RESPUESTA.md §3.2).
     cuando dejan de aplicar (también las antiguas `buyer_stage_stall`);
   - job del email con un GmailService falso: no envía en sábado ni en lunes
     festivo; en día hábil, un email por agente con las secciones «Pendientes
-    de volver a llamar» y «Sin gestión»; pasada horaria solo in-app de R3;
+    de volver a llamar» y «Sin gestionar»; pasada horaria solo in-app de R3;
+  - «Sin actividad» (gestionada y luego nada) ya no llega al agente: ni aviso,
+    ni email, ni Inicio (PLAN_SIN_ACTIVIDAD_AGENTES.md);
   - Inicio del agente y «Requiere atención» del admin con las dos reglas.
 - Integración contra la app levantada (se omite si no responde): el listado
   /alerts muestra los badges y el detalle el vencimiento.
@@ -161,18 +163,21 @@ def test_por_defecto_un_aviso_por_vencimiento_sin_repeticion(ctx):
     assert run(L(2026, 10, 20, 8, 0)) == 0          # martes: 2 días hábiles después, no repite
     assert run(L(2026, 10, 30, 8, 0)) == 0          # dos semanas después, tampoco
     assert len(_mine(ctx, NotificationKind.BUYER_NO_ACTION)) == 1
-    # Gestión real: se resuelve; 48 h hábiles sin nada -> nuevo vencimiento -> un aviso más
+    # Gestión real: se resuelve y, aunque pasen 48 h hábiles sin nada, ya no hay
+    # aviso «Comprador sin actividad» (PLAN_SIN_ACTIVIDAD_AGENTES.md D1)
     _follow_up(ctx, "CONTACTADO", L(2026, 10, 30, 9, 0))
     assert run(L(2026, 10, 30, 10, 0)) == 0
-    assert run(L(2026, 11, 4, 10, 0)) == 1          # mié 4/11 (lunes 2/11 festivo): venció el martes 9:00
+    assert run(L(2026, 11, 4, 10, 0)) == 0          # mié 4/11 (lunes 2/11 festivo): antes avisaba
     assert run(L(2026, 11, 10, 10, 0)) == 0
-    assert len(_mine(ctx, NotificationKind.BUYER_NO_ACTION)) == 2
+    assert len(_mine(ctx, NotificationKind.BUYER_NO_ACTION)) == 1
 
 
 def test_ventana_del_agente_excluye_sin_actividad(ctx):
     """PLAN_RUIDO_CAMPANA.md D1: la ventana de inicio del agente muestra solo
     «sin gestionar» (nunca gestionado) y «volver a llamar»; un comprador parado
-    tras una gestión (R1 «sin actividad») no sale, aunque siga en el email."""
+    tras una gestión (R1 «sin actividad») no sale. Desde
+    PLAN_SIN_ACTIVIDAD_AGENTES.md tampoco llega a `get_pending_buyers_by_agent`
+    (email); solo con `include_stalled=True` (admin)."""
     from app.models.alert_follow_up import AlertFollowUp
     from app.models.property_alert import PropertyAlert
     from app.services.buyer_reminder_service import get_pending_buyers_by_agent
@@ -190,7 +195,14 @@ def test_ventana_del_agente_excluye_sin_actividad(ctx):
 
     raw = get_pending_buyers_by_agent(ctx.db, 48, now=now, company_id=ctx.moyza.id, agent_id=ctx.agent.id)
     raw_names = {b["buyer_name"]: b for b in raw.get((ctx.agent.id, ctx.moyza.id), [])}
-    assert raw_names["PYTEST-CANAL Parado"]["rule"] == "no_action" and not raw_names["PYTEST-CANAL Parado"]["never_managed"]
+    assert "PYTEST-CANAL Parado" not in raw_names
+    assert raw_names["PYTEST-CANAL Comprador"]["never_managed"] is True
+    # La vista del admin sí la ve como «Sin actividad»
+    from app.services.buyer_attention_service import find_buyers_needing_attention
+    stalled_items = [i for i in find_buyers_needing_attention(ctx.db, agent_id=ctx.agent.id, now=now,
+                                                              include_stalled=True)
+                     if i.alert.id == stalled.id]
+    assert [(i.rule, i.never_managed, i.rule_label) for i in stalled_items] == [("no_action", False, "Sin actividad")]
 
     rows = DashboardService(ctx.db, ctx.moyza.id).pending_buyers_for_agent(ctx.agent.id, now=now)
     names = {r["buyer_name"] for r in rows}
@@ -214,7 +226,7 @@ def test_sin_respuesta_resuelve_r1_y_otra_gestion_resuelve_r3(ctx):
     assert ns.unread_count(ctx.db, ctx.user.id, ctx.moyza.id) == 0
 
 
-def test_r3_un_aviso_por_intento_y_el_cuarto_pasa_a_r1(ctx):
+def test_r3_un_aviso_por_intento_y_el_cuarto_ya_no_avisa(ctx):
     kind = NotificationKind.BUYER_CALLBACK_DUE
     # 1er «Sin respuesta» el viernes 16 a las 17:00 -> vence el lunes 19 a las 17:00
     _follow_up(ctx, "SIN_RESPUESTA", L(2026, 10, 16, 17, 0))
@@ -238,17 +250,16 @@ def test_r3_un_aviso_por_intento_y_el_cuarto_pasa_a_r1(ctx):
     assert [n.read_at is None for n in notes] == [False, False, True]
     assert "Intento 3 de 3" in notes[-1].body and "cierra la alerta como «Sin interés»" in notes[-1].body
     assert _run(ctx, L(2026, 10, 27, 10, 15)) == 0
-    # 4º «Sin respuesta»: ya no hay R3; cae en R1 a las 48 h hábiles
+    # 4º «Sin respuesta»: ya no hay R3. Antes caía en R1 «sin actividad» a las
+    # 48 h hábiles; desde PLAN_SIN_ACTIVIDAD_AGENTES.md D1 el agente no recibe nada
     _follow_up(ctx, "SIN_RESPUESTA", L(2026, 10, 26, 11, 0))
     assert ns.resolve_buyer_notifications(ctx.db, alert_ids=[ctx.alert.id], now=L(2026, 10, 26, 11, 5)) == 1
     assert _run(ctx, L(2026, 10, 27, 11, 15)) == 0
-    assert _run(ctx, L(2026, 10, 28, 11, 0)) == 1
+    assert _run(ctx, L(2026, 10, 28, 11, 0)) == 0
+    assert _run(ctx, L(2026, 11, 10, 11, 0)) == 0
     assert len(_mine(ctx, kind)) == 3
-    [r1] = _mine(ctx, NotificationKind.BUYER_NO_ACTION)
-    # Hubo gestión (los «Sin respuesta») y luego nada: «sin actividad», no «sin gestionar»
-    assert r1.title == "Comprador sin actividad · PYTEST-CANAL Comprador"
-    # Nunca dos avisos distintos sin leer a la vez para la misma alerta
-    assert ns.unread_count(ctx.db, ctx.user.id, ctx.moyza.id) == 1
+    assert _mine(ctx, NotificationKind.BUYER_NO_ACTION) == []
+    assert ns.unread_count(ctx.db, ctx.user.id, ctx.moyza.id) == 0
 
 
 def test_pasada_horaria_solo_r3_y_sin_email(ctx):
@@ -315,8 +326,6 @@ def test_inicio_agente_y_admin_con_las_dos_reglas(ctx):
     assert callback["text"] == "Tercer intento sin respuesta · cierra la alerta (Sin interés)"
     assert callback["since_label"] == "jueves 15/10 a las 12:00"
     assert attention_summary(rows) == "1 pendiente de volver a llamar · 1 sin gestionar"
-    stalled = dict(by_name["PYTEST-CANAL Comprador"], never_managed=False)
-    assert attention_summary([stalled, callback]) == "1 pendiente de volver a llamar · 1 sin actividad"
 
     [group] = [g for g in svc.pending_buyers_by_agent([ctx.agent], now=now) if g["agent_id"] == ctx.agent.id]
     assert (group["count"], group["callback"], group["no_action"], group["last_attempt"]) == (2, 1, 1, 1)
@@ -382,9 +391,11 @@ def test_job_en_dia_habil_un_email_con_dos_secciones(ctx):
     assert len(mine) == 1
     email = mine[0]
     assert email.subject.endswith("2 comprador(es) requieren atención")
-    assert "Pendientes de volver a llamar (1)" in email.body and "Sin gestionar o sin actividad (1)" in email.body
-    assert email.body.index("Pendientes de volver a llamar") < email.body.index("Sin gestionar o sin actividad (1)")
-    assert "<th" in email.body and "Situación" in email.body and ">Sin gestionar<" in email.body
+    assert "Pendientes de volver a llamar (1)" in email.body and "Sin gestionar (1)" in email.body
+    assert email.body.index("Pendientes de volver a llamar") < email.body.index("Sin gestionar (1)")
+    # Sección «Sin gestionar» sin la columna «Situación» (PLAN_SIN_ACTIVIDAD_AGENTES.md D4)
+    assert "<th" in email.body and "Situación" not in email.body
+    assert "sin actividad" not in email.body.lower()
     assert "PYTEST-CANAL Comprador" in email.body and "PYTEST-CANAL Volver" in email.body
     assert "Intento 1 de 3" in email.body
     assert "horas hábiles" in email.body
@@ -395,6 +406,48 @@ def test_job_en_dia_habil_un_email_con_dos_secciones(ctx):
     # En la misma pasada, los avisos in-app (uno por alerta)
     kinds = sorted(n.kind for n in _mine(ctx))
     assert kinds == [NotificationKind.BUYER_CALLBACK_DUE, NotificationKind.BUYER_NO_ACTION]
+
+
+def test_job_no_avisa_ni_lista_las_alertas_gestionadas(ctx):
+    """PLAN_SIN_ACTIVIDAD_AGENTES.md D1 y D4: una alerta gestionada y luego
+    parada más de 48 h hábiles no crea `buyer_no_action` ni sale en el email;
+    la nunca gestionada sí, en la sección «Sin gestionar»."""
+    from app.models.alert_follow_up import AlertFollowUp
+    from app.models.property_alert import PropertyAlert
+
+    stalled = PropertyAlert(company_id=ctx.moyza.id, agent_id=ctx.agent.id, lead_name="PYTEST-CANAL Parado",
+                            status=AlertStatus.IN_PROGRESS, created_by=ctx.admin.id,
+                            created_at=L(2026, 10, 13, 9, 0), assigned_at=L(2026, 10, 13, 9, 0), origin="search")
+    ctx.db.add(stalled)
+    ctx.db.flush()
+    ctx.db.add(AlertFollowUp(alert_id=stalled.id, action_type="CONTACTADO",
+                             created_at=L(2026, 10, 13, 12, 0), created_by=ctx.user.id))
+    ctx.db.flush()
+
+    summary, mine = _job(ctx, L(2026, 10, 19, 8, 0))   # lunes: más de 48 h hábiles desde el Contactado
+    [email] = mine
+    assert "Sin gestionar (1)" in email.body and "PYTEST-CANAL Comprador" in email.body
+    assert "PYTEST-CANAL Parado" not in email.body
+    assert "sin actividad" not in email.body.lower()
+    [entry] = [e for e in summary["emails"] if e["to"] == ctx.agent.email]
+    assert entry["no_action"] == ["PYTEST-CANAL Comprador"]
+    notes = _mine(ctx, NotificationKind.BUYER_NO_ACTION)
+    assert [(n.entity_id, n.title) for n in notes] == [(ctx.alert.id, "Comprador sin gestionar · PYTEST-CANAL Comprador")]
+
+
+def test_avisos_sin_actividad_que_queden_se_marcan_leidos(ctx):
+    """§3.3: un «Comprador sin actividad» sin leer de antes del cambio deja de
+    aplicar y la siguiente pasada lo marca leído."""
+    _follow_up(ctx, "CONTACTADO", L(2026, 10, 13, 12, 0))
+    old = Notification(user_id=ctx.user.id, company_id=ctx.moyza.id, kind=NotificationKind.BUYER_NO_ACTION,
+                       title="Comprador sin actividad · PYTEST-CANAL Comprador", entity_type="alert",
+                       entity_id=ctx.alert.id, created_at=L(2026, 10, 16, 8, 0))
+    ctx.db.add(old)
+    ctx.db.flush()
+    now = L(2026, 10, 19, 8, 0)
+    assert ns.resolve_buyer_notifications(ctx.db, items=_items(ctx, now), now=now) >= 1
+    ctx.db.refresh(old)
+    assert old.read_at == now
 
 
 def test_email_escapa_el_nombre():
