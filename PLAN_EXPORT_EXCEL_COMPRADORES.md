@@ -169,3 +169,81 @@ contenedor (`pip install openpyxl`); en producción se reconstruye la imagen.
 - Export para agentes, varias empresas en un fichero, hoja de seguimientos,
   filtro por fecha de última gestión o de cierre.
 - Gráficos o fórmulas en el libro.
+
+## 6. Cambio 2026-11-24: filtro por agente y solo la hoja «Compradores»
+
+Petición: «un filtro que sea agente, y que pueda seleccionar varios o todos»
+y «exportar solo la hoja de compradores por el momento».
+
+### 6.1 Decisiones
+
+- **D6** El libro lleva solo la hoja «Compradores». Las hojas «Resumen» y
+  «Alertas» se retiran del código (quedan en el historial de git si vuelven a
+  hacer falta); sus tests también.
+- **D7** Filtro «Agentes» en el modal: lista de casillas con todos los agentes
+  activos de la empresa activa (`scope_active_agents`, orden por nombre) y una
+  casilla «Todos» marcada por defecto que marca/desmarca el resto. Parámetro
+  repetido `agente=<id>`; sin ninguno = todos (sin filtro). Ids que no sean
+  agentes activos de la empresa se ignoran.
+- **D8** Un comprador «es» de un agente con la misma regla que usa la app para
+  que el agente lo vea (`alerts.visible_buyers_query`): lo creó el usuario del
+  agente (`Buyer.created_by` = usuario con el email del agente), o es el agente
+  de su perfil (`BuyerSearchCriteria.agent_id`), o tiene alguna alerta de la
+  empresa asignada a él (`PropertyAlert.agent_id`, cualquier estado y fecha).
+  Con varios agentes marcados, basta con que cumpla con uno.
+- **D9** Nueva columna «Agentes» en la hoja, tras «Creado por»: nombres de los
+  agentes de la empresa que cumplen D8 con ese comprador, separados por «, »
+  (vacío si ninguno). Así se ve a quién pertenece cada fila también sin filtro.
+
+### 6.2 Diseño
+
+- Servicio: `build_buyers_workbook(db, company, start, end, agent_ids=None)`.
+  Si `agent_ids` (lista no vacía), filtra con `Buyer.id.in_(...)` sobre la
+  unión de las tres condiciones de D8. Para la columna D9, tres consultas
+  agrupadas (no N+1): alertas por `(buyer_id, agent_id)` de la empresa,
+  criterios `(buyer_id, agent_id)`, y `created_by` → agente por email
+  (`Agent.email == User.email`, solo agentes de la empresa). Quitar
+  `_alerts`, `_alert_row`, `_summary_rows`, `ALERT_COLUMNS`, `SUMMARY_COLUMNS`
+  y constantes que ya no se usen; `_append` y `_write_sheet` se quedan.
+- Ruta `GET /alerts/export.xlsx`: nuevo `agente: List[str] = Query(default=[])`;
+  convierte a int, descarta los que no estén en `scope_active_agents(company)`;
+  pasa `agent_ids`. Nombre del fichero sin cambios.
+- Listado (`alerts_page`): pasar `export_agents` (activos de la empresa, por
+  nombre; ya existe `agents` para el filtro del listado, reutilizar).
+- Modal (`alerts/list.html`): bajo las fechas, bloque «Agentes» con casilla
+  «Todos» (`id="exportAgentsAll"`, marcada) y una casilla por agente
+  (`name="agente" value="{{ a.id }}"`), en una rejilla de 1–2 columnas con
+  scroll si hay muchos (`max-h-48 overflow-y-auto`, comprobar que existen en
+  el CSS compilado). JS mínimo inline en la plantilla (o en el JS de la
+  página si ya hay uno): «Todos» marcado → desmarca y deshabilita las demás;
+  desmarcado → las habilita; si el admin desmarca todas, vuelve a «Todos».
+  Nota: «Incluye los compradores dados de alta en ese periodo en {{ empresa }}».
+- Tests `tests/test_buyer_export.py`: quitar los de Resumen/Alertas; libro con
+  una sola hoja; columna «Agentes»; `?agente=<id>` deja solo los compradores
+  de ese agente (uno por alerta, otro por `created_by`, otro por criterios) y
+  excluye al resto; dos `agente=` suman; `agente` inválido o de otra empresa
+  se ignora (= todos). `test_alerts_unmanaged_filter.py`: el modal lista a
+  los agentes activos de la empresa con la casilla «Todos».
+- Docs: `MULTIEMPRESA_MOYZA_MOES.md` §15 no cambia (misma dependencia).
+
+### 6.3 Estado
+
+- **D10** (2026-11-24, petición del usuario durante la Fase A): sin las columnas «Creado por»,
+  «Alertas» ni «Última alerta»; «Agentes» va tras «Email». La regla D8 no cambia (el caso
+  `created_by` → agente por email sigue contando para el filtro y para «Agentes»). Cabeceras:
+  Fecha de alta · Nombre · Teléfono · Email · Agentes · Tipo de negocio · Tipo de inmueble ·
+  Provincia · Zonas/ciudades · Presupuesto mín. · Presupuesto máx. · Notas.
+- [x] Fase A (2026-11-24): `build_buyers_workbook(db, company, start, end, agent_ids=None)`
+  con solo «Compradores» (fuera `_alerts`, `_alert_row`, `_summary_rows`, `_property_text`,
+  `_user_names`, `_alert_counts` y constantes); D8 como subconsultas en `_agent_filter` y D9
+  con tres consultas agrupadas en `_buyer_agents` (agentes de la empresa, también de baja,
+  nombres ordenados); ruta con `agente: List[str]` (no numéricos, ≥ 2³¹, inactivos o de otra
+  empresa se ignoran); `tests/test_buyer_export.py` 21 pasan. Desviaciones: D8 cuenta alertas
+  de cualquier estado como dice §6.1 (`visible_buyers_query` solo cuenta las no PENDING);
+  `hasta` inclusivo se prueba ahora con un comprador a las 23:30 (ya no hay «Última alerta»).
+- [x] Fase B (2026-11-24): `export_agents` en `alerts_page` (reutiliza `agents`); bloque «Agentes» en `exportExcelModal` con «Todos» y JS inline al final de `alerts/list.html` (solo admin); test de visibilidad ampliado. Verificado a 375 px y 1280 px sin desbordamiento.
+- [x] Fase C (2026-11-24): revisión con un defecto corregido (`agente=²` o una cadena de
+      miles de cifras daba 500: ahora solo cifras ASCII de hasta 10 dígitos) y dos menores
+      (columna «Agentes» por ids para no fundir homónimos; comentario de test). Suite completa
+      1428 pasan (dos fallos ajenos deseleccionados). Smoke como admin con datos demo: una sola
+      hoja con las cabeceras de D10; un agente filtra, dos suman, valores inválidos = todos.

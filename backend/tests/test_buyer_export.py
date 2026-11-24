@@ -1,17 +1,22 @@
 """
-Excel de compradores para administración (PLAN_EXPORT_EXCEL_COMPRADORES.md §2.5).
+Excel de compradores para administración (PLAN_EXPORT_EXCEL_COMPRADORES.md
+§2.5 y §6).
 
 Integración contra la app levantada (patrón de test_metric_detail.py; se omiten
 si la app no responde):
 
-- El admin descarga un `.xlsx` con las tres hojas y sus cabeceras, con el
-  nombre de fichero esperado.
-- Filtro por fecha de alta, `hasta` inclusivo (alerta a las 23:30 de Madrid).
+- El admin descarga un `.xlsx` con una sola hoja, «Compradores», y sus
+  cabeceras («Agentes» tras «Email»; sin «Creado por», «Alertas» ni
+  «Última alerta»), con el nombre de
+  fichero esperado.
+- Filtro por fecha de alta, `hasta` inclusivo (comprador a las 23:30 de
+  Madrid); el límite inferior en hora de Madrid.
 - Solo la empresa activa: lo de MOES no sale en el export de MOYZA.
 - Un agente recibe la redirección de `require_admin_role`.
 - `desde > hasta` se intercambia; una fecha inválida redirige a /alerts.
-- Etapa actual con la regla del listado; «Sin iniciar» sin seguimientos.
-- Los totales del Resumen cuadran con las otras hojas.
+- Columna «Agentes» y filtro `agente` (D8): por alerta (cualquier estado),
+  por `created_by` (usuario con el email del agente) y por el perfil; dos
+  `agente` suman; inválidos, de otra empresa o dados de baja se ignoran.
 
 Los datos van en marzo de 2021 (lejos de los datos demo) con el prefijo del
 TAG y se borran al terminar.
@@ -34,20 +39,21 @@ BASE_URL = os.getenv("MOYZA_TEST_BASE_URL", "http://localhost:8000")
 ADMIN_EMAIL = os.getenv("MOYZA_TEST_ADMIN_EMAIL", "admin@moyza.com")
 TAG = "PYTEST-EXPORT"
 AGENT_EMAIL = "pytest.export.agente@example.com"
+AGENT2_EMAIL = "pytest.export.agente2@example.com"
+INACTIVE_EMAIL = "pytest.export.baja@example.com"
 MOES_AGENT_EMAIL = "pytest.export.moes@example.com"
 RANGE = "desde=2021-03-10&hasta=2021-03-12"
 FILENAME = "compradores_moyza_2021-03-10_2021-03-12.xlsx"
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 BUYER_HEADERS = [
-    "Fecha de alta", "Nombre", "Teléfono", "Email", "Creado por", "Alertas", "Última alerta",
-    "Tipo de negocio", "Tipo de inmueble", "Provincia", "Zonas/ciudades", "Presupuesto mín.",
-    "Presupuesto máx.", "Notas",
+    "Fecha de alta", "Nombre", "Teléfono", "Email", "Agentes", "Tipo de negocio",
+    "Tipo de inmueble", "Provincia", "Zonas/ciudades", "Presupuesto mín.", "Presupuesto máx.",
+    "Notas",
 ]
-ALERT_HEADERS = [
-    "Fecha", "Comprador", "Teléfono", "Email", "Origen", "Referencia", "Propiedad", "Fuente",
-    "Agente", "Etapa actual", "Estado", "Última gestión", "Nº gestiones", "Fecha de cierre", "Cedida",
-]
+AGENT_NAME = f"{TAG} AGENTE"
+AGENT2_NAME = f"{TAG} AGENTE DOS"
+INACTIVE_NAME = f"{TAG} AGENTE BAJA"
 
 pytestmark = pytest.mark.skipif(
     not _server_up(),
@@ -102,8 +108,8 @@ def _cleanup(db):
         synchronize_session=False)
     db.query(Buyer).filter(Buyer.name.like(f"{TAG}%")).delete(synchronize_session=False)
     db.query(Property).filter(Property.title.like(f"{TAG}%")).delete(synchronize_session=False)
-    db.query(User).filter(User.email == AGENT_EMAIL).delete(synchronize_session=False)
-    for email in (AGENT_EMAIL, MOES_AGENT_EMAIL):
+    db.query(User).filter(User.email.in_([AGENT_EMAIL, AGENT2_EMAIL])).delete(synchronize_session=False)
+    for email in (AGENT_EMAIL, AGENT2_EMAIL, INACTIVE_EMAIL, MOES_AGENT_EMAIL):
         found = db.query(Agent).filter(Agent.email == email).first()
         if found:
             found.companies.clear()
@@ -132,30 +138,37 @@ def data():
     role = db.query(Role).filter(Role.name.ilike("agent")).first()
     admin = db.query(User).filter(User.email == ADMIN_EMAIL).one()
 
-    agent = Agent(name=f"{TAG} AGENTE", email=AGENT_EMAIL)
+    agent = Agent(name=AGENT_NAME, email=AGENT_EMAIL)
     agent.companies.append(moyza)
+    agent2 = Agent(name=AGENT2_NAME, email=AGENT2_EMAIL)
+    agent2.companies.append(moyza)
+    inactive = Agent(name=INACTIVE_NAME, email=INACTIVE_EMAIL, is_active=False)
+    inactive.companies.append(moyza)
     moes_agent = Agent(name=f"{TAG} MOES", email=MOES_AGENT_EMAIL)
     moes_agent.companies.append(moes)
     user = User(email=AGENT_EMAIL, full_name=f"{TAG} usuario", hashed_password="pytest-sin-login",
                 role_id=role.id if role else None, is_active=True)
     user.companies.append(moyza)
+    user2 = User(email=AGENT2_EMAIL, full_name=f"{TAG} usuario dos", hashed_password="pytest-sin-login",
+                 role_id=role.id if role else None, is_active=True)
+    user2.companies.append(moyza)
     prop = Property(title=f"{TAG} Piso en el Centro", referencia="PYT-EXP-1", city="Jaén",
                     address="Calle Secreta 12, 3ºB, 23001 Jaén", company_id=moyza.id,
                     business_type="Venta")
-    db.add_all([agent, moes_agent, user, prop])
+    db.add_all([agent, agent2, inactive, moes_agent, user, user2, prop])
     db.flush()
 
-    def buyer(name, company, created, notes="Prefiere planta alta"):
+    def buyer(name, company, created, notes="Prefiere planta alta", created_by=None):
         item = Buyer(name=f"{TAG} {name}", phone="600111222", email="comprador@example.com",
                      notes=notes, company_id=company.id, created_at=created,
-                     created_by=admin.id)
+                     created_by=created_by or admin.id)
         db.add(item)
         db.flush()
         return item
 
-    def alert(name, company, agent_id, created, buyer_item=None, follow_ups=(), **extra):
+    def alert(name, company, agent_id, created, buyer_item=None, follow_ups=(), status="PENDING", **extra):
         item = PropertyAlert(company_id=company.id, agent_id=agent_id, lead_name=f"{TAG} {name}",
-                             status="PENDING", created_by=admin.id, created_at=created,
+                             status=status, created_by=admin.id, created_at=created,
                              assigned_at=created, buyer_id=buyer_item.id if buyer_item else None,
                              business_type="Venta", **extra)
         db.add(item)
@@ -170,13 +183,27 @@ def data():
                                province="Jaén", cities=["Jaén"], zones=["Centro"],
                                min_price=100000, max_price=200000))
     buyer("FUERA", moyza, _madrid(2021, 3, 9, 23, 30))
+    # `hasta` inclusivo: 23:30 de Madrid del último día dentro, 00:30 del siguiente fuera
+    buyer("ULTIMA HORA", moyza, _madrid(2021, 3, 12, 23, 30))
+    buyer("DIA SIGUIENTE", moyza, _madrid(2021, 3, 13, 0, 30))
     # 00:30 de Madrid del día 10 = 23:30 UTC del día 9: dentro solo si el límite
     # inferior se calcula en hora de Madrid. Notas con «=» y un salto manual
     # de Word (\x0b): texto literal, sin fórmula y sin romper el export.
     buyer("PRIMERA HORA", moyza, _madrid(2021, 3, 10, 0, 30), notes="=1+\x0b llamar")
     buyer("MOES", moes, _madrid(2021, 3, 11, 10))
+    # Compradores de agentes (D8) por cada vía: «DENTRO» por sus alertas
+    # (pendientes: cuenta cualquier estado), «CREADO» por `created_by` (usuario
+    # con el email del agente) y «PERFIL» por el agente de su perfil, que además
+    # tiene una alerta del agente dos. «DE DOS» lo creó el usuario del agente
+    # dos y «DE BAJA» tiene en su perfil a un agente dado de baja.
+    buyer("CREADO", moyza, _madrid(2021, 3, 11, 11), created_by=user.id)
+    profile = buyer("PERFIL", moyza, _madrid(2021, 3, 11, 12))
+    db.add(BuyerSearchCriteria(buyer_id=profile.id, agent_id=agent.id, business_type="Venta"))
+    buyer("DE DOS", moyza, _madrid(2021, 3, 11, 13), created_by=user2.id)
+    retired = buyer("DE BAJA", moyza, _madrid(2021, 3, 11, 14))
+    db.add(BuyerSearchCriteria(buyer_id=retired.id, agent_id=inactive.id))
 
-    # Alerta antigua del comprador: cuenta en «Alertas» pero no sale en la hoja
+    # Alerta antigua del comprador: D8 cuenta alertas de cualquier fecha para el filtro por agente
     alert("ANTIGUA", moyza, agent.id, _madrid(2020, 5, 1, 9), inside, origin="search")
     alert("CONTACTADO", moyza, agent.id, _madrid(2021, 3, 11, 10, 5), inside,
           follow_ups=[("CONTACTADO", _madrid(2021, 3, 11, 11)),
@@ -185,9 +212,12 @@ def data():
     alert("ULTIMA HORA", moyza, agent.id, _madrid(2021, 3, 12, 23, 30), inside, origin="search")
     alert("DIA SIGUIENTE", moyza, agent.id, _madrid(2021, 3, 13, 0, 30), origin="search")
     alert("ALERTA MOES", moes, moes_agent.id, _madrid(2021, 3, 11, 10), origin="search")
+    alert("PERFIL DOS", moyza, agent2.id, _madrid(2021, 3, 11, 12, 5), profile, origin="search",
+          status="IN_PROGRESS")
     db.commit()
 
-    yield {"admin_name": admin.full_name}
+    yield {"agent": agent.id, "agent2": agent2.id,
+           "inactive": inactive.id, "moes_agent": moes_agent.id}
 
     _cleanup(db)
     db.close()
@@ -212,58 +242,49 @@ def _by(rows, column) -> dict:
     return {row[column]: row for row in rows}
 
 
-def _summary(ws) -> dict:
-    """{concepto: valor} del Resumen (sin los títulos de bloque)."""
-    return {row[0]: row[1] for row in ws.iter_rows(min_row=2, values_only=True) if row[0]}
+def _download(query) -> tuple:
+    """(status, libro o None) del export de MOYZA del 10 al 12/03/2021 con `query` extra."""
+    status, body, _ = Client(ADMIN_EMAIL, "MOYZA").get(f"/alerts/export.xlsx?{RANGE}{query}")
+    return status, (load_workbook(BytesIO(body)) if status == 200 else None)
 
 
-def _block(ws, title) -> dict:
-    """{etiqueta: nº} de un bloque del Resumen («Alertas por fuente», …)."""
-    out, inside = {}, False
-    for concept, value in ws.iter_rows(min_row=2, values_only=True):
-        if concept == title:
-            inside = True
-        elif inside:
-            if concept is None:
-                break
-            out[concept] = value
-    return out
+def _names(wb) -> set:
+    """Nombres de los compradores del TAG en la hoja (fuera los de otros datos)."""
+    return {row["Nombre"] for row in _rows(wb["Compradores"]) if row["Nombre"].startswith(TAG)}
 
 
-def test_admin_descarga_xlsx_con_tres_hojas(export):
+ALL_NAMES = {f"{TAG} {name}" for name in
+             ("DENTRO", "PRIMERA HORA", "ULTIMA HORA", "CREADO", "PERFIL", "DE DOS", "DE BAJA")}
+
+
+def test_admin_descarga_xlsx_con_una_hoja(export):
     headers = export["headers"]
     assert headers["content-type"] == XLSX
     assert headers["content-disposition"] == f'attachment; filename="{FILENAME}"'
     wb = export["wb"]
-    assert wb.sheetnames == ["Resumen", "Compradores", "Alertas"]
-    assert [c.value for c in wb["Resumen"][1]] == ["Concepto", "Valor"]
-    assert [c.value for c in wb["Compradores"][1]] == BUYER_HEADERS
-    assert [c.value for c in wb["Alertas"][1]] == ALERT_HEADERS
-    assert wb["Compradores"].freeze_panes == "A2"
-    assert wb["Alertas"].auto_filter.ref
+    assert wb.sheetnames == ["Compradores"]
+    ws = wb["Compradores"]
+    assert [c.value for c in ws[1]] == BUYER_HEADERS
+    assert ws.freeze_panes == "A2"
+    assert ws.auto_filter.ref
 
 
-def test_filtro_por_fecha_hasta_inclusivo(export, data):
+def test_filtro_por_fecha_hasta_inclusivo(export):
     buyers = _by(_rows(export["wb"]["Compradores"]), "Nombre")
     assert f"{TAG} DENTRO" in buyers
+    # 00:30 de Madrid del primer día: el límite inferior va en hora de Madrid
     assert f"{TAG} PRIMERA HORA" in buyers
     assert f"{TAG} FUERA" not in buyers
-    alerts = {row["Comprador"] for row in _rows(export["wb"]["Alertas"])}
-    # Las alertas con comprador muestran su nombre; la del día siguiente no sale
-    assert f"{TAG} DIA SIGUIENTE" not in alerts
-    rows = [r for r in _rows(export["wb"]["Alertas"]) if r["Comprador"] == f"{TAG} DENTRO"]
-    dates = sorted(r["Fecha"] for r in rows)
-    # La de las 10:05 y la de las 23:30 del último día (hora de Madrid); la antigua no
-    assert dates == [datetime(2021, 3, 11, 10, 5), datetime(2021, 3, 12, 23, 30)]
+    assert buyers[f"{TAG} ULTIMA HORA"]["Fecha de alta"] == datetime(2021, 3, 12, 23, 30)
+    assert f"{TAG} DIA SIGUIENTE" not in buyers
 
 
-def test_fila_del_comprador(export, data):
+def test_fila_del_comprador(export):
     row = _by(_rows(export["wb"]["Compradores"]), "Nombre")[f"{TAG} DENTRO"]
     assert row["Fecha de alta"] == datetime(2021, 3, 11, 10)
-    assert row["Creado por"] == data["admin_name"]
-    # Todas sus alertas de la empresa, no solo las del periodo
-    assert row["Alertas"] == 3
-    assert row["Última alerta"] == datetime(2021, 3, 12, 23, 30)
+    # D10: sin «Creado por», «Alertas» ni «Última alerta»
+    assert not {"Creado por", "Alertas", "Última alerta"} & set(row)
+    assert row["Agentes"] == AGENT_NAME
     assert row["Tipo de negocio"] == "Venta"
     assert row["Tipo de inmueble"] == "Piso, Casa"
     assert row["Provincia"] == "Jaén"
@@ -273,16 +294,62 @@ def test_fila_del_comprador(export, data):
     ws = export["wb"]["Compradores"]
     data_row = next(r for r in ws.iter_rows(min_row=2) if r[1].value == f"{TAG} DENTRO")
     assert data_row[0].number_format == "dd/mm/yyyy hh:mm"
-    assert data_row[11].number_format == "#,##0"
+    assert data_row[9].number_format == "#,##0"
+    assert data_row[10].number_format == "#,##0"
+
+
+def test_columna_agentes(export):
+    buyers = _by(_rows(export["wb"]["Compradores"]), "Nombre")
+    # Por created_by (usuario con el email del agente)
+    assert buyers[f"{TAG} CREADO"]["Agentes"] == AGENT_NAME
+    assert buyers[f"{TAG} DE DOS"]["Agentes"] == AGENT2_NAME
+    # Perfil del agente y alerta del agente dos: los dos, por nombre
+    assert buyers[f"{TAG} PERFIL"]["Agentes"] == f"{AGENT_NAME}, {AGENT2_NAME}"
+    # Un agente dado de baja sigue apareciendo (dato histórico)
+    assert buyers[f"{TAG} DE BAJA"]["Agentes"] == INACTIVE_NAME
+    # Creado por el admin y sin alertas ni perfil: vacío
+    assert buyers[f"{TAG} PRIMERA HORA"]["Agentes"] in ("", None)
+
+
+def test_sin_filtro_salen_todos(export):
+    assert _names(export["wb"]) == ALL_NAMES
+
+
+def test_filtro_por_un_agente(data):
+    status, wb = _download(f"&agente={data['agent']}")
+    assert status == 200
+    assert wb.sheetnames == ["Compradores"]
+    # Por alerta (pendientes), por created_by y por el perfil; el resto fuera
+    assert _names(wb) == {f"{TAG} DENTRO", f"{TAG} CREADO", f"{TAG} PERFIL"}
+
+
+def test_filtro_por_dos_agentes_suma(data):
+    status, wb = _download(f"&agente={data['agent']}&agente={data['agent2']}")
+    assert status == 200
+    assert _names(wb) == {f"{TAG} DENTRO", f"{TAG} CREADO", f"{TAG} PERFIL", f"{TAG} DE DOS"}
+    status, wb = _download(f"&agente={data['agent2']}")
+    assert _names(wb) == {f"{TAG} PERFIL", f"{TAG} DE DOS"}
+
+
+@pytest.mark.parametrize("value", ["abc", "", "999999999", "99999999999999999999", "%C2%B2", "9" * 5000,
+                                   "inactive", "moes_agent"])
+def test_agente_invalido_se_ignora(data, value):
+    """Id no numérico, inexistente, desbordado, dado de baja o de otra empresa: todos."""
+    agent_id = data.get(value, value)
+    status, wb = _download(f"&agente={agent_id}")
+    assert status == 200
+    assert _names(wb) == ALL_NAMES
+
+
+def test_agente_invalido_junto_a_uno_valido(data):
+    status, wb = _download(f"&agente={data['moes_agent']}&agente={data['agent2']}")
+    assert status == 200
+    assert _names(wb) == {f"{TAG} PERFIL", f"{TAG} DE DOS"}
 
 
 def test_solo_empresa_activa(export):
     buyers = {row["Nombre"] for row in _rows(export["wb"]["Compradores"])}
-    alerts = {row["Comprador"] for row in _rows(export["wb"]["Alertas"])}
-    agents = {row["Agente"] for row in _rows(export["wb"]["Alertas"])}
     assert f"{TAG} MOES" not in buyers
-    assert f"{TAG} ALERTA MOES" not in alerts
-    assert f"{TAG} MOES" not in agents
 
 
 def test_agente_redirigido(data):
@@ -317,7 +384,8 @@ def test_fecha_extrema_redirige_sin_error(data):
 
 def test_textos_literales_sin_formulas_ni_caracteres_de_control(export):
     ws = export["wb"]["Compradores"]
-    cell = next(r for r in ws.iter_rows(min_row=2) if r[1].value == f"{TAG} PRIMERA HORA")[13]
+    notes = BUYER_HEADERS.index("Notas")
+    cell = next(r for r in ws.iter_rows(min_row=2) if r[1].value == f"{TAG} PRIMERA HORA")[notes]
     assert cell.value == "=1+ llamar"
     assert cell.data_type == "s"
 
@@ -329,57 +397,4 @@ def test_sin_fechas_mes_en_curso(data):
     assert status == 200
     expected = f"compradores_moyza_{today.replace(day=1).isoformat()}_{today.isoformat()}.xlsx"
     assert headers["content-disposition"] == f'attachment; filename="{expected}"'
-    assert load_workbook(BytesIO(body)).sheetnames == ["Resumen", "Compradores", "Alertas"]
-
-
-def test_etapa_actual_y_columnas_de_la_alerta(export):
-    rows = [r for r in _rows(export["wb"]["Alertas"]) if r["Comprador"] == f"{TAG} DENTRO"]
-    contacted = next(r for r in rows if r["Fecha"] == datetime(2021, 3, 11, 10, 5))
-    untouched = next(r for r in rows if r["Fecha"] == datetime(2021, 3, 12, 23, 30))
-    # CONTACTADO y luego SIN_RESPUESTA: la etapa no retrocede
-    assert contacted["Etapa actual"] == "Contactado"
-    assert contacted["Nº gestiones"] == 2
-    assert contacted["Última gestión"] == datetime(2021, 3, 11, 12)
-    assert contacted["Origen"] == "Con referencia"
-    assert contacted["Referencia"] == "PYT-EXP-1"
-    assert contacted["Propiedad"] == f"{TAG} Piso en el Centro · Calle Secreta 12"
-    assert contacted["Fuente"] == "Idealista"
-    assert contacted["Agente"] == f"{TAG} AGENTE"
-    assert contacted["Estado"] == "Pendiente"
-    assert contacted["Cedida"] == "No"
-    assert untouched["Etapa actual"] == "Sin iniciar"
-    assert untouched["Nº gestiones"] == 0
-    assert untouched["Origen"] == "Búsqueda general"
-    assert untouched["Fuente"] in ("", None)
-    assert untouched["Referencia"] in ("", None) and untouched["Propiedad"] in ("", None)
-
-
-def test_resumen_cuadra_con_las_hojas(export):
-    wb = export["wb"]
-    summary = _summary(wb["Resumen"])
-    buyers = _rows(wb["Compradores"])
-    alerts = _rows(wb["Alertas"])
-    assert summary["Empresa"]
-    assert summary["Periodo"] == "10/03/2021 – 12/03/2021"
-    assert summary["Compradores nuevos"] == len(buyers)
-    assert summary["Alertas nuevas"] == len(alerts)
-    assert summary["Alertas con referencia"] + summary["Alertas de búsqueda general"] == len(alerts)
-    assert summary["Alertas con referencia"] == sum(1 for r in alerts if r["Origen"] == "Con referencia")
-    for title, column in (("Alertas por fuente", "Fuente"),
-                          ("Alertas por agente", "Agente"),
-                          ("Alertas por etapa actual", "Etapa actual")):
-        block = _block(wb["Resumen"], title)
-        assert sum(block.values()) == len(alerts), title
-        if column == "Fuente":
-            expected = {}
-            for r in alerts:
-                key = r["Fuente"] or "Sin fuente"
-                expected[key] = expected.get(key, 0) + 1
-        else:
-            expected = {}
-            for r in alerts:
-                expected[r[column]] = expected.get(r[column], 0) + 1
-        assert block == expected, title
-        # Ordenado por cantidad descendente
-        counts = list(block.values())
-        assert counts == sorted(counts, reverse=True), title
+    assert load_workbook(BytesIO(body)).sheetnames == ["Compradores"]
