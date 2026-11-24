@@ -476,3 +476,24 @@ def test_sin_actividad_solo_la_ve_el_admin_en_el_detalle(stalled_data):
     status, body, _ = agent.get(f"/alerts/{stalled_data['never']}")
     assert status == 200
     assert "Sin gestionar · " in body and "Venció el " in body
+
+
+def test_exportar_excel_solo_lo_ve_el_admin(data):
+    """Botón y modal «Exportar Excel» (PLAN_EXPORT_EXCEL_COMPRADORES.md §2.3)."""
+    from app.core.business_calendar import madrid_today
+    today = madrid_today()
+
+    status, body, _ = _Client(ADMIN_EMAIL, "MOYZA").get("/alerts")
+    assert status == 200
+    assert "Exportar Excel" in body
+    assert 'data-modal-open="exportExcelModal"' in body
+    assert 'action="/alerts/export.xlsx"' in body
+    # Por defecto el mes en curso: del día 1 a hoy (Madrid)
+    assert f'name="desde" value="{today.replace(day=1).isoformat()}"' in body
+    assert f'name="hasta" value="{today.isoformat()}"' in body
+
+    status, body, _ = _Client(EMAIL.format("ana"), "MOYZA").get("/alerts")
+    assert status == 200
+    assert "Exportar Excel" not in body
+    assert "exportExcelModal" not in body
+    assert "/alerts/export.xlsx" not in body

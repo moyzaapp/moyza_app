@@ -629,6 +629,21 @@ docker exec moyza_backend python -c "from app.db.session import SessionLocal; fr
 docker exec moyza_backend python -m pytest tests/test_buyer_attention_service.py tests/test_buyer_attention_channels.py tests/test_alert_search.py -q
 ```
 
+### Excel de compradores para administración (PLAN_EXPORT_EXCEL_COMPRADORES.md, 2026-11-23)
+
+Nueva dependencia **`openpyxl`** en `backend/requirements.txt`: hay que **reconstruir la
+imagen del backend** (no basta con `docker restart`). Sin migraciones.
+
+```bash
+docker compose build backend && docker compose up -d backend
+docker exec moyza_backend python -c "import openpyxl; print(openpyxl.__version__)"
+```
+
+- Botón «Exportar Excel» (solo admin) en la cabecera de alertas de `/alerts`: modal con
+  Desde / Hasta (por defecto el mes en curso) que descarga `GET /alerts/export.xlsx`
+  con las hojas Resumen, Compradores y Alertas dados de alta en ese periodo, solo de la
+  empresa activa.
+
 ## 16. Excepciones: qué cruza empresas (2026-10-20)
 
 Detalle en `PLAN_SUGERENCIAS_MULTIEMPRESA.md`. Las propiedades **sugeridas**

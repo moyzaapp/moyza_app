@@ -126,7 +126,7 @@
                 {# Total con los filtros aplicados (todas las páginas), no el tamaño de página #}
                 <span class="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full font-medium">{{ total_alerts }}</span>
             </h2>
-            {% if attention_filter or filtered_agent %}
+            {% if attention_filter or filtered_agent or is_admin %}
             <div class="flex flex-wrap items-center gap-2">
             {# Filtro "sin gestionar" (solo admin, PLAN_VENTANA_SIN_GESTION.md): chip para quitarlo #}
             {% if attention_filter %}
@@ -148,6 +148,10 @@
                 <span class="truncate min-w-0 max-w-xs" title="{{ filtered_agent.name }}{% if filtered_agent.note %} · {{ filtered_agent.note }}{% endif %}">{{ filtered_agent.name }}{% if filtered_agent.note %} · {{ filtered_agent.note }}{% endif %}</span>
                 <svg class="w-3.5 h-3.5 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
             </a>
+            {% endif %}
+            {# Excel de compradores y alertas por fecha de alta (solo admin, PLAN_EXPORT_EXCEL_COMPRADORES.md §2.3) #}
+            {% if is_admin %}
+            {% call ui.button("Exportar Excel", "secondary", attrs='data-modal-open="exportExcelModal" aria-haspopup="dialog"', extra="whitespace-nowrap") %}<svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>{% endcall %}
             {% endif %}
             </div>
             {% endif %}
@@ -679,6 +683,21 @@
 </div>
 
 {% if is_admin %}
+<!-- Modal: Exportar Excel (solo admin). GET sin data-once: la descarga no navega y el
+     modal se cierra con el cierre normal -->
+{% call ui.modal("exportExcelModal", "Exportar Excel", size="md", subtitle="Compradores y alertas por fecha de alta") %}
+<form method="GET" action="/alerts/export.xlsx" id="exportExcelForm">
+    <div class="p-6 space-y-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {{ ui.field("desde", "Desde", type="date", value=export_default_from, required=True, id="exportDesde") }}
+            {{ ui.field("hasta", "Hasta", type="date", value=export_default_to, required=True, id="exportHasta") }}
+        </div>
+        <p class="text-xs text-gray-500">Incluye los compradores y alertas dados de alta en ese periodo en {{ active_company.name if active_company else brand_name }}.</p>
+    </div>
+    {{ ui.modal_footer(submit_label="Descargar") }}
+</form>
+{% endcall %}
+
 <!-- Modal: Reasignar alerta (acción de fila; solo admin, alertas abiertas) -->
 {% call ui.modal("reassignModal", "Reasignar alerta", size="lg", subtitle=" ") %}
 <form method="POST" action="" id="reassignForm" data-once data-loading-text="Reasignando…">
