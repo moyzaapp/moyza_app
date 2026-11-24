@@ -1,69 +1,60 @@
 """Excel de compradores para administración (PLAN_EXPORT_EXCEL_COMPRADORES.md).
 
-`build_buyers_workbook` devuelve un `.xlsx` con tres hojas sobre la empresa
-dada y un rango de días de Madrid (inclusivo):
+`build_buyers_workbook` devuelve un `.xlsx` con una sola hoja, «Compradores»
+(§6, D6: las hojas «Resumen» y «Alertas» se retiraron el 2026-11-24), con los
+compradores de la empresa dada dados de alta en un rango de días de Madrid
+(inclusivo), su perfil y los agentes a los que pertenecen (D10: sin las
+columnas «Creado por», «Alertas» ni «Última alerta»; «Agentes» va tras «Email»).
 
-- «Resumen»: totales y recuentos por fuente, agente y etapa actual.
-- «Compradores»: compradores dados de alta en el periodo, con su perfil.
-- «Alertas»: alertas creadas en el periodo, con etapa, estado y gestiones.
+Un comprador «es» de un agente (§6.1, D8) si lo creó el usuario del agente
+(`Buyer.created_by`, usuario con el email del agente), si el agente es el del
+perfil (`BuyerSearchCriteria.agent_id`) o si tiene alguna alerta de la
+empresa asignada a él (cualquier estado y fecha). Esa regla filtra con
+`agent_ids` y rellena la columna «Agentes» (D9).
 
 Es un documento de trabajo: cabecera en negrita, fila fija, autofiltro y
 fechas en hora de Madrid. Sin fórmulas ni estilos corporativos.
 """
-from collections import Counter
 from datetime import date
 from datetime import datetime
 from datetime import time
 from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
+from typing import Iterable
+from typing import Optional
 
 from openpyxl import Workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Font
 from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
-from sqlalchemy import func
+from sqlalchemy import or_
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 
-from app.core.address import street_only
 from app.core.business_calendar import to_madrid
 from app.core.business_calendar import to_utc
-from app.core.constants import AlertOrigin
+from app.models.agent import Agent
 from app.models.buyer import Buyer
+from app.models.buyer_search_criteria import BuyerSearchCriteria
 from app.models.property_alert import PropertyAlert
 from app.models.user import User
-from app.services import alert_view
-from app.services.alert_duplicate_service import STATUS_LABELS
 from app.services.buyer_matching import profile_types
+from app.services.company_scope import scope_agents
 
 DATETIME_FORMAT = "dd/mm/yyyy hh:mm"
 AMOUNT_FORMAT = "#,##0"
 HEADER_FONT = Font(bold=True)
 HEADER_FILL = PatternFill(fill_type="solid", start_color="FFE5E7EB", end_color="FFE5E7EB")
 
-ORIGIN_LABELS = {
-    AlertOrigin.PROPERTY: "Con referencia",
-    AlertOrigin.SEARCH: "Búsqueda general",
-}
-NO_STAGE_LABEL = "Sin iniciar"
-NO_SOURCE_LABEL = "Sin fuente"
-NO_AGENT_LABEL = "Sin asignar"
-
-# (cabecera, ancho) de cada hoja
-SUMMARY_COLUMNS = [("Concepto", 34), ("Valor", 40)]
+# (cabecera, ancho) de la hoja
 BUYER_COLUMNS = [
     ("Fecha de alta", 17), ("Nombre", 28), ("Teléfono", 16), ("Email", 28),
-    ("Creado por", 22), ("Alertas", 9), ("Última alerta", 17), ("Tipo de negocio", 15),
-    ("Tipo de inmueble", 22), ("Provincia", 14), ("Zonas/ciudades", 32),
-    ("Presupuesto mín.", 16), ("Presupuesto máx.", 16), ("Notas", 40),
-]
-ALERT_COLUMNS = [
-    ("Fecha", 17), ("Comprador", 28), ("Teléfono", 16), ("Email", 28), ("Origen", 17),
-    ("Referencia", 14), ("Propiedad", 36), ("Fuente", 18), ("Agente", 22),
-    ("Etapa actual", 20), ("Estado", 13), ("Última gestión", 17), ("Nº gestiones", 12),
-    ("Fecha de cierre", 17), ("Cedida", 9),
+    ("Agentes", 28),
+    ("Tipo de negocio", 15), ("Tipo de inmueble", 22), ("Provincia", 14),
+    ("Zonas/ciudades", 32), ("Presupuesto mín.", 16), ("Presupuesto máx.", 16), ("Notas", 40),
 ]
 
 
@@ -96,36 +87,6 @@ def _join(*lists) -> str:
             if text:
                 items.append(text)
     return ", ".join(items)
-
-
-def _user_names(db: Session, user_ids) -> dict:
-    """{user_id: nombre (o email)} de quienes crearon los compradores."""
-    ids = {uid for uid in user_ids if uid}
-    if not ids:
-        return {}
-    rows = db.query(User.id, User.full_name, User.email).filter(User.id.in_(ids)).all()
-    return {row.id: (row.full_name or row.email or "") for row in rows}
-
-
-def _alert_counts(db: Session, company_id: int, buyer_ids) -> dict:
-    """{buyer_id: (nº de alertas, fecha de la última)} en la empresa, de cualquier fecha."""
-    if not buyer_ids:
-        return {}
-    rows = (
-        db.query(PropertyAlert.buyer_id, func.count(PropertyAlert.id), func.max(PropertyAlert.created_at))
-        .filter(PropertyAlert.company_id == company_id, PropertyAlert.buyer_id.in_(buyer_ids))
-        .group_by(PropertyAlert.buyer_id)
-        .all()
-    )
-    return {buyer_id: (count, last) for buyer_id, count, last in rows}
-
-
-def _property_text(prop) -> str:
-    """Título y calle de la propiedad («Piso en el Centro · Calle Mayor 3»)."""
-    if prop is None:
-        return ""
-    street = street_only(prop.address)
-    return " · ".join(part for part in (prop.title, street) if part)
 
 
 def _append(ws, row):
@@ -165,28 +126,96 @@ def _write_sheet(ws, columns, rows, date_cols=(), amount_cols=()):
     ws.auto_filter.ref = ws.dimensions
 
 
-def _buyer_rows(db: Session, company_id: int, since: datetime, until: datetime) -> list:
-    buyers = (
+def _agent_filter(company_id: int, agent_ids: list):
+    """Cláusula D8: el comprador es de alguno de `agent_ids`.
+
+    Misma regla que `alerts.visible_buyers_query` para el agente, pero con
+    alertas de cualquier estado: lo creó el usuario del agente (por email),
+    el agente es el de su perfil o tiene alguna alerta de la empresa suya.
+    """
+    by_alert = select(PropertyAlert.buyer_id).where(
+        PropertyAlert.company_id == company_id,
+        PropertyAlert.buyer_id.isnot(None),
+        PropertyAlert.agent_id.in_(agent_ids),
+    )
+    by_profile = select(BuyerSearchCriteria.buyer_id).where(BuyerSearchCriteria.agent_id.in_(agent_ids))
+    by_creator = select(User.id).join(Agent, Agent.email == User.email).where(Agent.id.in_(agent_ids))
+    return or_(
+        Buyer.id.in_(by_alert),
+        Buyer.id.in_(by_profile),
+        Buyer.created_by.in_(by_creator),
+    )
+
+
+def _buyer_agents(db: Session, company_id: int, buyer_ids: list) -> dict:
+    """{buyer_id: «nombre, nombre»} con los agentes de la empresa que cumplen D8.
+
+    Tres consultas agrupadas (alertas, perfiles y creador por email), sin N+1.
+    Cuenta también a los agentes dados de baja: el dato es histórico.
+    """
+    if not buyer_ids:
+        return {}
+    names = dict(scope_agents(db.query(Agent.id, Agent.name), company_id).all())
+    if not names:
+        return {}
+    agent_ids = list(names)
+    pairs = set()
+    pairs.update(
+        db.query(PropertyAlert.buyer_id, PropertyAlert.agent_id)
+        .filter(
+            PropertyAlert.company_id == company_id,
+            PropertyAlert.buyer_id.in_(buyer_ids),
+            PropertyAlert.agent_id.in_(agent_ids),
+        )
+        .distinct()
+        .all()
+    )
+    pairs.update(
+        db.query(BuyerSearchCriteria.buyer_id, BuyerSearchCriteria.agent_id)
+        .filter(
+            BuyerSearchCriteria.buyer_id.in_(buyer_ids),
+            BuyerSearchCriteria.agent_id.in_(agent_ids),
+        )
+        .all()
+    )
+    pairs.update(
+        db.query(Buyer.id, Agent.id)
+        .join(User, User.id == Buyer.created_by)
+        .join(Agent, Agent.email == User.email)
+        .filter(Buyer.id.in_(buyer_ids), Agent.id.in_(agent_ids))
+        .all()
+    )
+    # Ids, no nombres: dos agentes con el mismo nombre salen los dos
+    by_buyer = {}
+    for buyer_id, agent_id in pairs:
+        by_buyer.setdefault(buyer_id, set()).add(agent_id)
+    return {
+        buyer_id: ", ".join(sorted((names[a] for a in agents), key=str.lower))
+        for buyer_id, agents in by_buyer.items()
+    }
+
+
+def _buyer_rows(db: Session, company_id: int, since: datetime, until: datetime,
+                agent_ids: Optional[list] = None) -> list:
+    query = (
         db.query(Buyer)
         .options(selectinload(Buyer.search_criteria))
         .filter(Buyer.company_id == company_id, Buyer.created_at >= since, Buyer.created_at < until)
-        .order_by(Buyer.created_at.asc(), Buyer.id.asc())
-        .all()
     )
-    counts = _alert_counts(db, company_id, [b.id for b in buyers])
-    creators = _user_names(db, [b.created_by for b in buyers])
+    if agent_ids:
+        query = query.filter(_agent_filter(company_id, agent_ids))
+    buyers = query.order_by(Buyer.created_at.asc(), Buyer.id.asc()).all()
+    buyer_ids = [b.id for b in buyers]
+    agents = _buyer_agents(db, company_id, buyer_ids)
     rows = []
     for buyer in buyers:
         criteria = buyer.search_criteria
-        count, last = counts.get(buyer.id, (0, None))
         rows.append([
             _madrid(buyer.created_at),
             buyer.name,
             buyer.phone or "",
             buyer.email or "",
-            creators.get(buyer.created_by, ""),
-            count,
-            _madrid(last),
+            agents.get(buyer.id, ""),
             (criteria.business_type or "") if criteria else "",
             ", ".join(profile_types(criteria)),
             (criteria.province or "") if criteria else "",
@@ -198,112 +227,23 @@ def _buyer_rows(db: Session, company_id: int, since: datetime, until: datetime) 
     return rows
 
 
-def _alerts(db: Session, company_id: int, since: datetime, until: datetime) -> list:
-    return (
-        db.query(PropertyAlert)
-        .options(
-            selectinload(PropertyAlert.buyer),
-            selectinload(PropertyAlert.property),
-            selectinload(PropertyAlert.agent),
-            selectinload(PropertyAlert.follow_ups),
-        )
-        .filter(
-            PropertyAlert.company_id == company_id,
-            PropertyAlert.created_at >= since,
-            PropertyAlert.created_at < until,
-        )
-        .order_by(PropertyAlert.created_at.asc(), PropertyAlert.id.asc())
-        .all()
-    )
+def build_buyers_workbook(db: Session, company, start: date, end: date,
+                          agent_ids: Optional[Iterable[int]] = None) -> bytes:
+    """Libro `.xlsx` con la hoja «Compradores» de `company`: los dados de alta
+    entre `start` y `end` (días de Madrid, ambos incluidos).
 
-
-def _alert_row(alert, stage_label: str) -> list:
-    real = alert_view.real_follow_ups_since(alert.follow_ups, None)
-    last_managed = max((f.created_at for f in real if f.created_at is not None), default=None)
-    buyer = alert.buyer
-    prop = alert.property
-    return [
-        _madrid(alert.created_at),
-        (buyer.name if buyer else None) or alert.lead_name or "",
-        alert.lead_phone or (buyer.phone if buyer else None) or "",
-        alert.lead_email or (buyer.email if buyer else None) or "",
-        ORIGIN_LABELS.get(alert.origin, alert.origin or ""),
-        (prop.referencia or "") if prop else "",
-        _property_text(prop),
-        (alert.source or "").strip(),
-        alert.agent.name if alert.agent else NO_AGENT_LABEL,
-        stage_label,
-        STATUS_LABELS.get(alert.status, alert.status or ""),
-        _madrid(last_managed),
-        len(real),
-        _madrid(alert.completed_at),
-        "Sí" if alert.ceded_at else "No",
-    ]
-
-
-def _summary_rows(company, start: date, end: date, buyers_total: int, alerts, stages: dict) -> list:
-    origins = Counter(alert.origin for alert in alerts)
-    sources = Counter((alert.source or "").strip() or NO_SOURCE_LABEL for alert in alerts)
-    agents = Counter(alert.agent.name if alert.agent else NO_AGENT_LABEL for alert in alerts)
-    stage_counts = Counter(stages[alert.id] for alert in alerts)
-
-    rows = [
-        ["Empresa", company.name],
-        ["Periodo", f"{start.strftime('%d/%m/%Y')} – {end.strftime('%d/%m/%Y')}"],
-        ["Generado el", to_madrid(datetime.utcnow()).strftime("%d/%m/%Y %H:%M")],
-        [None, None],
-        ["Compradores nuevos", buyers_total],
-        ["Alertas nuevas", len(alerts)],
-        ["Alertas con referencia", origins.get(AlertOrigin.PROPERTY, 0)],
-        ["Alertas de búsqueda general", origins.get(AlertOrigin.SEARCH, 0)],
-    ]
-    for title, counter in (
-        ("Alertas por fuente", sources),
-        ("Alertas por agente", agents),
-        ("Alertas por etapa actual", stage_counts),
-    ):
-        rows.append([None, None])
-        rows.append([title, None])
-        # Por cantidad desc. y, a igualdad, por nombre
-        for label, count in sorted(counter.items(), key=lambda item: (-item[1], item[0])):
-            rows.append([label, count])
-    return rows
-
-
-def build_buyers_workbook(db: Session, company, start: date, end: date) -> bytes:
-    """Libro `.xlsx` de compradores y alertas de `company` dados de alta entre
-    `start` y `end` (días de Madrid, ambos incluidos)."""
+    Con `agent_ids` (no vacío), solo los compradores de alguno de esos agentes
+    (D8); sin ellos, todos. La ruta ya descarta los que no son agentes activos
+    de la empresa.
+    """
     since, until = utc_range(start, end)
-
-    buyer_rows = _buyer_rows(db, company.id, since, until)
-    alerts = _alerts(db, company.id, since, until)
-    # Etapa con todo el historial, como la ve el admin en el listado
-    stages = {}
-    for alert in alerts:
-        stage = alert_view.current_stage(alert.follow_ups, None)
-        stages[alert.id] = stage["label"] if stage else NO_STAGE_LABEL
+    ids = sorted(set(agent_ids or ()))
 
     wb = Workbook()
-    summary = wb.active
-    summary.title = "Resumen"
-    summary.append([header for header, _ in SUMMARY_COLUMNS])
-    for cell in summary[1]:
-        cell.font = HEADER_FONT
-        cell.fill = HEADER_FILL
-    for index, (_, width) in enumerate(SUMMARY_COLUMNS, start=1):
-        summary.column_dimensions[get_column_letter(index)].width = width
-    for row in _summary_rows(company, start, end, len(buyer_rows), alerts, stages):
-        _append(summary, row)
-        # Títulos de bloque en negrita
-        if row[0] and row[1] is None:
-            summary.cell(row=summary.max_row, column=1).font = HEADER_FONT
-    summary.freeze_panes = "A2"
-
-    _write_sheet(wb.create_sheet("Compradores"), BUYER_COLUMNS, buyer_rows,
-                 date_cols={1, 7}, amount_cols={12, 13})
-    _write_sheet(wb.create_sheet("Alertas"), ALERT_COLUMNS,
-                 [_alert_row(alert, stages[alert.id]) for alert in alerts],
-                 date_cols={1, 12, 14})
+    ws = wb.active
+    ws.title = "Compradores"
+    _write_sheet(ws, BUYER_COLUMNS, _buyer_rows(db, company.id, since, until, ids),
+                 date_cols={1}, amount_cols={10, 11})
 
     output = BytesIO()
     wb.save(output)

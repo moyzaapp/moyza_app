@@ -685,14 +685,37 @@
 {% if is_admin %}
 <!-- Modal: Exportar Excel (solo admin). GET sin data-once: la descarga no navega y el
      modal se cierra con el cierre normal -->
-{% call ui.modal("exportExcelModal", "Exportar Excel", size="md", subtitle="Compradores y alertas por fecha de alta") %}
+{% call ui.modal("exportExcelModal", "Exportar Excel", size="md", subtitle="Compradores por fecha de alta") %}
 <form method="GET" action="/alerts/export.xlsx" id="exportExcelForm">
     <div class="p-6 space-y-4">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {{ ui.field("desde", "Desde", type="date", value=export_default_from, required=True, id="exportDesde") }}
             {{ ui.field("hasta", "Hasta", type="date", value=export_default_to, required=True, id="exportHasta") }}
         </div>
-        <p class="text-xs text-gray-500">Incluye los compradores y alertas dados de alta en ese periodo en {{ active_company.name if active_company else brand_name }}.</p>
+        {# Agentes (§6 D7): sin ninguno marcado = todos. «Todos» deshabilita la lista (JS al final) #}
+        <fieldset>
+            <legend class="block text-sm font-medium text-gray-700 mb-1">Agentes</legend>
+            <label class="flex items-center gap-2 py-1 cursor-pointer">
+                <input type="checkbox" id="exportAgentsAll" checked{% if not export_agents %} disabled{% endif %}
+                    class="w-4 h-4 rounded text-gray-900 border-gray-300 focus:ring-gray-400">
+                <span class="text-sm text-gray-700">Todos</span>
+            </label>
+            {% if export_agents %}
+            <div id="exportAgentsList" class="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 max-h-48 overflow-y-auto rounded-xl border border-gray-200 p-3">
+                {% for a in export_agents %}
+                <label class="flex items-center gap-2 py-1 min-w-0 cursor-pointer">
+                    <input type="checkbox" name="agente" value="{{ a.id }}"
+                        class="w-4 h-4 shrink-0 rounded text-gray-900 border-gray-300 focus:ring-gray-400 disabled:opacity-50">
+                    <span class="text-sm text-gray-700 truncate" title="{{ a.name }}">{{ a.name }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            <p class="text-xs text-gray-500 mt-1">Desmarca «Todos» para elegir uno o varios agentes.</p>
+            {% else %}
+            <p class="text-xs text-gray-500 mt-1">No hay agentes activos en esta empresa.</p>
+            {% endif %}
+        </fieldset>
+        <p class="text-xs text-gray-500">Incluye los compradores dados de alta en ese periodo en {{ active_company.name if active_company else brand_name }}.</p>
     </div>
     {{ ui.modal_footer(submit_label="Descargar") }}
 </form>
@@ -1630,5 +1653,34 @@ function setBuyerMode(mode) {
     });
 })();
 </script>
+{% if is_admin %}
+<script>
+// ---- Exportar Excel: casilla «Todos» de agentes (PLAN_EXPORT_EXCEL_COMPRADORES.md §6 D7) ----
+// «Todos» marcado: desmarca y deshabilita a los agentes (no se envía ningún
+// `agente` = todos). Desmarcado: se habilitan. Si se desmarca el último
+// agente, vuelve «Todos».
+(function () {
+    var all = document.getElementById('exportAgentsAll');
+    var list = document.getElementById('exportAgentsList');
+    if (!all || !list) return;
+    var boxes = list.querySelectorAll('input[name="agente"]');
+    function sync() {
+        boxes.forEach(function (box) {
+            if (all.checked) box.checked = false;
+            box.disabled = all.checked;
+        });
+        list.classList.toggle('opacity-60', all.checked);
+    }
+    all.addEventListener('change', sync);
+    boxes.forEach(function (box) {
+        box.addEventListener('change', function () {
+            var any = Array.prototype.some.call(boxes, function (b) { return b.checked; });
+            if (!any) { all.checked = true; sync(); }
+        });
+    });
+    sync();
+})();
+</script>
+{% endif %}
 
 {% endblock %}

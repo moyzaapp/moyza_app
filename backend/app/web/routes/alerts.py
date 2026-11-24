@@ -985,6 +985,8 @@ async def alerts_page(
             # por defecto el mes en curso, del día 1 a hoy (Madrid)
             "export_default_from": madrid_today().replace(day=1).isoformat(),
             "export_default_to": madrid_today().isoformat(),
+            # Filtro "Agentes" del modal (§6, D7): los activos de la empresa, por nombre
+            "export_agents": agents,
         }
     )
 
@@ -1728,13 +1730,16 @@ async def export_buyers_excel(
     request: Request,
     desde: Optional[str] = Query(default=None),
     hasta: Optional[str] = Query(default=None),
+    agente: List[str] = Query(default=[]),
     db: Session = Depends(get_db)
 ):
-    """Excel de compradores y alertas dados de alta en el periodo (solo admin).
+    """Excel de compradores dados de alta en el periodo (solo admin).
 
     PLAN_EXPORT_EXCEL_COMPRADORES.md §2.1: empresa activa, rango de días de
     Madrid inclusivo (por defecto el mes en curso hasta hoy); si `desde` es
-    posterior a `hasta` se intercambian.
+    posterior a `hasta` se intercambian. §6 (D7, D8): `agente` repetido filtra
+    por los compradores de esos agentes; los ids que no sean agentes activos
+    de la empresa se ignoran y sin ninguno válido salen todos.
     """
     admin_user = require_admin_role(request, db)
     if isinstance(admin_user, RedirectResponse):
@@ -1753,7 +1758,22 @@ async def export_buyers_excel(
     if day_from > day_to:
         day_from, day_to = day_to, day_from
 
-    content = build_buyers_workbook(db, company, day_from, day_to)
+    # Solo cifras ASCII de hasta 10 dígitos que quepan en la columna: `isdigit`
+    # admite «²» y `int` rechaza cadenas muy largas, y ambos darían un 500
+    requested = set()
+    for raw in agente:
+        text = str(raw).strip()
+        if text.isdecimal() and text.isascii() and len(text) <= 10 and int(text) < 2 ** 31:
+            requested.add(int(text))
+    agent_ids = []
+    if requested:
+        agent_ids = [
+            agent_id for (agent_id,) in scope_active_agents(db.query(Agent.id), company.id)
+            .filter(Agent.id.in_(requested))
+            .all()
+        ]
+
+    content = build_buyers_workbook(db, company, day_from, day_to, agent_ids=agent_ids)
     filename = f"compradores_{company.code.lower()}_{day_from.isoformat()}_{day_to.isoformat()}.xlsx"
     return Response(
         content=content,

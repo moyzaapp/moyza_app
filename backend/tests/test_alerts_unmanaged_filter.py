@@ -491,6 +491,13 @@ def test_exportar_excel_solo_lo_ve_el_admin(data):
     # Por defecto el mes en curso: del día 1 a hoy (Madrid)
     assert f'name="desde" value="{today.replace(day=1).isoformat()}"' in body
     assert f'name="hasta" value="{today.isoformat()}"' in body
+    # Filtro «Agentes» (§6 D7): «Todos» marcado y una casilla por agente activo
+    # de la empresa activa; los de otra empresa no salen
+    modal = body[body.index('id="exportExcelForm"'):body.index('id="reassignForm"')]
+    assert re.search(r'<input type="checkbox" id="exportAgentsAll" checked\s', modal)
+    for key in ("ana", "bea", "carla"):
+        assert f'name="agente" value="{data[key]}"' in modal
+    assert f'name="agente" value="{data["moes"]}"' not in modal
 
     status, body, _ = _Client(EMAIL.format("ana"), "MOYZA").get("/alerts")
     assert status == 200
