@@ -50,12 +50,15 @@ def test_grupos_por_empresa_con_carga_de_cada_destino(db, ctx):
     _u, ana = _person(db, ctx, "ana")
     _u, bea = _person(db, ctx, "bea")
     _u, inactive = _person(db, ctx, "baja", active=False)
+    _u, carla = _person(db, ctx, "carla", codes=("MOES",))
     mine = [_alert(db, ctx, leaving, "PENDING"), _alert(db, ctx, leaving, "IN_PROGRESS")]
     moes_alert = _alert(db, ctx, leaving, "PENDING", code="MOES")
     _alert(db, ctx, leaving, "COMPLETED")          # cerrada: no se reparte
     _alert(db, ctx, ana, "PENDING")
     _alert(db, ctx, ana, "IN_PROGRESS")
     _alert(db, ctx, ana, "COMPLETED")              # cerrada: no cuenta como carga
+    _alert(db, ctx, ana, "PENDING", code="MOES")   # otra empresa: también es carga (D3)
+    _alert(db, ctx, carla, "PENDING", code="MOES")
 
     groups = svc.handover_groups(db, leaving)
     assert [g.company.code for g in groups] == ["MOYZA", "MOES"]
@@ -63,8 +66,16 @@ def test_grupos_por_empresa_con_carga_de_cada_destino(db, ctx):
     assert [a.id for a in moyza.alerts] == [a.id for a in mine]
     assert [a.id for a in moes.alerts] == [moes_alert.id]
 
-    load = {t.agent.id: t.open_alerts for t in moyza.targets}
-    assert load[ana.id] == 2 and load[bea.id] == 0
+    # Destinos por grupos de empresa (como «Reasignar»), los de MOYZA primero
+    assert all(set(g) == {"label", "agents"} and g["agents"] for g in moyza.targets)
+    assert moyza.targets[0]["label"] == "MOYZA"
+    load = {t.agent.id: t.open_alerts for g in moyza.targets for t in g["agents"]}
+    # Carga real: abiertas en todas las empresas (PLAN_BAJA_DESTINOS_TODAS_EMPRESAS.md D3)
+    assert load[ana.id] == 3 and load[bea.id] == 0
+    # Un agente solo de MOES es destino de las de MOYZA, con su carga de MOES
+    moes_group = next(g for g in moyza.targets if g["label"] == "MOES PREMIUM")
+    assert carla.id in {t.agent.id for t in moes_group["agents"]}
+    assert load[carla.id] == 1
     # Ni el propio ni los dados de baja son destino
     assert leaving.id not in load and inactive.id not in load
 
@@ -134,9 +145,9 @@ def test_reasignar_rechazos_no_tocan_nada(db, ctx):
     cases = [
         ([], ana.id, "Marca al menos un comprador"),
         ([mine.id], None, "Elige a qué agente"),
-        ([mine.id], leaving.id, "no es un agente activo"),        # a sí mismo
-        ([mine.id], inactive.id, "no es un agente activo"),
-        ([mine.id], moes_agent.id, "no es un agente activo"),     # no es de la empresa
+        ([mine.id], leaving.id, "no existe o está dado de baja"),   # a sí mismo
+        ([mine.id], inactive.id, "no existe o está dado de baja"),
+        ([mine.id], 999999999, "no existe o está dado de baja"),
         ([foreign.id, closed.id], ana.id, "ya no están abiertos a su nombre"),
     ]
     for alert_ids, target_id, text in cases:
@@ -152,6 +163,22 @@ def test_reasignar_rechazos_no_tocan_nada(db, ctx):
     # Marcando una suya y una ajena, solo se mueve la suya
     _target, ids = reassign([mine.id, foreign.id], ana.id)
     assert ids == [mine.id] and _reload(db, foreign).agent_id == other.id
+
+
+def test_reasignar_a_un_agente_de_otra_empresa(db, ctx):
+    """D2: vale cualquier agente activo; la alerta conserva su empresa y el
+    agente no gana empresas."""
+    svc = _svc()
+    _user, leaving = _person(db, ctx, "cruza")
+    _u, moes_agent = _person(db, ctx, "moes", codes=("MOES",))
+    mine = _alert(db, ctx, leaving, "PENDING")
+
+    target, ids = svc.handover_reassign(db, leaving, company_id=ctx["moyza_id"], alert_ids=[mine.id],
+                                        target_id=str(moes_agent.id), by_user=_admin(db, ctx))
+    assert target.id == moes_agent.id and ids == [mine.id]
+    moved = _reload(db, mine)
+    assert moved.agent_id == moes_agent.id and moved.company_id == ctx["moyza_id"]
+    assert [c.code for c in moes_agent.companies] == ["MOES"]
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +241,7 @@ def _http(email, path, data=None):
 def test_pantalla_lista_reparte_y_solo_admin(db, ctx):
     user, leaving = _person(db, ctx, "http")
     _u, ana = _person(db, ctx, "ana")
+    _u, moes_agent = _person(db, ctx, "moes", codes=("MOES",))
     prop = _property(db, ctx, ana, "Vendida")
     first, second = _alert(db, ctx, leaving, "PENDING", prop=prop), _alert(db, ctx, leaving, "IN_PROGRESS")
     path = f"/agents/{leaving.id}/handover"
@@ -222,7 +250,11 @@ def test_pantalla_lista_reparte_y_solo_admin(db, ctx):
     assert status == 200
     for text in ("Repartir compradores", leaving.name, first.lead_name, second.lead_name, prop.title,
                  "Búsqueda general", f'value="{first.id}"', f"{ana.name} · 0 abiertos",
-                 "Reasignar marcados", "Eliminar marcados…", "Volver a Usuarios"):
+                 "Reasignar marcados", "Eliminar marcados…", "Volver a Usuarios",
+                 # Destinos de todas las empresas agrupados, como en «Reasignar»
+                 '<optgroup label="MOYZA">', '<optgroup label="MOES PREMIUM">',
+                 f"{moes_agent.name} · 0 abiertos",
+                 "Junto a cada agente, los compradores abiertos que ya tiene (todas las empresas)."):
         assert text in html, text
 
     # Un agente no entra ni reparte

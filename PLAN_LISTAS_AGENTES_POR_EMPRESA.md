@@ -75,7 +75,8 @@ del usuario".
    cerradas de un agente de baja se encuentran por texto o desde el comprador.
 4. **Alta y reasignación**: todos los agentes activos de las dos empresas agrupados "MOYZA" /
    "MOES PREMIUM" / "MOYZA, MOES PREMIUM" (solo usuarios configurados en ambas), con los de la
-   empresa de la alerta primero. La cesión no cambia.
+   empresa de la alerta primero. La cesión no cambia. Vale también para la baja (2026-11-24,
+   `PLAN_BAJA_DESTINOS_TODAS_EMPRESAS.md`): modal de baja y "Repartir compradores".
 
 ## 4. Fases
 

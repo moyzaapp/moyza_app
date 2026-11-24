@@ -269,7 +269,10 @@ def test_offboarding_json(data):
     [moyza] = [c for c in summary["companies"] if c["id"] == data["moyza_id"]]
     assert moyza["open_alerts"] == 1 and moyza["live_properties"] == 0
     assert moyza["properties_url"].startswith("/properties?search=")
-    target_ids = {t["id"] for t in moyza["targets"]}
+    # Destinos agrupados por empresa (PLAN_BAJA_DESTINOS_TODAS_EMPRESAS.md D1)
+    assert all(set(g) == {"label", "agents"} for g in moyza["targets"])
+    assert "MOYZA" in moyza["targets"][0]["label"].split(", ")
+    target_ids = {t["id"] for g in moyza["targets"] for t in g["agents"]}
     assert data["destino_agent"] in target_ids
     assert data["saliente_agent"] not in target_ids and data["baja_agent"] not in target_ids
 
@@ -324,7 +327,7 @@ def test_deactivate_sin_destino_y_correcto(data):
 
     status, _, headers = admin.post(path, {f"reassign_to_{data['moyza_id']}": data["baja_agent"]})
     assert _flash(headers).get("category") == "error"
-    assert "no es un agente activo" in _flash(headers)["message"]
+    assert "no existe o está dado de baja" in _flash(headers)["message"]
 
     db = _session()
     assert db.get(User, data["saliente_user"]).is_active is True

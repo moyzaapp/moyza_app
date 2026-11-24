@@ -129,7 +129,12 @@
     function companyCard(company, blocked) {
         var live = Number(company.live_properties) || 0;
         var open = Number(company.open_alerts) || 0;
-        var targets = Array.isArray(company.targets) ? company.targets : [];
+        // Destinos agrupados por empresa, como en «Reasignar»: [{label, agents: [{id, name}]}]
+        var groups = (Array.isArray(company.targets) ? company.targets : []).filter(function (g) {
+            return g && Array.isArray(g.agents) && g.agents.length;
+        });
+        var targets = [];
+        groups.forEach(function (g) { targets = targets.concat(g.agents); });
         var result = { card: make('section', 'rounded-xl border border-gray-200 p-4 space-y-3'), missingTarget: false };
         var card = result.card;
 
@@ -145,7 +150,7 @@
 
         if (!targets.length) {
             result.missingTarget = true;
-            card.appendChild(make('p', 'text-xs text-red-600', 'No hay ningún otro agente activo en ' + company.name + ' que pueda recibir sus compradores. Da de alta o reactiva uno antes.'));
+            card.appendChild(make('p', 'text-xs text-red-600', 'No hay ningún otro agente activo que pueda recibir sus compradores. Da de alta o reactiva uno antes.'));
             return result;
         }
 
@@ -166,10 +171,15 @@
         var empty = make('option', '', 'Elige un agente…');
         empty.value = '';
         select.appendChild(empty);
-        targets.forEach(function (t) {
-            var opt = make('option', '', t.name);
-            opt.value = t.id;
-            select.appendChild(opt);
+        groups.forEach(function (g) {
+            var optgroup = document.createElement('optgroup');
+            optgroup.label = g.label || '';
+            g.agents.forEach(function (t) {
+                var opt = make('option', '', t.name);
+                opt.value = t.id;
+                optgroup.appendChild(opt);
+            });
+            select.appendChild(optgroup);
         });
         if (targets.length === 1) select.value = String(targets[0].id);
         wrap.appendChild(select);
