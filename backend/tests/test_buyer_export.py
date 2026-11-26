@@ -167,10 +167,11 @@ def data():
         return item
 
     def alert(name, company, agent_id, created, buyer_item=None, follow_ups=(), status="PENDING", **extra):
+        extra.setdefault("business_type", "Venta")
         item = PropertyAlert(company_id=company.id, agent_id=agent_id, lead_name=f"{TAG} {name}",
                              status=status, created_by=admin.id, created_at=created,
                              assigned_at=created, buyer_id=buyer_item.id if buyer_item else None,
-                             business_type="Venta", **extra)
+                             **extra)
         db.add(item)
         db.flush()
         for action, when in follow_ups:
@@ -202,6 +203,13 @@ def data():
     buyer("DE DOS", moyza, _madrid(2021, 3, 11, 13), created_by=user2.id)
     retired = buyer("DE BAJA", moyza, _madrid(2021, 3, 11, 14))
     db.add(BuyerSearchCriteria(buyer_id=retired.id, agent_id=inactive.id))
+    # «Tipo de negocio» sale de las alertas: en Alquiler no hay perfil
+    # (PLAN_PERFIL_SOLO_VENTA.md). «ALQUILER» solo tiene una alerta de alquiler;
+    # «AMBOS» una de cada (y perfil de Venta); «SIN OPERACION» alertas sin ella.
+    rental = buyer("ALQUILER", moyza, _madrid(2021, 3, 11, 15))
+    both = buyer("AMBOS", moyza, _madrid(2021, 3, 11, 16))
+    db.add(BuyerSearchCriteria(buyer_id=both.id, business_type="Venta"))
+    no_operation = buyer("SIN OPERACION", moyza, _madrid(2021, 3, 11, 17))
 
     # Alerta antigua del comprador: D8 cuenta alertas de cualquier fecha para el filtro por agente
     alert("ANTIGUA", moyza, agent.id, _madrid(2020, 5, 1, 9), inside, origin="search")
@@ -214,6 +222,13 @@ def data():
     alert("ALERTA MOES", moes, moes_agent.id, _madrid(2021, 3, 11, 10), origin="search")
     alert("PERFIL DOS", moyza, agent2.id, _madrid(2021, 3, 11, 12, 5), profile, origin="search",
           status="IN_PROGRESS")
+    alert("ALQUILER", moyza, agent.id, _madrid(2021, 3, 11, 15, 5), rental, origin="search",
+          business_type="Alquiler")
+    alert("AMBOS ALQ", moyza, agent.id, _madrid(2021, 3, 11, 16, 5), both, origin="search",
+          business_type="Alquiler")
+    alert("AMBOS VENTA", moyza, agent.id, _madrid(2021, 3, 11, 16, 10), both, origin="search")
+    alert("SIN OPERACION", moyza, agent.id, _madrid(2021, 3, 11, 17, 5), no_operation,
+          origin="search", business_type=None)
     db.commit()
 
     yield {"agent": agent.id, "agent2": agent2.id,
@@ -254,7 +269,12 @@ def _names(wb) -> set:
 
 
 ALL_NAMES = {f"{TAG} {name}" for name in
-             ("DENTRO", "PRIMERA HORA", "ULTIMA HORA", "CREADO", "PERFIL", "DE DOS", "DE BAJA")}
+             ("DENTRO", "PRIMERA HORA", "ULTIMA HORA", "CREADO", "PERFIL", "DE DOS", "DE BAJA",
+              "ALQUILER", "AMBOS", "SIN OPERACION")}
+# Compradores del agente uno: por alerta («DENTRO», «ALQUILER», «AMBOS», «SIN
+# OPERACION»), por created_by («CREADO») y por el perfil («PERFIL»)
+AGENT_NAMES = {f"{TAG} {name}" for name in
+               ("DENTRO", "CREADO", "PERFIL", "ALQUILER", "AMBOS", "SIN OPERACION")}
 
 
 def test_admin_descarga_xlsx_con_una_hoja(export):
@@ -298,6 +318,23 @@ def test_fila_del_comprador(export):
     assert data_row[10].number_format == "#,##0"
 
 
+def test_tipo_de_negocio_sale_de_las_alertas(export):
+    """En Alquiler no hay perfil: la operación se toma de las alertas de la empresa."""
+    buyers = _by(_rows(export["wb"]["Compradores"]), "Nombre")
+    assert buyers[f"{TAG} ALQUILER"]["Tipo de negocio"] == "Alquiler"
+    # Las demás columnas de perfil siguen vacías (una celda vacía se lee como None)
+    assert not buyers[f"{TAG} ALQUILER"]["Tipo de inmueble"]
+    # Alertas de los dos tipos (y perfil de Venta): unión en el orden Venta, Alquiler
+    assert buyers[f"{TAG} AMBOS"]["Tipo de negocio"] == "Venta, Alquiler"
+    # Ni perfil ni operación en la alerta: vacío
+    assert not buyers[f"{TAG} SIN OPERACION"]["Tipo de negocio"]
+    # Sin alertas: «PRIMERA HORA» no tiene perfil y «DE BAJA» lo tiene sin operación
+    assert not buyers[f"{TAG} PRIMERA HORA"]["Tipo de negocio"]
+    assert not buyers[f"{TAG} DE BAJA"]["Tipo de negocio"]
+    # Solo el perfil (Venta), sin alertas de la empresa con operación distinta
+    assert buyers[f"{TAG} PERFIL"]["Tipo de negocio"] == "Venta"
+
+
 def test_columna_agentes(export):
     buyers = _by(_rows(export["wb"]["Compradores"]), "Nombre")
     # Por created_by (usuario con el email del agente)
@@ -320,13 +357,13 @@ def test_filtro_por_un_agente(data):
     assert status == 200
     assert wb.sheetnames == ["Compradores"]
     # Por alerta (pendientes), por created_by y por el perfil; el resto fuera
-    assert _names(wb) == {f"{TAG} DENTRO", f"{TAG} CREADO", f"{TAG} PERFIL"}
+    assert _names(wb) == AGENT_NAMES
 
 
 def test_filtro_por_dos_agentes_suma(data):
     status, wb = _download(f"&agente={data['agent']}&agente={data['agent2']}")
     assert status == 200
-    assert _names(wb) == {f"{TAG} DENTRO", f"{TAG} CREADO", f"{TAG} PERFIL", f"{TAG} DE DOS"}
+    assert _names(wb) == AGENT_NAMES | {f"{TAG} DE DOS"}
     status, wb = _download(f"&agente={data['agent2']}")
     assert _names(wb) == {f"{TAG} PERFIL", f"{TAG} DE DOS"}
 

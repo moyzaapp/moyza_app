@@ -247,3 +247,14 @@ y «exportar solo la hoja de compradores por el momento».
       (columna «Agentes» por ids para no fundir homónimos; comentario de test). Suite completa
       1428 pasan (dos fallos ajenos deseleccionados). Smoke como admin con datos demo: una sola
       hoja con las cabeceras de D10; un agente filtra, dos suman, valores inválidos = todos.
+
+## 7. Ajuste 2026-11-26: «Tipo de negocio» desde las alertas
+
+La columna salía del perfil (`BuyerSearchCriteria.business_type`) y en Alquiler no hay perfil
+(`PLAN_PERFIL_SOLO_VENTA.md`, desde el 2026-10-26): solo se rellenaba en Venta. Ahora
+`_business_types` une la operación de las alertas del comprador en la empresa con la del
+perfil, en el orden `BusinessType.values()` («Venta, Alquiler» si tiene de las dos; vacío si
+ninguna trae operación). Las demás columnas de perfil siguen vacías para un comprador solo
+de alquiler. Tests nuevos en `tests/test_buyer_export.py` (compradores «ALQUILER», «AMBOS»
+y «SIN OPERACION»). El filtro por fecha no cambia (sigue siendo la fecha de alta del
+comprador; un comprador antiguo con alerta nueva no sale): el usuario lo dejó así por ahora.

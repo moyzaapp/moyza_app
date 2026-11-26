@@ -12,6 +12,11 @@ perfil (`BuyerSearchCriteria.agent_id`) o si tiene alguna alerta de la
 empresa asignada a él (cualquier estado y fecha). Esa regla filtra con
 `agent_ids` y rellena la columna «Agentes» (D9).
 
+«Tipo de negocio» (2026-11-26): operación de las alertas del comprador en la
+empresa más la del perfil, «Venta, Alquiler» si tiene de los dos. En Alquiler
+no hay perfil, así que antes salía vacía; el resto de columnas de perfil
+siguen vacías para un comprador solo de alquiler.
+
 Es un documento de trabajo: cabecera en negrita, fila fija, autofiltro y
 fechas en hora de Madrid. Sin fórmulas ni estilos corporativos.
 """
@@ -36,6 +41,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.business_calendar import to_madrid
 from app.core.business_calendar import to_utc
+from app.core.constants import BusinessType
 from app.models.agent import Agent
 from app.models.buyer import Buyer
 from app.models.buyer_search_criteria import BuyerSearchCriteria
@@ -195,6 +201,40 @@ def _buyer_agents(db: Session, company_id: int, buyer_ids: list) -> dict:
     }
 
 
+def _business_types(db: Session, company_id: int, buyer_ids: list, buyers: list) -> dict:
+    """{buyer_id: «Venta, Alquiler»} con la operación de las alertas de la empresa y la del perfil.
+
+    En Alquiler el perfil no se guarda (`buyer_matching.profile_applies`), así
+    que la operación vive en la alerta: se unen las de las alertas del comprador
+    en la empresa con la del perfil, en el orden de `BusinessType.values()`.
+    """
+    if not buyer_ids:
+        return {}
+    by_buyer = {}
+    pairs = (
+        db.query(PropertyAlert.buyer_id, PropertyAlert.business_type)
+        .filter(
+            PropertyAlert.company_id == company_id,
+            PropertyAlert.buyer_id.in_(buyer_ids),
+            PropertyAlert.business_type.isnot(None),
+            PropertyAlert.business_type != "",
+        )
+        .distinct()
+        .all()
+    )
+    for buyer_id, business_type in pairs:
+        by_buyer.setdefault(buyer_id, set()).add(business_type)
+    for buyer in buyers:
+        criteria = buyer.search_criteria
+        if criteria is not None and criteria.business_type:
+            by_buyer.setdefault(buyer.id, set()).add(criteria.business_type)
+    order = {value: index for index, value in enumerate(BusinessType.values())}
+    return {
+        buyer_id: ", ".join(sorted(types, key=lambda t: (order.get(t, len(order)), t)))
+        for buyer_id, types in by_buyer.items()
+    }
+
+
 def _buyer_rows(db: Session, company_id: int, since: datetime, until: datetime,
                 agent_ids: Optional[list] = None) -> list:
     query = (
@@ -207,6 +247,7 @@ def _buyer_rows(db: Session, company_id: int, since: datetime, until: datetime,
     buyers = query.order_by(Buyer.created_at.asc(), Buyer.id.asc()).all()
     buyer_ids = [b.id for b in buyers]
     agents = _buyer_agents(db, company_id, buyer_ids)
+    business_types = _business_types(db, company_id, buyer_ids, buyers)
     rows = []
     for buyer in buyers:
         criteria = buyer.search_criteria
@@ -216,7 +257,7 @@ def _buyer_rows(db: Session, company_id: int, since: datetime, until: datetime,
             buyer.phone or "",
             buyer.email or "",
             agents.get(buyer.id, ""),
-            (criteria.business_type or "") if criteria else "",
+            business_types.get(buyer.id, ""),
             ", ".join(profile_types(criteria)),
             (criteria.province or "") if criteria else "",
             _join(criteria.cities, criteria.zones) if criteria else "",
