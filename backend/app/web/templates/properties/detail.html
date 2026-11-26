@@ -1,11 +1,32 @@
 {% extends 'base.html' %}
 {% import "components/ui_macros.html" as ui %}
+{% from "properties/_review_box.html" import review_box, review_modals %}
 
 {% block title %}
 Detalle Propiedad
 {% endblock %}
 
 {% block content %}
+
+{# Revisión de la propiedad nueva por el captador (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.4-3) #}
+{{ review_box(property, review, review_actions, is_admin) }}
+
+{# Compradores compatibles con la propiedad nueva (PLAN_COMPRADORES_COMPATIBLES_PROPIEDAD_NUEVA.md §4.5):
+   el admin, todos; un agente, los suyos. Solo si hay alguno #}
+{% if matches_count %}
+<section class="mb-6 rounded-xl border border-violet-200 bg-violet-50 text-violet-900 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3" aria-label="Compradores compatibles">
+    <div class="flex items-center gap-3 min-w-0 flex-1">
+        <span class="w-10 h-10 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center shrink-0" aria-hidden="true">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg>
+        </span>
+        <div class="min-w-0">
+            <p class="text-sm font-semibold">Compradores compatibles: <span class="tabular-nums">{{ matches_count }}</span></p>
+            <p class="text-xs text-violet-800">{{ 'Su perfil de búsqueda encaja con esta propiedad nueva' if is_admin else ('Tu comprador' if matches_count == 1 else 'Tus compradores') ~ ' con un perfil que encaja con esta propiedad nueva' }}</p>
+        </div>
+    </div>
+    {{ ui.button("Ver compradores", "secondary", href="/properties/" ~ property.id ~ "/matches", full_mobile=True) }}
+</section>
+{% endif %}
 
 <div class="mb-6 sm:mb-8">
 
@@ -853,6 +874,8 @@ Detalle Propiedad
         </div>
     </div>
 </div>
+
+{{ review_modals(property, review, review_actions, review_comment_max) }}
 
 <!-- Modal para Registrar actividad -->
 {% call ui.modal("activityModal", "Registrar actividad", size="2xl", subtitle=property.title) %}

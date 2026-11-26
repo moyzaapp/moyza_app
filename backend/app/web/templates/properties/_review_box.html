@@ -1,0 +1,147 @@
+{#
+  Caja de revisión de la propiedad nueva (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.4-3), ancla
+  #revision, encima de la cabecera del detalle. Según estado y rol (`review`, `review_actions`
+  de property_review_service.can_review, `is_admin`):
+    - Captador con pending/fixed: «Revisa esta ficha» con los datos a comprobar, el comentario
+      del admin si la corrigió, y «Todo correcto» / «Hay que revisar» (modal con comentario).
+    - Captador con issues: lo que pidió revisar, a la espera del admin.
+    - Admin con issues: lo que pide el captador; «Marcar como corregida» (modal) / «Marcar correcta».
+    - Admin con pending/fixed: pendiente del captador; «Marcar correcta» (P4).
+    - Cualquiera con ok: línea discreta «Revisada por … el …». skipped o sin fila: nada.
+  Violet = propiedades nuevas; ámbar = observaciones pendientes (tokens.md, dominio `review`).
+  Los modales (`reviewIssuesModal`, `reviewFixedModal`) van en `review_modals`, al final de la página.
+#}
+{% import "components/ui_macros.html" as ui %}
+
+{% macro review_box(property, review, review_actions, is_admin) -%}
+{% set visible = review and (review.status == 'ok' or review_actions.captador or review_actions.ok
+                               or (review.status == 'issues' and review_actions.is_captador)) %}
+{% if visible %}
+{% set captador = property.agent.name if property.agent else 'el captador' %}
+{% set since %}{% if property.market_entry_date %}En el mercado desde el {{ property.market_entry_date | madrid_dt('%d/%m/%Y') }}{% else %}Detectada el {{ review.created_at | madrid_dt('%d/%m/%Y') }}{% endif %}{% endset %}
+<section id="revision" class="scroll-mt-20 mb-6" aria-label="Revisión de la propiedad nueva">
+
+{% if review.status == 'ok' %}
+    <p class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+        {{ ui.status_badge("review", "ok") }}
+        <span>Revisada{% if review.ok_by_user %} por {{ review.ok_by_user.full_name or review.ok_by_user.email }}{% endif %}{% if review.ok_at %} el {{ review.ok_at | madrid_dt('%d/%m/%Y') }}{% endif %}</span>
+    </p>
+
+{% elif review_actions.captador %}
+    {# El captador tiene que leerla: pending o fixed #}
+    <div class="rounded-xl border border-violet-200 bg-violet-50 text-violet-900 px-4 py-4 sm:px-5">
+        <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-base font-bold">{{ 'Confirma que la ficha está correcta' if review.status == 'fixed' else 'Revisa esta ficha' }}</h2>
+            {{ ui.status_badge("review", review.status) }}
+        </div>
+        <p class="text-xs text-violet-800 mt-1">Propiedad nueva captada por ti · {{ since }}. Comprueba que los datos coinciden con lo que captaste antes de que se ofrezca a los compradores.</p>
+
+        {% if review.status == 'fixed' %}
+        <div class="mt-3 rounded-lg bg-white border border-violet-200 px-3 py-2 text-sm text-gray-700">
+            <p class="text-xs font-semibold text-violet-800">El administrador la corrigió{% if review.fixed_at %} el {{ review.fixed_at | madrid_dt('%d/%m/%Y') }}{% endif %}</p>
+            {% if review.agent_comment %}<p class="text-xs text-gray-500 mt-1">Pediste: {{ review.agent_comment }}</p>{% endif %}
+            {% if review.admin_comment %}<p class="mt-1 whitespace-pre-line">{{ review.admin_comment }}</p>{% endif %}
+        </div>
+        {% endif %}
+
+        {% set web_url = property | public_url %}
+        <dl class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 rounded-lg bg-white border border-violet-200 px-3 py-3 text-sm">
+            <div class="min-w-0"><dt class="text-xs text-gray-500">Dirección</dt><dd class="text-gray-900 break-words">{{ property.address or 'Sin dirección' }}{% if property.city %} · {{ property.city }}{% endif %}</dd></div>
+            <div><dt class="text-xs text-gray-500">Precio</dt><dd class="text-gray-900 tabular-nums">{{ property.price | eur }}</dd></div>
+            <div><dt class="text-xs text-gray-500">Tipo y operación</dt><dd class="text-gray-900">{{ [property.property_type, property.business_type] | select | join(' · ') or '–' }}</dd></div>
+            <div><dt class="text-xs text-gray-500">Dormitorios</dt><dd class="text-gray-900 tabular-nums">{{ property.num_dormitorios if property.num_dormitorios is not none else '–' }}</dd></div>
+            <div><dt class="text-xs text-gray-500">Superficie</dt><dd class="text-gray-900 tabular-nums">{% if property.m2_construidos %}{{ "{:,.2f}".format(property.m2_construidos).rstrip("0").rstrip(".") }} m² construidos{% elif property.m2_utiles %}{{ "{:,.2f}".format(property.m2_utiles).rstrip("0").rstrip(".") }} m² útiles{% else %}–{% endif %}</dd></div>
+            <div class="min-w-0"><dt class="text-xs text-gray-500">Enlace web</dt><dd class="break-all">{% if web_url %}<a href="{{ web_url }}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-700 hover:underline">Abrir la ficha en la web</a>{% else %}<span class="text-gray-900">Sin enlace</span>{% endif %}</dd></div>
+        </dl>
+
+        <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 mt-4">
+            {{ ui.button("Hay que revisar", "secondary", attrs='data-modal-open="reviewIssuesModal"', full_mobile=True) }}
+            <form method="POST" action="/properties/{{ property.id }}/review/ok" data-once data-loading-text="Guardando…" class="w-full sm:w-auto">
+                {{ ui.button("Todo correcto", "primary", type="submit", full_mobile=True) }}
+            </form>
+        </div>
+    </div>
+
+{% elif review.status == 'issues' and review_actions.fixed %}
+    {# Admin: el captador pide revisar #}
+    <div class="rounded-xl border border-amber-200 bg-amber-50 text-amber-900 px-4 py-4 sm:px-5">
+        <div class="flex flex-wrap items-center gap-2">
+            <h2 class="text-base font-bold">{{ captador }} pide revisar esta ficha</h2>
+            {{ ui.status_badge("review", "issues") }}
+        </div>
+        <p class="mt-2 rounded-lg bg-white border border-amber-200 px-3 py-2 text-sm text-gray-700 whitespace-pre-line">{{ review.agent_comment }}</p>
+        <p class="text-xs text-amber-800 mt-2">
+            {% if review.flagged_at %}Lo pidió el {{ review.flagged_at | madrid_dt('%d/%m/%Y %H:%M') }}{% if review.rounds and review.rounds > 1 %} · {{ review.rounds }}ª vez{% endif %}. {% endif %}
+            Edita la propiedad con <a href="/properties?filtro=revision" class="font-medium underline underline-offset-2 hover:text-amber-900">Editar en el listado de Propiedades</a> y después márcala como corregida: el captador recibirá un aviso para confirmarla.
+        </p>
+        <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 mt-4">
+            <form method="POST" action="/properties/{{ property.id }}/review/ok" data-once data-loading-text="Guardando…" class="w-full sm:w-auto"
+                  onsubmit="return confirm('¿Marcar la propiedad como correcta sin el OK del captador?')">
+                {{ ui.button("Marcar correcta", "secondary", type="submit", full_mobile=True) }}
+            </form>
+            {{ ui.button("Marcar como corregida", "primary", attrs='data-modal-open="reviewFixedModal"', full_mobile=True) }}
+        </div>
+    </div>
+
+{% elif review.status == 'issues' %}
+    {# El captador mientras espera al admin #}
+    <div class="rounded-xl border border-amber-200 bg-amber-50 text-amber-900 px-4 py-3">
+        <div class="flex flex-wrap items-center gap-2">
+            <p class="text-sm font-semibold">Pendiente de que el administrador la corrija</p>
+            {{ ui.status_badge("review", "issues") }}
+        </div>
+        {% if review.agent_comment %}<p class="text-xs text-amber-800 mt-1 whitespace-pre-line">Pedido: {{ review.agent_comment }}</p>{% endif %}
+    </div>
+
+{% elif is_admin and review_actions.ok %}
+    {# Admin con pending / fixed: espera al captador (P4: puede darla por buena) #}
+    <div class="rounded-xl border border-violet-200 bg-violet-50 text-violet-900 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+        <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+                <p class="text-sm font-semibold">
+                    {% if review.status == 'fixed' %}Corregida: pendiente de que {{ captador }} confirme que está correcta{% else %}Pendiente de que {{ captador }} revise la ficha{% endif %}
+                </p>
+                {{ ui.status_badge("review", review.status) }}
+            </div>
+            <p class="text-xs text-violet-800 mt-1">{{ since }}{% if review.status == 'fixed' and review.fixed_at %} · corregida el {{ review.fixed_at | madrid_dt('%d/%m/%Y') }}{% endif %}</p>
+        </div>
+        <form method="POST" action="/properties/{{ property.id }}/review/ok" data-once data-loading-text="Guardando…" class="w-full sm:w-auto"
+              onsubmit="return confirm('¿Marcar la propiedad como correcta sin el OK del captador?')">
+            {{ ui.button("Marcar correcta", "secondary", type="submit", full_mobile=True) }}
+        </form>
+    </div>
+{% endif %}
+
+</section>
+{% endif %}
+{%- endmacro %}
+
+{% macro review_modals(property, review, review_actions, comment_max=1000) -%}
+{% if review and review_actions.issues %}
+{% call ui.modal("reviewIssuesModal", "Hay que revisar la ficha", size="lg", subtitle=property.title) %}
+<form method="POST" action="/properties/{{ property.id }}/review/issues" data-once data-loading-text="Enviando…">
+    <div class="p-4 sm:p-6 space-y-4">
+        {{ ui.field("comment", "¿Qué hay que corregir?", type="textarea", required=True, id="reviewIssuesComment",
+                    placeholder="Ej.: el precio es 135.000 €, tiene 3 dormitorios y falta el enlace de la web",
+                    help="El administrador lo corregirá y te avisará para que confirmes la ficha.",
+                    attrs='maxlength="' ~ comment_max ~ '"') }}
+    </div>
+    {{ ui.modal_footer(submit_label="Enviar al administrador") }}
+</form>
+{% endcall %}
+{% endif %}
+{% if review and review_actions.fixed %}
+{% call ui.modal("reviewFixedModal", "Marcar como corregida", size="lg", subtitle=property.title) %}
+<form method="POST" action="/properties/{{ property.id }}/review/fixed" data-once data-loading-text="Guardando…">
+    <div class="p-4 sm:p-6 space-y-4">
+        {% if review.agent_comment %}{{ ui.banner("El captador pidió: " ~ review.agent_comment, tone="amber") }}{% endif %}
+        {{ ui.field("comment", "Qué se ha corregido", type="textarea", id="reviewFixedComment", optional_label=True,
+                    placeholder="Ej.: precio y dormitorios actualizados",
+                    help="El captador lo verá en el aviso y en la ficha al confirmarla.",
+                    attrs='maxlength="' ~ comment_max ~ '"') }}
+    </div>
+    {{ ui.modal_footer(submit_label="Marcar como corregida") }}
+</form>
+{% endcall %}
+{% endif %}
+{%- endmacro %}

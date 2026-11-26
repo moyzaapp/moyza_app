@@ -27,9 +27,10 @@
 {% set _tones = {
     "green": "bg-green-100 text-green-800", "amber": "bg-amber-100 text-amber-800",
     "red":   "bg-red-100 text-red-800",     "blue":  "bg-blue-100 text-blue-800",
-    "gray":  "bg-gray-100 text-gray-700",   "purple": "bg-purple-100 text-purple-800"
+    "gray":  "bg-gray-100 text-gray-700",   "purple": "bg-purple-100 text-purple-800",
+    "violet": "bg-violet-100 text-violet-800"
 } %}
-{% set _dots = { "green": "bg-green-500", "amber": "bg-amber-500", "red": "bg-red-500", "blue": "bg-blue-500", "gray": "bg-gray-400", "purple": "bg-purple-500" } %}
+{% set _dots = { "green": "bg-green-500", "amber": "bg-amber-500", "red": "bg-red-500", "blue": "bg-blue-500", "gray": "bg-gray-400", "purple": "bg-purple-500", "violet": "bg-violet-500" } %}
 
 {% macro badge(label, tone="gray", dot=False, extra="") -%}
 <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium {{ _tones.get(tone, _tones['gray']) }} {{ extra }}">
@@ -57,7 +58,8 @@
     "priority": { "ALTA": ("Alta", "red"), "NORMAL": ("Normal", "blue"), "BAJA": ("Baja", "gray") },
     "log":      { "success": ("Exitoso", "green"), "failed": ("Fallido", "red"), "pending": ("Pendiente", "amber"), "skipped": ("Omitido", "gray") },
     "business": { "Venta": ("Venta", "blue"), "Alquiler": ("Alquiler", "amber") },
-    "active":   { True: ("Activo", "green"), False: ("Inactivo", "gray") }
+    "active":   { True: ("Activo", "green"), False: ("Inactivo", "gray") },
+    "review":   { "pending": ("Por revisar", "violet"), "issues": ("Con observaciones", "amber"), "fixed": ("Corregida · pendiente de OK", "violet"), "ok": ("Revisada", "green") }
 } %}
 
 {% macro status_badge(domain, value, dot=True) -%}
@@ -66,8 +68,8 @@
 {%- endmacro %}
 
 {# ---------------------------------------------------------------- KPI #}
-{% set _kpi_value = { "green": "text-green-600", "amber": "text-amber-600", "red": "text-red-600", "blue": "text-blue-600", "gray": "text-gray-900" } %}
-{% set _kpi_icon  = { "green": "bg-green-100 text-green-600", "amber": "bg-amber-100 text-amber-600", "red": "bg-red-100 text-red-600", "blue": "bg-blue-100 text-blue-600", "gray": "bg-gray-100 text-gray-600" } %}
+{% set _kpi_value = { "green": "text-green-600", "amber": "text-amber-600", "red": "text-red-600", "blue": "text-blue-600", "gray": "text-gray-900", "violet": "text-violet-600" } %}
+{% set _kpi_icon  = { "green": "bg-green-100 text-green-600", "amber": "bg-amber-100 text-amber-600", "red": "bg-red-100 text-red-600", "blue": "bg-blue-100 text-blue-600", "gray": "bg-gray-100 text-gray-600", "violet": "bg-violet-100 text-violet-600" } %}
 
 {#
   Extensión del proyecto (compatible con el macro del skill):
@@ -108,13 +110,15 @@
     "amber": "border-amber-200 bg-amber-50 text-amber-900",
     "blue":  "border-blue-200 bg-blue-50 text-blue-900",
     "red":   "border-red-200 bg-red-50 text-red-900",
-    "green": "border-green-200 bg-green-50 text-green-900"
+    "green": "border-green-200 bg-green-50 text-green-900",
+    "violet": "border-violet-200 bg-violet-50 text-violet-900"
 } %}
 
 {% macro banner(title, tone="amber", text=None, role="status") -%}
 <div class="rounded-xl border px-4 py-3 flex items-start gap-3 {{ _banner.get(tone, _banner['amber']) }}" role="{{ 'alert' if tone == 'red' else role }}">
     <svg class="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
         {% if tone == "green" %}<path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
+        {% elif tone == "violet" %}<path stroke-linecap="round" stroke-linejoin="round" d="M11.35 3.836c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m8.9-4.414c.376.023.75.05 1.124.08 1.131.094 1.976 1.057 1.976 2.192V16.5A2.25 2.25 0 0 1 18 18.75h-2.25m-7.5-10.5H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V18.75m-7.5-10.5h6.375c.621 0 1.125.504 1.125 1.125v9.375m-8.25-3 1.5 1.5 3-3.75"/>
         {% elif tone == "blue" %}<path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/>
         {% else %}<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>{% endif %}
     </svg>

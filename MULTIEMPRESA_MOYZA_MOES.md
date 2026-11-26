@@ -1068,3 +1068,58 @@ desde la ficha del agente).
 ```bash
 docker exec moyza_backend python -m pytest tests/test_agent_companies_follow_user.py tests/test_agent_lists_by_company.py tests/test_alert_assignment.py tests/test_alert_assignment_routes.py tests/test_indicator_rows.py tests/test_performance_service.py -q
 ```
+
+## 24. Revisión obligatoria de las propiedades nuevas por el captador (2026-11-24)
+
+PLAN_REVISION_PROPIEDADES_NUEVAS.md. Cada propiedad nueva (la carga la ETL del CRM o la
+crea el admin) pide al captador que lea la ficha y marque «Todo correcto» o «Hay que
+revisar» (con comentario); el admin la corrige, la marca corregida y vuelve al captador.
+Avisos solo in-app (campana, Novedades, ventana al entrar y bloque del Inicio), color
+`violet`; el admin lo ve en «Requiere atención» y en la tarjeta «Por revisar» de Propiedades.
+
+1. Migración nueva `r4s5t6u7v8w9` (tabla `property_reviews`) sobre `q3x4y5z6a7b8`:
+   `docker exec moyza_backend alembic upgrade head`. **Backfill**: todas las propiedades
+   existentes quedan `skipped` (nada anterior pide revisión). Si la rama de Captaciones
+   (`q3c4p5t6a7b8`) ya está aplicada en esa base, hará falta `alembic merge` antes.
+2. Variables nuevas (opcionales; valores por defecto):
+   - `PROPERTY_REVIEW_ENABLED=true`: `false` apaga el registro, los avisos y el recordatorio.
+   - `PROPERTY_REVIEW_POLL_MINUTES=10`: cada cuánto mira el job si la ETL cargó propiedades.
+   - `PROPERTY_REVIEW_REMINDER_BUSINESS_HOURS=48`: un único recordatorio a las N horas hábiles.
+   - `PROPERTY_REVIEW_MAX_AGE_DAYS=15` (P7): una propiedad sin revisión con
+     `market_entry_date` de hace más de N días es carga histórica del CRM → `skipped` sin avisar.
+3. Jobs nuevos en el worker maestro: `register_property_reviews` (intervalo) y
+   `remind_property_reviews` (08:10 Madrid, lunes a viernes, salta festivos).
+4. CSS: clases `violet-*` nuevas → recompilar Tailwind (lo hace el build de Docker; en local
+   `bash backend/scripts/build_css.sh`) y reiniciar el backend.
+
+Rollback: `docker exec moyza_backend alembic downgrade q3x4y5z6a7b8` con el código anterior
+(borra la tabla y las revisiones hechas). Desactivar sin tocar código:
+`PROPERTY_REVIEW_ENABLED=false` y reiniciar.
+
+```bash
+docker exec moyza_backend python -m pytest tests/test_property_review_service.py tests/test_property_review_routes.py -q
+```
+
+## 25. Compradores compatibles con una propiedad nueva (2026-11-24)
+
+PLAN_COMPRADORES_COMPATIBLES_PROPIEDAD_NUEVA.md. Al dar el OK a la revisión de una propiedad
+nueva (§24) se cruzan con ella los perfiles de las alertas abiertas (`PENDING` + `IN_PROGRESS`,
+perfil completo, agente activo, operaciones con perfil) de **todos** los agentes y de las **dos**
+empresas. Un aviso in-app `property_match` (violet) por agente y empresa de la alerta, y página
+`/properties/{id}/matches` con «Enviar por WhatsApp» (un clic del agente desde su WhatsApp; sin
+Evolution API ni envío automático). Nada se añade a la lista de interés ni crea seguimientos.
+
+1. Migración nueva `s5t6u7v8w9x0` (tabla `property_buyer_matches`) sobre `r4s5t6u7v8w9`:
+   `docker exec moyza_backend alembic upgrade head`. Sin backfill (las propiedades existentes
+   no se cruzan). Mismo aviso que §24 si Captaciones (`q3c4p5t6a7b8`) ya está aplicada.
+2. Sin variables ni jobs nuevos: el cruce va en la petición del OK.
+3. CSS: la página usa clases nuevas (`md:flex-row`, `md:items-center`, `md:shrink-0`,
+   `sm:min-h-0`, `sm:max-w-[14rem]`): recompilar Tailwind (build de Docker o
+   `bash backend/scripts/build_css.sh`) y reiniciar el backend.
+
+Rollback: `docker exec moyza_backend alembic downgrade r4s5t6u7v8w9` con el código anterior
+(borra el historial de cruces; los envíos siguen en los seguimientos `PROPIEDAD_ENVIADA`).
+
+```bash
+docker exec moyza_backend python -m pytest tests/test_criteria_matches_property.py tests/test_property_match_service.py tests/test_property_matches_page.py -q
+```

@@ -1,0 +1,121 @@
+{#
+  Compradores compatibles con una propiedad nueva
+  (PLAN_COMPRADORES_COMPATIBLES_PROPIEDAD_NUEVA.md §4.5). Ruta GET /properties/{id}/matches.
+
+  - Cabecera: título de la propiedad, tipo · población · dormitorios · precio, distintivo de
+    empresa, badge de la revisión, «Ver en la web» y, si el rol puede, «Ver ficha».
+  - Lista: el agente, solo sus compradores; el admin, todos agrupados por agente y
+    «N agentes avisados». Cada fila: comprador, teléfono, perfil, estado y etapa de la
+    alerta, «Ver comprador» y «Enviar por WhatsApp» (POST a /alerts/{id}/send-property con
+    target="_blank", como la tarjeta de sugerencias: la pestaña nueva acaba en wa.me y ui.js
+    cambia la línea a «Enviada hoy»). Sin botón, el motivo (`row.reason`).
+  - Violet = propiedades nuevas (tokens.md). No enseña propietario ni dirección.
+#}
+{% extends 'base.html' %}
+{% import "components/ui_macros.html" as ui %}
+
+{% block title %}Compradores compatibles - {{ brand_name }}{% endblock %}
+
+{% block content %}
+{% set web_url = property | public_url %}
+<div class="max-w-5xl mx-auto space-y-6">
+
+    <a href="{{ back_url }}" class="text-sm text-gray-500 hover:text-gray-700 inline-flex items-center gap-1 min-h-10">
+        ← {{ 'Volver a la propiedad' if is_admin else 'Volver a Compradores' }}
+    </a>
+
+    <div class="space-y-3">
+        {% set subtitle = (subtitle_parts + [property.price | eur]) | select | join(" · ") %}
+        {% call ui.page_header(property.title, subtitle) %}
+            {% if web_url %}
+            {% call ui.button("Ver en la web", "secondary", href=web_url, attrs='target="_blank" rel="noopener noreferrer"', full_mobile=True) %}
+            <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
+            {% endcall %}
+            {% endif %}
+            {% if show_detail_link %}{{ ui.button("Ver ficha", "secondary", href="/properties/" ~ property.id, full_mobile=True) }}{% endif %}
+        {% endcall %}
+        <p class="flex flex-wrap items-center gap-2">
+            {{ ui.company_badge(property.company) }}
+            {% if review and review.status in ('pending', 'issues', 'fixed', 'ok') %}{{ ui.status_badge("review", review.status) }}{% endif %}
+            {% if not web_url %}{{ ui.badge("Sin enlace web", "amber", dot=True) }}{% endif %}
+        </p>
+    </div>
+
+    <section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="matchesTitle">
+        <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
+            <div class="flex items-start gap-3 min-w-0">
+                <span class="w-10 h-10 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center shrink-0" aria-hidden="true">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/></svg>
+                </span>
+                <div class="min-w-0">
+                    <h2 id="matchesTitle" class="text-lg font-bold text-gray-900">
+                        Compradores compatibles{% if rows %} <span class="text-gray-500 font-medium tabular-nums">· {{ rows | length }}</span>{% endif %}
+                    </h2>
+                    <p class="text-xs text-gray-500 mt-0.5">
+                        {% if is_admin %}Compradores de todos los agentes y de las dos empresas cuyo perfil de búsqueda encaja con esta propiedad.
+                        {% else %}Tus compradores cuyo perfil de búsqueda encaja con esta propiedad. El mensaje sale de tu WhatsApp con el enlace de la web.{% endif %}
+                    </p>
+                </div>
+            </div>
+            {% if is_admin and notified_agents is not none %}
+            <span class="shrink-0">{{ ui.badge(("1 agente avisado" if notified_agents == 1 else notified_agents ~ " agentes avisados"), "violet", dot=True) }}</span>
+            {% endif %}
+        </header>
+
+        {% if not rows %}
+        {{ ui.empty_state("Ningún comprador encaja con esta propiedad", "Se buscan al marcarla como correcta en la revisión: compradores con búsqueda abierta y perfil completo.") }}
+        {% else %}
+        {% for group in groups %}
+        {% if is_admin %}
+        <h3 class="px-4 sm:px-6 pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            {{ group.agent_name }} <span class="tabular-nums">· {{ group.rows | length }}</span>
+        </h3>
+        {% endif %}
+        <ul class="divide-y divide-gray-100{{ ' border-b border-gray-100' if is_admin and not loop.last else '' }}">
+            {% for row in group.rows %}
+            {% set alert = row.alert %}
+            <li class="px-4 sm:px-6 py-4 flex flex-col md:flex-row md:items-center gap-3" data-send-block>
+                <div class="min-w-0 flex-1 space-y-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <p class="text-sm font-semibold text-gray-900 break-words">{{ row.name }}</p>
+                        {{ ui.status_badge("alert", alert.status) }}
+                        {% if row.stage %}
+                        <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium {{ row.stage.color }}">{{ row.stage.label }}</span>
+                        {% else %}
+                        {{ ui.badge("Sin iniciar", "gray") }}
+                        {% endif %}
+                        {% if alert.company_id != property.company_id or show_company_badges %}{{ ui.company_badge(alert.company, title="Comprador de " ~ alert.company.name) }}{% endif %}
+                    </div>
+                    <p class="text-sm text-gray-700">
+                        {% if row.phone %}
+                        <a href="{{ row.phone | tel_href }}" class="inline-flex items-center min-h-10 sm:min-h-0 font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 tabular-nums">{{ row.phone | phone_display }}</a>
+                        {% else %}
+                        <span class="text-gray-500">Sin teléfono</span>
+                        {% endif %}
+                    </p>
+                    {% if row.criteria_summary %}<p class="text-xs text-gray-500 break-words">Busca: {{ row.criteria_summary }}</p>{% endif %}
+                    <p class="text-xs text-gray-500{{ '' if row.sent_at else ' hidden' }}" data-sent-label>{% if row.sent_at %}Enviada el {{ row.sent_at | madrid_dt('%d/%m/%Y') }}{% endif %}</p>
+                </div>
+                <div class="flex flex-col sm:flex-row sm:items-center gap-2 md:shrink-0">
+                    {% if row.can_open %}{{ ui.button("Ver comprador", "secondary", href="/alerts/" ~ alert.id, full_mobile=True) }}{% endif %}
+                    {% if row.can_send %}
+                    <form method="POST" action="/alerts/{{ alert.id }}/send-property" target="_blank" data-property-send class="w-full sm:w-auto">
+                        <input type="hidden" name="property_id" value="{{ property.id }}">
+                        <input type="hidden" name="next" value="/properties/{{ property.id }}/matches">
+                        {% set send_attrs %}aria-label="Enviar por WhatsApp a {{ row.name }}"{% endset %}
+                        {% call ui.button("Enviar por WhatsApp", "secondary", type="submit", attrs=send_attrs, full_mobile=True) %}
+                        <svg class="w-5 h-5" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z"/></svg>
+                        {% endcall %}
+                    </form>
+                    {% elif row.reason %}
+                    <p class="text-xs text-gray-500 sm:max-w-[14rem]" data-send-reason>{{ row.reason }}</p>
+                    {% endif %}
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endfor %}
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

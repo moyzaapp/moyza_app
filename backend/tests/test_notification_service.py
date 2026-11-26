@@ -137,6 +137,19 @@ def test_recent_no_leidas_primero(ctx):
     assert [n.id for n in ns.recent(ctx.db, ctx.laura.id, ctx.moyza.id)][:2] == [old.id, new.id]
 
 
+def test_recent_y_unread_por_tipo(ctx):
+    """El Inicio del agente separa los avisos de propiedades nuevas del resto."""
+    [visit] = _notify(ctx, [ctx.laura], entity=("visit", 1))
+    [review] = _notify(ctx, [ctx.laura], entity=("property_review", 1), kind=NotificationKind.PROPERTY_REVIEW_PENDING)
+    [match] = _notify(ctx, [ctx.laura], entity=("property_match", 1), kind=NotificationKind.PROPERTY_MATCH)
+    props = NotificationKind.PROPERTY_KINDS
+    assert {n.id for n in ns.recent(ctx.db, ctx.laura.id, ctx.moyza.id, kinds=props)} == {review.id, match.id}
+    assert [n.id for n in ns.recent(ctx.db, ctx.laura.id, ctx.moyza.id, exclude_kinds=props)] == [visit.id]
+    assert ns.unread_count(ctx.db, ctx.laura.id, ctx.moyza.id, kinds=props) == 2
+    assert ns.unread_count(ctx.db, ctx.laura.id, ctx.moyza.id, exclude_kinds=props) == 1
+    assert ns.unread_count(ctx.db, ctx.laura.id, ctx.moyza.id) == 3
+
+
 def test_limpieza_de_leidas_a_90_dias(ctx):
     [old] = _notify(ctx, [ctx.laura], entity=("visit", 1))
     [recent_read] = _notify(ctx, [ctx.laura], entity=("visit", 2))

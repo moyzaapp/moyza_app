@@ -10,6 +10,8 @@
 {% from "dashboard/components/progress_ring.html" import progress_ring %}
 {% from "dashboard/components/trend_chart.html" import trend_chart %}
 {% from "dashboard/components/notification_item.html" import notification_item %}
+{% from "dashboard/components/review_item.html" import review_item %}
+{% from "dashboard/components/icons.html" import icon %}
 {% set text_tones = {'green': 'text-green-700', 'amber': 'text-amber-700', 'red': 'text-red-700', 'gray': 'text-gray-500'} %}
 
 {# ---------------------------------------------------------------- Mis resultados: semana y mes a la vez (PLAN_INICIO_SEMANA_MES.md) #}
@@ -61,6 +63,27 @@
 </section>
 {%- endmacro %}
 
+{# ---------------------------------------------------------------- Propiedades nuevas por revisar (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.4-2)
+   Violet = «propiedades nuevas» (tokens.md). Solo si hay alguna; el botón reabre la ventana del inicio de sesión. #}
+{% if home.reviews %}
+{% set nr = home.reviews | length %}
+<section class="bg-white rounded-2xl border border-violet-200 overflow-hidden" aria-labelledby="reviewsTitle">
+    <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-6 py-4 border-b border-violet-200 bg-violet-50">
+        <div class="flex items-start gap-3 min-w-0">
+            <span class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-violet-100 text-violet-600" aria-hidden="true">{{ icon('clipboard') }}</span>
+            <div class="min-w-0">
+                <h2 id="reviewsTitle" class="text-lg font-bold text-violet-900">Propiedades nuevas por revisar</h2>
+                <p class="text-xs text-violet-800 mt-0.5">{{ nr }} {{ 'ficha espera' if nr == 1 else 'fichas esperan' }} a que confirmes que {{ 'está correcta' if nr == 1 else 'están correctas' }} o digas qué hay que revisar</p>
+            </div>
+        </div>
+        {{ ui.button("Ver pendientes", "secondary", attrs='data-modal-open="pendingReviewsModal"', full_mobile=True) }}
+    </header>
+    <ul class="divide-y divide-gray-100 px-4 sm:px-6">
+        {% for r in home.reviews %}{{ review_item(r, show_company_badges) }}{% endfor %}
+    </ul>
+</section>
+{% endif %}
+
 <section aria-labelledby="kpisTitle" class="space-y-3">
     <h2 id="kpisTitle" class="text-xs font-semibold uppercase tracking-wide text-gray-500">Mis resultados</h2>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -74,6 +97,29 @@
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
     {% if home.show_news %}
+    <div class="space-y-6">
+
+    {# Avisos de propiedades nuevas (revisión y compradores compatibles, violet) en su propio
+       cuadro, separados del resto de novedades para que se vean de un vistazo. Solo si hay alguno. #}
+    {% if home.property_news %}
+    <section class="bg-white rounded-2xl border border-violet-200 overflow-hidden" aria-labelledby="propertyNewsTitle">
+        <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-violet-200 bg-violet-50">
+            <div class="flex items-center gap-3 min-w-0">
+                <span class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-violet-100 text-violet-600" aria-hidden="true">{{ icon('clipboard') }}</span>
+                <h2 id="propertyNewsTitle" class="text-lg font-bold text-violet-900 min-w-0">
+                    Propiedades nuevas
+                    {% if home.property_news_unread %}<span class="ml-1 align-middle">{{ ui.badge(home.property_news_unread ~ (" nueva" if home.property_news_unread == 1 else " nuevas"), "violet") }}</span>{% endif %}
+                </h2>
+            </div>
+            <a href="/notifications" class="shrink-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2">Ver todas</a>
+        </header>
+        <p class="px-4 sm:px-6 pt-3 text-xs text-gray-500">Fichas que te toca revisar y compradores tuyos que encajan con una propiedad nueva.</p>
+        <ul class="divide-y divide-gray-100">
+            {% for n in home.property_news %}{{ notification_item(n, n.when) }}{% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
     <section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="newsTitle">
         <header class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200">
             <h2 id="newsTitle" class="text-lg font-bold text-gray-900">
@@ -96,6 +142,8 @@
             {{ ui.empty_state("Aún no tienes novedades", "Te avisaremos aquí cuando otro agente visite tus inmuebles, te añada como acompañante o el administrador te deje una observación.") }}
         {% endif %}
     </section>
+
+    </div>
     {% endif %}
 
     <section class="bg-white rounded-2xl border border-gray-200 {% if not home.show_news %}lg:col-span-2{% endif %}" aria-labelledby="agendaTitle">
@@ -227,12 +275,29 @@
     </section>
 </div>
 
-{# ---------------------------------------------------------------- Ventana de compradores sin atender (§3.4; se abre al iniciar sesión) #}
+{# ---------------------------------------------------------------- Ventana de propiedades nuevas por revisar (P2; se abre la primera al iniciar sesión) #}
+{% if home.reviews %}
+{% call ui.modal("pendingReviewsModal", "Propiedades nuevas por revisar", size="lg",
+                 subtitle="Lee cada ficha y marca si está correcta o qué hay que revisar") %}
+<div data-auto-open-on-login="1">
+    <div class="p-4 sm:p-6">
+    <ul class="divide-y divide-gray-100 -my-2">
+        {% for r in home.reviews %}{{ review_item(r, show_company_badges) }}{% endfor %}
+    </ul>
+    </div>
+    <footer class="{{ ui.modal_footer_class }}">
+        {{ ui.button("Lo reviso después", "primary", attrs='data-modal-close', full_mobile=True) }}
+    </footer>
+</div>
+{% endcall %}
+{% endif %}
+
+{# ---------------------------------------------------------------- Ventana de compradores sin atender (§3.4; se abre al iniciar sesión, después de la de propiedades) #}
 {% if home.pending_buyers %}
 {% set n = home.pending_buyers | length %}
 {% call ui.modal("pendingBuyersModal", "Compradores que requieren atención", size="lg",
                  subtitle=(home.pending_summary ~ " · sin gestionar desde la asignación o pendientes de volver a llamar, en horas hábiles")) %}
-<div data-auto-open-on-login>
+<div data-auto-open-on-login="2">
     <div class="p-4 sm:p-6">
     <ul class="divide-y divide-gray-100 -my-2">
         {% for b in home.pending_buyers %}

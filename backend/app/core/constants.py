@@ -133,6 +133,58 @@ class PropertyStatus:
         return value in cls.values()
 
 
+class PropertyReviewStatus:
+    """Revisión de una propiedad nueva por su captador (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.1).
+
+    - ``pending``: la app la registró y espera a que el captador la lea.
+    - ``issues``: el captador pidió revisar algo (comentario); le toca al admin.
+    - ``fixed``: el admin la corrigió; vuelve al captador para el OK.
+    - ``ok``: revisada (OK del captador o del admin, P4).
+    - ``skipped``: no pide revisión (existía antes del despliegue o entró no activa).
+
+    Etiqueta y color siguen el mapa de estados de tokens.md (dominio `review`):
+    violet = «propiedades nuevas» (P6), amber = observaciones pendientes del admin.
+    """
+    PENDING = "pending"
+    ISSUES = "issues"
+    FIXED = "fixed"
+    OK = "ok"
+    SKIPPED = "skipped"
+
+    # Abiertas: aún no tienen el OK
+    OPEN = (PENDING, ISSUES, FIXED)
+    # Esperan al captador (las de `issues` esperan al admin)
+    AWAITING_AGENT = (PENDING, FIXED)
+
+    LABELS = {
+        PENDING: "Por revisar",
+        ISSUES: "Con observaciones",
+        FIXED: "Corregida · pendiente de OK",
+        OK: "Revisada",
+        SKIPPED: "Sin revisión",
+    }
+
+    TONES = {
+        PENDING: "violet",
+        ISSUES: "amber",
+        FIXED: "violet",
+        OK: "green",
+        SKIPPED: "gray",
+    }
+
+    @classmethod
+    def values(cls):
+        return {cls.PENDING, cls.ISSUES, cls.FIXED, cls.OK, cls.SKIPPED}
+
+    @classmethod
+    def label(cls, value: str) -> str:
+        return cls.LABELS.get(value, value or "")
+
+    @classmethod
+    def tone(cls, value: str) -> str:
+        return cls.TONES.get(value, "gray")
+
+
 class BusinessType:
     """Operación de una propiedad o de lo que busca un comprador.
 
