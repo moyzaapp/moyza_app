@@ -13,6 +13,7 @@
  *  - Guardia de doble envío: <form data-once> desactiva el botón de envío al enviar y
  *    muestra "Guardando…" (o el texto de data-loading-text).
  *  - Botones [data-modal-open="id"] abren el modal sin JS en línea.
+ *  - Al cerrar un modal abierto se emite `ui:modal-closed` en el propio modal (burbujea).
  *
  * Sin dependencias. Compatible con los modales antiguos (hidden/flex) mientras migran.
  */
@@ -75,6 +76,11 @@ window.UI = (function () {
         if (!openStack.length) document.body.classList.remove('overflow-hidden');
         if (entry && entry.opener && typeof entry.opener.focus === 'function' && document.contains(entry.opener)) {
             try { entry.opener.focus({ preventScroll: true }); } catch (e) { entry.opener.focus(); }
+        }
+        // Aviso para quien encadena ventanas (dashboard.js: primero propiedades
+        // por revisar y, al cerrarla, compradores; PLAN_REVISION_PROPIEDADES_NUEVAS.md)
+        if (entry) {
+            try { modal.dispatchEvent(new CustomEvent('ui:modal-closed', { bubbles: true })); } catch (e) { /* navegador antiguo */ }
         }
     }
 

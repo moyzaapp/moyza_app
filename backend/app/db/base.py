@@ -31,3 +31,5 @@ from app.models.agent_performance_report import AgentPerformanceReport
 from app.models.agent_performance_target import AgentPerformanceTarget
 from app.models.notification import Notification
 from app.models.closing import Closing
+from app.models.property_review import PropertyReview
+from app.models.property_buyer_match import PropertyBuyerMatch

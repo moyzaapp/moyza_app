@@ -6,11 +6,17 @@
  *    línea por serie (agente); "bars" = barras apiladas por serie + línea de
  *    total (equipo). Paleta y opciones de references/charts.md del skill.
  *    Si Chart.js no carga: banner ámbar y la tabla de datos queda abierta.
- *  - Ventana de compradores sin atender: se abre una vez por inicio de sesión.
+ *  - Ventanas al iniciar sesión: se abren una vez por inicio de sesión.
  *    El login deja la cookie `moyza_welcome=1` (2 min); al cargar el Inicio,
- *    si la cookie existe se abre el modal marcado con [data-auto-open-on-login]
- *    y la cookie se borra. Volver al Inicio en la misma sesión no la reabre;
- *    queda el botón "Compradores sin atender" para hacerlo a mano.
+ *    si la cookie existe se abren los modales marcados con
+ *    [data-auto-open-on-login] y la cookie se borra. Si hay varios, **en
+ *    orden** (`data-auto-open-on-login="1"`, `"2"`…; sin número, al final y en
+ *    orden del documento): el siguiente se abre cuando se cierra el anterior
+ *    (evento `ui:modal-closed` de ui.js). Hoy, agente: primero «Propiedades
+ *    nuevas por revisar», después «Compradores que requieren atención»; admin:
+ *    primero «Propiedades por corregir», después «Compradores sin gestionar»
+ *    (PLAN_REVISION_PROPIEDADES_NUEVAS.md P2). Volver al Inicio en la misma
+ *    sesión no las reabre; quedan los botones para hacerlo a mano.
  */
 (function () {
   'use strict';
@@ -109,9 +115,27 @@
   if (justLoggedIn) deleteCookie(WELCOME_COOKIE);
 
   if (justLoggedIn && window.UI) {
-    document.querySelectorAll('[data-auto-open-on-login]').forEach(function (marker) {
+    var queue = [];
+    Array.prototype.forEach.call(document.querySelectorAll('[data-auto-open-on-login]'), function (marker, index) {
       var modal = marker.closest('[role="dialog"]');
-      if (modal) window.UI.openModal(modal.id);
+      if (!modal || queue.some(function (q) { return q.modal === modal; })) return;
+      var order = parseInt(marker.getAttribute('data-auto-open-on-login'), 10);
+      queue.push({ modal: modal, order: isNaN(order) ? 1000 + index : order });
     });
+    queue.sort(function (a, b) { return a.order - b.order; });
+
+    var openNext = function () {
+      var next = queue.shift();
+      if (!next) return;
+      if (queue.length) {
+        next.modal.addEventListener('ui:modal-closed', function onClosed() {
+          next.modal.removeEventListener('ui:modal-closed', onClosed);
+          // Tras la animación de cierre y la vuelta del foco
+          setTimeout(openNext, 150);
+        });
+      }
+      window.UI.openModal(next.modal.id);
+    };
+    openNext();
   }
 })();

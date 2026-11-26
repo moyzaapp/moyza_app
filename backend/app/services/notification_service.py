@@ -56,6 +56,19 @@ class NotificationKind:
     # Regla retirada («sin avance de Primera llamada»): solo para pintar el
     # historial y resolver las antiguas
     BUYER_STAGE_STALL = "buyer_stage_stall"
+    # Revisión de las propiedades nuevas por el captador
+    # (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.3; los emite property_review_service).
+    # violet = «propiedades nuevas» (P6)
+    PROPERTY_REVIEW_PENDING = "property_review_pending"
+    PROPERTY_REVIEW_FIXED = "property_review_fixed"
+    # Compradores compatibles con una propiedad nueva: un aviso por agente y
+    # propiedad (y empresa de la alerta) al darle el OK
+    # (PLAN_COMPRADORES_COMPATIBLES_PROPIEDAD_NUEVA.md §4.4; lo emite property_match_service)
+    PROPERTY_MATCH = "property_match"
+
+    # Los avisos de propiedades nuevas (violet) van en su propio cuadro del
+    # Inicio del agente, separados de «Novedades»
+    PROPERTY_KINDS = (PROPERTY_REVIEW_PENDING, PROPERTY_REVIEW_FIXED, PROPERTY_MATCH)
 
     # Icono (dashboard/components/icons.html) y tono por tipo
     STYLES = {
@@ -70,6 +83,9 @@ class NotificationKind:
         BUYER_NO_ACTION: ("inbox", "amber"),
         BUYER_CALLBACK_DUE: ("clock", "amber"),
         BUYER_STAGE_STALL: ("user", "amber"),
+        PROPERTY_REVIEW_PENDING: ("clipboard", "violet"),
+        PROPERTY_REVIEW_FIXED: ("clipboard", "violet"),
+        PROPERTY_MATCH: ("users", "violet"),
     }
 
     @classmethod
@@ -595,14 +611,26 @@ def _scoped(db: Session, user_id: int, company_id):
     )
 
 
-def unread_count(db: Session, user_id: int, company_id) -> int:
-    return _scoped(db, user_id, company_id).filter(Notification.read_at.is_(None)).count()
+def _by_kinds(query, kinds=None, exclude_kinds=None):
+    """Solo (`kinds`) o sin (`exclude_kinds`) ciertos tipos: el Inicio del agente
+    separa los avisos de propiedades nuevas (`NotificationKind.PROPERTY_KINDS`)
+    del resto de «Novedades»."""
+    if kinds:
+        query = query.filter(Notification.kind.in_(list(kinds)))
+    if exclude_kinds:
+        query = query.filter(Notification.kind.notin_(list(exclude_kinds)))
+    return query
 
 
-def recent(db: Session, user_id: int, company_id, limit: int = 8) -> list:
+def unread_count(db: Session, user_id: int, company_id, kinds=None, exclude_kinds=None) -> int:
+    query = _scoped(db, user_id, company_id).filter(Notification.read_at.is_(None))
+    return _by_kinds(query, kinds, exclude_kinds).count()
+
+
+def recent(db: Session, user_id: int, company_id, limit: int = 8, kinds=None, exclude_kinds=None) -> list:
     """Las últimas `limit`, con las no leídas primero."""
     return (
-        _scoped(db, user_id, company_id)
+        _by_kinds(_scoped(db, user_id, company_id), kinds, exclude_kinds)
         .order_by(Notification.read_at.isnot(None), Notification.created_at.desc())
         .limit(limit)
         .all()

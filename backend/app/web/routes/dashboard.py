@@ -88,15 +88,27 @@ async def dashboard(
         # La ficha de agente tiene que pertenecer a alguna de sus empresas
         if agent is not None and in_company(agent, company_ids):
             home = svc.agent_home(agent, week=week, month=month)
-            # Novedades: notificaciones in-app del usuario en sus empresas
+            # Novedades: notificaciones in-app del usuario en sus empresas. Las de
+            # propiedades nuevas (revisión y compradores compatibles, violet) van
+            # en su propio cuadro para no mezclarse con el resto.
             with_company = svc.is_multi
+            property_kinds = notifications.NotificationKind.PROPERTY_KINDS
             home.update({
                 "show_news": True,
                 "news": [
                     notifications.serialize(n, with_company=with_company)
-                    for n in notifications.recent(db, current_user.id, company_ids, DashboardThresholds.NEWS_LIMIT)
+                    for n in notifications.recent(db, current_user.id, company_ids, DashboardThresholds.NEWS_LIMIT,
+                                                  exclude_kinds=property_kinds)
                 ],
-                "news_unread": notifications.unread_count(db, current_user.id, company_ids),
+                "news_unread": notifications.unread_count(db, current_user.id, company_ids,
+                                                          exclude_kinds=property_kinds),
+                "property_news": [
+                    notifications.serialize(n, with_company=with_company)
+                    for n in notifications.recent(db, current_user.id, company_ids, DashboardThresholds.NEWS_LIMIT,
+                                                  kinds=property_kinds)
+                ],
+                "property_news_unread": notifications.unread_count(db, current_user.id, company_ids,
+                                                                   kinds=property_kinds),
             })
             context.update({"view": "agent", "agent": agent, "home": home})
         else:

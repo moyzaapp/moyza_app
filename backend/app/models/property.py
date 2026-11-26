@@ -171,6 +171,15 @@ class Property(Base):
         back_populates="property"
     )
 
+    # Revisión de la ficha por el captador (PLAN_REVISION_PROPIEDADES_NUEVAS.md
+    # §4.1): una por propiedad; None = la app aún no la ha registrado
+    review = relationship(
+        "PropertyReview",
+        back_populates="property",
+        uselist=False,
+        passive_deletes=True,
+    )
+
     # -----------------------------------------------------------------
     # Disponibilidad: una propiedad es "No disponible" cuando su
     # estado_inmueble (texto libre) dice "No disponible", sin importar

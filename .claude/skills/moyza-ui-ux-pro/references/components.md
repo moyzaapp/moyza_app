@@ -212,7 +212,10 @@ el botón sin JS. El título se puede cambiar con `document.getElementById('clie
 Un modal que aparece al cargar (error devuelto por el servidor): renderízalo con el macro y
 ábrelo en `DOMContentLoaded` (ver `clients/home.html`). Un modal que debe salir una vez
 por inicio de sesión (aviso de compradores sin atender): el login deja la cookie
-`moyza_welcome`, y `dashboard.js` abre los `[data-auto-open-on-login]` y la borra.
+`moyza_welcome`, y `dashboard.js` abre los `[data-auto-open-on-login]` y la borra. Si hay
+varios, en orden (`data-auto-open-on-login="1"`, `"2"`…): el siguiente se abre al cerrarse
+el anterior (evento `ui:modal-closed` que emite `UI.closeModal`). Hoy: propiedades nuevas
+por revisar y después compradores que requieren atención.
 
 El macro lleva `!mt-0` porque un modal dentro de un contenedor `space-y-*` recibiría
 `margin-top` y el `fixed inset-0` nacería desplazado (pasó en el Inicio). Cuerpo y pie

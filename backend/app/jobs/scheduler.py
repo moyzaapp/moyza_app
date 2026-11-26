@@ -140,6 +140,58 @@ def notify_buyer_callbacks(now: datetime = None):
         db.close()
 
 
+def register_property_reviews(now: datetime = None):
+    """Propiedades nuevas por revisar (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.6).
+
+    Cada `PROPERTY_REVIEW_POLL_MINUTES`: registra las propiedades sin revisión
+    (las que la ETL del CRM haya cargado desde la última pasada) y avisa a su
+    captador. Idempotente: la revisión es única por propiedad. Devuelve
+    (registradas, avisos creados).
+    """
+    if not settings.PROPERTY_REVIEW_ENABLED:
+        return None
+    from app.services import property_review_service
+
+    db = SessionLocal()
+    try:
+        registered = property_review_service.register_new_properties(db, now=now)
+        notified = property_review_service.notify_pending(db, now=now)
+        if registered or notified:
+            logger.info(f"Revisión de propiedades nuevas: {len(registered)} registradas, {notified} avisos")
+        return len(registered), notified
+    except Exception as e:
+        logger.error(f"Error en register_property_reviews: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
+def remind_property_reviews(now: datetime = None):
+    """Recordatorio único al captador a las 48 h hábiles sin revisar (P5).
+
+    08:10 de Madrid, lunes a viernes; los festivos de Jaén no avisa (como el
+    recordatorio de compradores). Devuelve cuántos avisos se crearon.
+    """
+    if not settings.PROPERTY_REVIEW_ENABLED:
+        return None
+    from app.core.business_calendar import is_business_day
+    from app.core.business_calendar import madrid_today
+    from app.services import property_review_service
+
+    if not is_business_day(madrid_today(now)):
+        logger.info("Recordatorios de propiedades por revisar: hoy no es día hábil")
+        return 0
+
+    db = SessionLocal()
+    try:
+        reminded = property_review_service.remind_overdue(db, now=now)
+        logger.info(f"Recordatorios de propiedades por revisar: {reminded}")
+        return reminded
+    except Exception as e:
+        logger.error(f"Error en remind_property_reviews: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 def _freeze_previous_period(period_type: str, now: datetime = None):
     """Congela, en todas las empresas, el período anterior al que contiene `now`.
 
@@ -320,6 +372,28 @@ def start_scheduler():
         id="notify_buyer_callbacks",
         replace_existing=True
     )
+
+    # Propiedades nuevas por revisar (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.6):
+    # la ETL escribe en `properties` sin pasar por la app, así que se miran cada
+    # pocos minutos; recordatorio único a las 08:10 de lunes a viernes
+    if settings.PROPERTY_REVIEW_ENABLED:
+        scheduler.add_job(
+            register_property_reviews,
+            "interval",
+            minutes=max(settings.PROPERTY_REVIEW_POLL_MINUTES, 1),
+            id="register_property_reviews",
+            replace_existing=True
+        )
+        scheduler.add_job(
+            remind_property_reviews,
+            "cron",
+            day_of_week="mon-fri",
+            hour=8,
+            minute=10,
+            timezone="Europe/Madrid",
+            id="remind_property_reviews",
+            replace_existing=True
+        )
 
     # Avisos in-app de seguimientos: 08:00 hora de Madrid
     # El aviso diario "Seguimiento vencido / para hoy" (follow_up_due) se retiró

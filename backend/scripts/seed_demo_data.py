@@ -532,7 +532,8 @@ def reset(db) -> None:
         db.delete(visit)
     db.flush()
 
-    for table in ("report_job_logs", "ai_analysis_logs", "property_price_history", "property_status_history", "property_change_logs",
+    for table in ("report_job_logs", "ai_analysis_logs", "property_price_history", "property_status_history", "property_change_logs", "property_reviews",
+                  "property_buyer_matches",
                   "property_interactions", "reports", "alert_follow_ups"):
         exists = db.execute(text(
             "SELECT 1 FROM information_schema.columns WHERE table_name = :t AND column_name = 'property_id'"

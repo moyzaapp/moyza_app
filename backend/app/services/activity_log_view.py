@@ -134,6 +134,12 @@ _RULES = [
     ("POST", r"/properties/delete/(\d+)", "Propiedades", "Eliminó una propiedad"),
     ("POST", r"/properties/(\d+)/generate-report", "Propiedades", "Generó el informe de una propiedad"),
     ("POST", r"/properties/(\d+)/interactions/create", "Propiedades", "Registró una interacción"),
+    # Revisión de propiedades nuevas (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.5)
+    ("POST", r"/properties/(\d+)/review/ok", "Propiedades", "Revisó propiedad nueva: correcta"),
+    ("POST", r"/properties/(\d+)/review/issues", "Propiedades", "Revisó propiedad nueva: pidió revisar"),
+    ("POST", r"/properties/(\d+)/review/fixed", "Propiedades", "Marcó corregida una propiedad nueva"),
+    # Compradores compatibles (PLAN_COMPRADORES_COMPATIBLES_PROPIEDAD_NUEVA.md §4.5)
+    ("GET", r"/properties/(\d+)/matches", "Propiedades", "Abrió los compradores compatibles de una propiedad"),
 
     ("GET", r"/clients", "Clientes", "Abrió el listado de clientes"),
     ("POST", r"/clients/create", "Clientes", "Creó un cliente"),

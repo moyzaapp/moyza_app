@@ -99,6 +99,21 @@ class Settings:
     # Habilitar/deshabilitar el recordatorio sin necesidad de eliminar el job
     BUYER_REMINDER_ENABLED: bool = os.getenv("BUYER_REMINDER_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 
+    # Revisión de las propiedades nuevas por el captador
+    # (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.6). La ETL del CRM escribe en
+    # `properties` desde fuera de la app: el job `register_property_reviews`
+    # registra cada POLL_MINUTES las propiedades sin revisión y avisa al
+    # captador. Un solo recordatorio a las N horas hábiles sin revisar (P5);
+    # el admin lo ve además en «Requiere atención». false = ni registro ni
+    # avisos ni recordatorio (lo ya registrado se sigue viendo y se puede marcar).
+    PROPERTY_REVIEW_ENABLED: bool = os.getenv("PROPERTY_REVIEW_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    PROPERTY_REVIEW_POLL_MINUTES: int = int(os.getenv("PROPERTY_REVIEW_POLL_MINUTES", "10"))
+    PROPERTY_REVIEW_REMINDER_BUSINESS_HOURS: int = int(os.getenv("PROPERTY_REVIEW_REMINDER_BUSINESS_HOURS", "48"))
+    # P7: una propiedad sin revisión cuyo `market_entry_date` (fecha de alta en
+    # el CRM) tiene más de N días es una carga histórica, no una propiedad
+    # nueva: queda `skipped` sin avisar. Sin fecha se trata como nueva.
+    PROPERTY_REVIEW_MAX_AGE_DAYS: int = int(os.getenv("PROPERTY_REVIEW_MAX_AGE_DAYS", "15"))
+
     # Correo de bienvenida con credenciales al crear un usuario
     WELCOME_EMAIL_ENABLED: bool = os.getenv("WELCOME_EMAIL_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 

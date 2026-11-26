@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import date
 from datetime import datetime
 from datetime import timedelta
@@ -2884,18 +2885,35 @@ def _send_property(db: Session, alert: PropertyAlert, property_id: Optional[int]
     return RedirectResponse(url=target, status_code=303)
 
 
+# Página «Compradores compatibles» de una propiedad nueva
+# (PLAN_COMPRADORES_COMPATIBLES_PROPIEDAD_NUEVA.md §4.5): el envío desde ella
+# vuelve allí si algo falla
+_MATCHES_BACK_URL = re.compile(r"/properties/\d+/matches")
+
+
+def _send_back_url(next_url: Optional[str], default: str) -> str:
+    """`next` del formulario de envío si es la página de compatibles; si no, `default`."""
+    # isinstance: llamada directa sin el campo (el valor por defecto es el Form)
+    if isinstance(next_url, str) and _MATCHES_BACK_URL.fullmatch(next_url):
+        return next_url
+    return default
+
+
 @router.post("/alerts/{alert_id}/send-property")
 async def send_property_from_alert(
     alert_id: int,
     request: Request,
     property_id: Optional[int] = Form(None),
+    next_url: Optional[str] = Form(None, alias="next"),
     db: Session = Depends(get_db)
 ):
     """Envía una propiedad sugerida al comprador de la alerta por WhatsApp.
 
     PLAN_ENVIO_PROPIEDAD_COMPRADOR.md §4.3. Mismo permiso que /link-property
     (alerta abierta, admin o su agente, no bloqueada por la cola), sin exigir
-    el perfil. Teléfono: `alert.lead_phone`. Ver `_send_property`.
+    el perfil. Teléfono: `alert.lead_phone`. Ver `_send_property`. Desde la
+    página de compatibles de una propiedad nueva llega `next`
+    (/properties/{id}/matches): los errores del envío vuelven allí.
     """
     current_user = request.state.user
     alert = get_alert_in_company(db, alert_id, get_company_ids(request))
@@ -2908,7 +2926,7 @@ async def send_property_from_alert(
 
     buyer_name = alert.lead_name or (alert.buyer.name if alert.buyer is not None else None)
     return _send_property(db, alert, property_id, alert.lead_phone, buyer_name, current_user,
-                          back_url=f"/alerts/{alert_id}?step=proposal#propuesta")
+                          back_url=_send_back_url(next_url, f"/alerts/{alert_id}?step=proposal#propuesta"))
 
 
 def _safe_back_url(next_url: Optional[str], default: str) -> str:

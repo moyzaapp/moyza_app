@@ -45,6 +45,7 @@ en documentos (ficha de visita, PDF). En la app, el nombre en texto basta.
 | Peligro | `red` | Error, prioridad alta, vendida/no disponible, acción destructiva |
 | Información | `blue` | En proceso, informativo, neutro con énfasis |
 | Neutro | `gray` | Baja prioridad, sin dato, cancelado |
+| Propiedades nuevas | `violet` | Revisión de la ficha por el captador y compradores compatibles con una propiedad nueva (PLAN_REVISION_PROPIEDADES_NUEVAS.md P6). Solo para eso: no es «información» ni «aviso» |
 
 Tonos por uso dentro de cada color:
 
@@ -54,6 +55,13 @@ Tonos por uso dentro de cada color:
 - Botón suave de fila: `bg-{c}-50 hover:bg-{c}-100 text-{c}-700`
 - Icono de KPI: `bg-{c}-100 text-{c}-600`
 - Valor de KPI: `text-{c}-600`
+
+Tonos de `violet` escritos enteros (para que el build de Tailwind los encuentre):
+badge `bg-violet-100 text-violet-800` (punto `bg-violet-500`), banner / caja
+`bg-violet-50 border border-violet-200 text-violet-900` (texto secundario `text-violet-800`),
+icono de KPI y de aviso `bg-violet-100 text-violet-600`, valor de KPI `text-violet-600`,
+tarjeta-filtro activa `border-violet-500 ring-2 ring-violet-100` (reposo `hover:border-violet-300`),
+botón suave `bg-violet-50 hover:bg-violet-100 text-violet-700`.
 
 ## Mapa de estados (único, úsalo tal cual)
 
@@ -78,6 +86,11 @@ Tonos por uso dentro de cada color:
 | | `failed` | Fallido | red |
 | | `pending` | Pendiente | amber |
 | | `skipped` | Omitido | gray |
+| Revisión de propiedad nueva (`review`) | `pending` | Por revisar | violet |
+| | `issues` | Con observaciones | amber |
+| | `fixed` | Corregida · pendiente de OK | violet |
+| | `ok` | Revisada | green |
+| | `skipped` | (no se pinta) | |
 | Usuario | Activo / Inactivo | | green / gray |
 | Semáforo de métricas | cumple objetivo | | green |
 | | a medias | | amber |

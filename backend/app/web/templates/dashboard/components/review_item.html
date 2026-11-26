@@ -1,0 +1,27 @@
+{#
+  Fila de una propiedad nueva por revisar (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.4):
+  ventana al entrar y bloque «Propiedades nuevas por revisar» del Inicio del agente.
+  `r` = PropertyReview con la propiedad (y su empresa) cargadas. Distintivo de empresa
+  solo si el agente ve varias a la vez (`show_company_badges`, se pasa porque los
+  macros importados no ven el contexto).
+#}
+{% import "components/ui_macros.html" as ui %}
+
+{% macro review_item(r, show_company_badges=False) -%}
+{% set p = r.property %}
+<li class="py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+    <div class="min-w-0 flex-1">
+        <p class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span class="text-sm font-medium text-gray-900 break-words">{{ p.title }}</span>
+            {{ ui.status_badge("review", r.status) }}
+        </p>
+        {% if show_company_badges and p.company %}<p class="mt-1">{{ ui.company_badge(p.company) }}</p>{% endif %}
+        <p class="text-xs text-gray-500 mt-0.5">{{ [p.property_type, p.city, (p.price | eur) if p.price is not none else none] | select | join(' · ') }}</p>
+        {# P7: la fecha de alta en el CRM; sin ella, cuándo la detectó la app #}
+        <p class="text-xs text-gray-500">
+            {% if p.market_entry_date %}En el mercado desde {{ p.market_entry_date | madrid_dt('%d/%m/%Y') }}{% else %}Detectada el {{ r.created_at | madrid_dt('%d/%m/%Y') }}{% endif %}{% if r.status == 'fixed' and r.fixed_at %} · corregida el {{ r.fixed_at | madrid_dt('%d/%m/%Y') }}{% endif %}
+        </p>
+    </div>
+    {{ ui.button("Revisar ficha", "secondary", href="/properties/" ~ p.id ~ "#revision", full_mobile=True) }}
+</li>
+{%- endmacro %}

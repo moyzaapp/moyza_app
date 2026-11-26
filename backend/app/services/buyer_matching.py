@@ -41,6 +41,10 @@ PLAN_PERFIL_OBLIGATORIO.md también las creadas con referencia):
   el perfil. Ordenadas por precio ascendente, sin agrupar por empresa; la
   empresa de cada una se carga en la misma tanda (badge sin N+1).
   `matching_summary_by_company`: desglose por empresa para la cabecera.
+- `criteria_matches_property`: el cruce al revés (una propiedad nueva contra
+  cada perfil, PLAN_COMPRADORES_COMPATIBLES_PROPIEDAD_NUEVA.md §4.1). Réplica
+  en Python de `_matching_filters`: si cambia uno, cambia el otro (lo vigila
+  el test cruzado).
   La superficie (m²) ya no filtra: salió del perfil en toda la app (decisión
   cerrada 5); las columnas `min_m2` / `max_m2` se conservan sin usarse.
 - `apply_profile`: vuelca los campos del formulario del perfil en el
@@ -338,6 +342,99 @@ def _matching_filters(query, criteria: BuyerSearchCriteria, company_id: Optional
     if criteria.garage is True:
         query = query.filter(Property.num_garaje_aparcam >= 1)
     return query
+
+
+# ---------------------------------------------------------------------------
+# Cruce inverso: propiedad -> perfiles
+# (PLAN_COMPRADORES_COMPATIBLES_PROPIEDAD_NUEVA.md §4.1)
+# ---------------------------------------------------------------------------
+#
+# `criteria_matches_property` es la ÚNICA segunda implementación del cruce:
+# replica en Python, condición por condición, lo que hace `_matching_filters`
+# en SQL. Si cambia `_matching_filters`, hay que cambiar esta también; el test
+# cruzado de tests/test_criteria_matches_property.py compara las dos sobre la
+# base de datos y lo detecta. Las comparaciones con NULL siguen a SQL: un dato
+# vacío de la propiedad nunca cumple un filtro (salvo «sin ascensor»).
+
+def _sql_trim(value) -> str:
+    """`trim()` de PostgreSQL: solo quita espacios (no tabuladores ni saltos)."""
+    return str(value).strip(" ")
+
+
+def _country_matches(prop, country: str) -> bool:
+    """Réplica de `country_clause`: país vacío o variante de España = España."""
+    normalized = _sql_trim(prop.pais or "").lower()
+    if geo.is_spain(country):
+        return prop.pais is None or normalized in ("",) + geo.SPAIN_ALIASES
+    return normalized == country.strip().lower()
+
+
+def _province_matches(prop, province: str) -> bool:
+    """Réplica de `province_clause`: CP de cinco caracteres que empieza por el prefijo."""
+    prefix = geo.cp_prefix_for_provincia(province)
+    if prefix is None:
+        return True
+    if prop.cod_postal is None:
+        return False
+    cp = _sql_trim(prop.cod_postal)
+    return len(cp) == len(prefix) + 3 and cp.startswith(prefix)
+
+
+def _at_least(value, minimum) -> bool:
+    return value is not None and value >= minimum
+
+
+def _at_most(value, maximum) -> bool:
+    return value is not None and value <= maximum
+
+
+def criteria_matches_property(criteria: BuyerSearchCriteria, prop) -> bool:
+    """¿Encaja `prop` con el perfil? Mismo resultado que `prop in matching_properties(criteria)`.
+
+    Réplica de `_matching_filters` (sin `company_id`: el cruce mira las dos
+    empresas): activa y con captador, ubicación en cascada (país vacío =
+    España, provincia por el prefijo del CP recortado, poblaciones y zonas por
+    igualdad exacta, lista vacía = todas), tipos (`profile_types`, también el
+    `property_type` antiguo), operación, precio, dormitorios, baños, ascensor
+    (NULL = sin) y garaje (sin dato = sin garaje).
+    """
+    if criteria is None or prop is None:
+        return False
+    if prop.status != PropertyStatus.ACTIVE or prop.agent_id is None:
+        return False
+
+    if criteria.province and geo.cp_prefix_for_provincia(criteria.province):
+        if not (_country_matches(prop, geo.SPAIN) and _province_matches(prop, criteria.province)):
+            return False
+    elif criteria.country:
+        if not _country_matches(prop, criteria.country):
+            return False
+    if criteria.zones and (prop.zona is None or prop.zona not in criteria.zones):
+        return False
+    if criteria.cities and (prop.city is None or prop.city not in criteria.cities):
+        return False
+    types = profile_types(criteria)
+    if types and (prop.property_type is None or prop.property_type not in types):
+        return False
+    if criteria.business_type and prop.business_type != criteria.business_type:
+        return False
+    if criteria.min_price is not None and not _at_least(prop.price, criteria.min_price):
+        return False
+    if criteria.max_price is not None and not _at_most(prop.price, criteria.max_price):
+        return False
+    if criteria.min_bedrooms is not None and not _at_least(prop.num_dormitorios, criteria.min_bedrooms):
+        return False
+    if criteria.max_bedrooms is not None and not _at_most(prop.num_dormitorios, criteria.max_bedrooms):
+        return False
+    if criteria.min_bathrooms is not None and not _at_least(prop.num_banos_aseos, criteria.min_bathrooms):
+        return False
+    if criteria.elevator is True and not _at_least(prop.num_ascensores, 1):
+        return False
+    if criteria.elevator is False and not (prop.num_ascensores is None or prop.num_ascensores == 0):
+        return False
+    if criteria.garage is True and not _at_least(prop.num_garaje_aparcam, 1):
+        return False
+    return True
 
 
 def matching_properties_query(db: Session, criteria: BuyerSearchCriteria, company_id: Optional[int] = None):

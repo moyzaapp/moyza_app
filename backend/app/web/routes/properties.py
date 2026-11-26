@@ -38,6 +38,12 @@ from app.services.ai_valuation import AIValuationService
 
 from pathlib import Path
 
+from app.core.constants import PropertyReviewStatus
+from app.models.property_review import PropertyReview
+from app.services import property_review_service
+from app.services import property_match_service
+from app.services import alert_view
+from app.services import buyer_matching
 from app.services.company_scope import (
     scope_properties,
     scope_agents,
@@ -325,9 +331,10 @@ async def properties_page(
     # una pestaña "Resto de {empresa}" por cada una
     multi_company = is_unified_view(request) and len(company_ids) > 1
 
-    # Filtro por tarjeta: 'activas' (por defecto) | 'no_disponible'.
+    # Filtro por tarjeta: 'activas' (por defecto) | 'no_disponible' |
+    # 'revision' (propiedades nuevas por revisar, PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.4-4).
     # Por ahora no se ofrece una vista con todas las propiedades.
-    filtro = filtro if filtro in ("activas", "no_disponible") else "activas"
+    filtro = filtro if filtro in ("activas", "no_disponible", "revision") else "activas"
 
     # Solo el admin puede crear o eliminar propiedades
     can_create = is_admin(current_user)
@@ -442,9 +449,18 @@ async def properties_page(
     is_not_available = Property.not_available_clause()
     is_active = (Property.status == PropertyStatus.ACTIVE) & Property.available_clause()
 
+    # Por revisar: el admin ve todas las abiertas de la empresa (también las
+    # que esperan su corrección); el agente, las suyas que esperan su OK. Solo
+    # propiedades que siguen activas, como el Inicio y los avisos.
+    review_statuses = PropertyReviewStatus.OPEN if admin_view else PropertyReviewStatus.AWAITING_AGENT
+    in_review = (Property.status == PropertyStatus.ACTIVE) & Property.id.in_(
+        db.query(PropertyReview.property_id).filter(PropertyReview.status.in_(review_statuses))
+    )
+
     # Los contadores reflejan el total del usuario, no el resultado de la búsqueda
     active_count = base_query.filter(is_active).count()
     not_available_count = base_query.filter(is_not_available).count()
+    review_count = base_query.filter(in_review).count()
 
     search = (request.query_params.get("search") or "").strip()
 
@@ -454,6 +470,8 @@ async def properties_page(
         filtered_query = filtered_query.filter(is_active)
     elif filtro == "no_disponible":
         filtered_query = filtered_query.filter(is_not_available)
+    elif filtro == "revision":
+        filtered_query = filtered_query.filter(in_review)
 
     if search:
         pattern = f"%{search}%"
@@ -492,7 +510,7 @@ async def properties_page(
     if tab == "phone_check":
         properties = []
     else:
-        properties = filtered_query.options(joinedload(Property.client)).order_by(
+        properties = filtered_query.options(joinedload(Property.client), joinedload(Property.review)).order_by(
             Property.price.desc().nullslast(),
             numeric_title.desc().nullslast()
         ).all()
@@ -575,6 +593,7 @@ async def properties_page(
             "current_user": current_user,
             "active_count": active_count,
             "not_available_count": not_available_count,
+            "review_count": review_count,
             "filtro": filtro,
             "search": search,
             "can_create": can_create,
@@ -664,6 +683,11 @@ async def create_property(
 
         db.add(property_item)
         db.commit()
+
+        # Revisión del captador al momento (la ETL la recoge el job): se
+        # registra y se le avisa; nunca rompe el alta
+        # (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.2)
+        property_review_service.safe_register_and_notify(db, actor=request.state.user)
 
         response = RedirectResponse(url="/properties", status_code=302)
         set_flash(response, "success", f"Propiedad '{title}' creada correctamente")
@@ -956,6 +980,24 @@ async def property_detail(
 
     latest_report = property_reports[0] if property_reports else None
 
+    # Caja de revisión de la propiedad nueva (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.4-3)
+    current_user = request.state.user
+    admin_view = bool(is_admin(current_user))
+    review = property_review_service.review_for_property(db, property_item.id)
+    review_agent = None if admin_view else get_agent_from_user(current_user, db)
+    review_actions = property_review_service.can_review(review, current_user, review_agent, admin_view)
+
+    # Bloque «Compradores compatibles: N · Ver»
+    # (PLAN_COMPRADORES_COMPATIBLES_PROPIEDAD_NUEVA.md §4.5): el admin, todos
+    # los cruces; un agente, los de sus compradores (p. ej. el captador que dio
+    # el OK: `notify` no le avisa a sí mismo). Solo si hay alguno.
+    if admin_view:
+        matches_count = property_match_service.matches_count_for_property(db, property_item)
+    elif review_agent is not None:
+        matches_count = property_match_service.matches_count_for_property(db, property_item, agent_id=review_agent.id)
+    else:
+        matches_count = 0
+
     return templates.TemplateResponse(
         request=request,
         name="properties/detail.html",
@@ -978,7 +1020,254 @@ async def property_detail(
             "interest_avg": visit_summary["interest_avg"],
             "price_high_count": visit_summary["price_high_count"],
             "property_reports": property_reports,
-            "latest_report": latest_report
+            "latest_report": latest_report,
+            "is_admin": admin_view,
+            "review": review,
+            "review_actions": review_actions,
+            "review_comment_max": property_review_service.COMMENT_MAX,
+            "matches_count": matches_count,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Revisión de la propiedad nueva por el captador (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.5)
+# ---------------------------------------------------------------------------
+
+def _review_redirect(property_id, category=None, message=None):
+    response = RedirectResponse(url=property_review_service.review_url(property_id), status_code=303)
+    if message:
+        set_flash(response, category, message)
+    return response
+
+
+def _review_context(request: Request, db: Session, property_id: int):
+    """(propiedad, revisión, acciones permitidas, es_admin) o una redirección con el error.
+
+    La propiedad tiene que verse con las empresas de la petición: el admin, la
+    activa; el agente, las suyas (vista unificada). Quién puede qué lo decide
+    `property_review_service.can_review`.
+    """
+    user = request.state.user
+    property_item = get_property_in_company(db, property_id, get_company_ids(request))
+    if not property_item:
+        response = RedirectResponse(url="/properties", status_code=303)
+        set_flash(response, "error", "Propiedad no encontrada")
+        return response
+    review = property_review_service.review_for_property(db, property_item.id)
+    if review is None:
+        return _review_redirect(property_item.id, "error", "Esta propiedad no tiene revisión pendiente.")
+    admin_view = bool(is_admin(user))
+    agent = None if admin_view else get_agent_from_user(user, db)
+    actions = property_review_service.can_review(review, user, agent, admin_view)
+    return property_item, review, actions, admin_view
+
+
+@router.post("/properties/{property_id}/review/ok")
+async def review_mark_ok(property_id: int, request: Request, db: Session = Depends(get_db)):
+    """«Todo correcto» del captador o «Marcar correcta» del admin (P4)."""
+    context = _review_context(request, db, property_id)
+    if isinstance(context, RedirectResponse):
+        return context
+    property_item, review, actions, admin_view = context
+    if not actions["ok"]:
+        return _review_redirect(property_item.id, "error", "No puedes marcar esta propiedad como revisada.")
+    try:
+        property_review_service.mark_ok(db, review, request.state.user, by_admin=admin_view and not actions["captador"])
+    except ValueError as e:
+        return _review_redirect(property_item.id, "error", str(e))
+    message = f"«{property_item.title}» queda revisada y correcta"
+    return _review_redirect(property_item.id, "success",
+                            message + _matches_flash(db, property_item, request.state.user, admin_view))
+
+
+def _matches_flash(db: Session, property_item, user, admin_view: bool) -> str:
+    """Coletilla del flash del OK con los compradores compatibles que acaba de encontrar
+    (PLAN_COMPRADORES_COMPATIBLES_PROPIEDAD_NUEVA.md). El agente que da el OK no
+    recibe aviso de sus propios compradores (`notify` excluye al actor): se lo dice el flash."""
+    try:
+        if admin_view:
+            count = property_match_service.matches_count_for_property(db, property_item)
+            if not count:
+                return ""
+            who = "1 comprador encaja" if count == 1 else f"{count} compradores encajan"
+            return f". {who} con ella: se ha avisado a sus agentes"
+        agent = get_agent_from_user(user, db)
+        count = property_match_service.matches_count_for_property(db, property_item, agent_id=agent.id) if agent else 0
+        if not count:
+            return ""
+        who = "1 de tus compradores encaja" if count == 1 else f"{count} de tus compradores encajan"
+        return f". {who} con ella"
+    except Exception:
+        logger.exception("No se pudieron contar los compradores compatibles de la propiedad %s", property_item.id)
+        return ""
+
+
+@router.post("/properties/{property_id}/review/issues")
+async def review_flag_issues(property_id: int, request: Request, comment: str = Form(""),
+                             db: Session = Depends(get_db)):
+    """«Hay que revisar»: solo el captador, con comentario obligatorio (máx. 1000)."""
+    context = _review_context(request, db, property_id)
+    if isinstance(context, RedirectResponse):
+        return context
+    property_item, review, actions, _ = context
+    if not actions["issues"]:
+        return _review_redirect(property_item.id, "error", "Solo el captador puede pedir que se revise la ficha.")
+    try:
+        property_review_service.flag_issues(db, review, request.state.user, comment)
+    except ValueError as e:
+        return _review_redirect(property_item.id, "error", str(e))
+    return _review_redirect(property_item.id, "success",
+                            f"Enviado al administrador: revisará «{property_item.title}» y te avisará")
+
+
+@router.post("/properties/{property_id}/review/fixed")
+async def review_mark_fixed(property_id: int, request: Request, comment: str = Form(""),
+                            db: Session = Depends(get_db)):
+    """«Marcar como corregida»: solo el admin; vuelve al captador para el OK."""
+    context = _review_context(request, db, property_id)
+    if isinstance(context, RedirectResponse):
+        return context
+    property_item, review, actions, _ = context
+    if not actions["fixed"]:
+        return _review_redirect(property_item.id, "error", "Solo el administrador puede marcar la propiedad como corregida.")
+    try:
+        property_review_service.mark_fixed(db, review, request.state.user, comment)
+    except ValueError as e:
+        return _review_redirect(property_item.id, "error", str(e))
+    return _review_redirect(property_item.id, "success",
+                            f"«{property_item.title}» marcada como corregida; se ha avisado al captador")
+
+
+# ---------------------------------------------------------------------------
+# Compradores compatibles con una propiedad nueva
+# (PLAN_COMPRADORES_COMPATIBLES_PROPIEDAD_NUEVA.md §4.5)
+# ---------------------------------------------------------------------------
+
+MATCHES_NOT_FOUND = "Propiedad no encontrada"
+MATCHES_NONE_FOR_AGENT = "Ninguno de tus compradores encaja con esta propiedad"
+
+
+def _matches_denied(url: str, message: str) -> RedirectResponse:
+    response = RedirectResponse(url=url, status_code=302)
+    set_flash(response, "error", message)
+    return response
+
+
+def _match_send_state(alert, prop, admin_view: bool, company_ids, locked_ids) -> dict:
+    """Si se pinta «Enviar por WhatsApp» en la fila y, si no, por qué (§4.5).
+
+    Misma regla que POST /alerts/{id}/send-property y la tarjeta de sugerencias:
+    alerta abierta y de una empresa de la petición; el agente, solo las suyas
+    y no bloqueadas por su cola; la propiedad con enlace web y el comprador
+    con un teléfono válido para WhatsApp.
+    """
+    from app.core.phone import whatsapp_url
+    from app.services.property_link import property_public_url
+
+    if alert.status not in alert_view.OPEN_ALERT_STATUSES:
+        return {"can_send": False, "reason": "Alerta cerrada"}
+    if alert.company_id not in company_ids:
+        name = alert.company.name if alert.company is not None else "la otra empresa"
+        return {"can_send": False, "reason": f"Comprador de {name}: cambia de empresa para enviarla"}
+    if not admin_view and alert.id in locked_ids:
+        return {"can_send": False, "reason": "Gestiona antes los compradores anteriores de tu cola"}
+    if not property_public_url(prop):
+        return {"can_send": False, "reason": "Sin enlace web"}
+    if whatsapp_url(alert.lead_phone) is None:
+        return {"can_send": False, "reason": "Sin teléfono válido"}
+    return {"can_send": True, "reason": None}
+
+
+@router.get("/properties/{property_id}/matches", response_class=HTMLResponse)
+async def property_matches(property_id: int, request: Request, db: Session = Depends(get_db)):
+    """Compradores compatibles con una propiedad nueva (§4.5).
+
+    Acceso: el admin si la propiedad es de su empresa activa (ve todos los
+    cruces, de las dos empresas, agrupados por agente); el agente si lleva
+    alguno de los compradores que encajan (solo ve los suyos; la propiedad
+    puede ser de otra empresa: la página no enseña propietario ni dirección).
+    Cada fila: comprador, teléfono, perfil, estado y etapa de la alerta, «Ver
+    comprador» y «Enviar por WhatsApp» (POST a /alerts/{id}/send-property, que
+    registra el `PROPIEDAD_ENVIADA` informativo) o el motivo de que no esté.
+    """
+    from app.web.routes.alerts import sent_dates
+
+    user = request.state.user
+    admin_view = bool(is_admin(user))
+    company_ids = get_company_ids(request)
+    prop = (
+        db.query(Property)
+        .options(joinedload(Property.company), joinedload(Property.agent))
+        .filter(Property.id == property_id)
+        .first()
+    )
+    if prop is None:
+        return _matches_denied("/properties", MATCHES_NOT_FOUND)
+
+    agent = None
+    if admin_view:
+        if prop.company_id not in company_ids:
+            return _matches_denied("/properties", MATCHES_NOT_FOUND)
+        matches = property_match_service.matches_for_property(db, prop)
+        locked_ids = set()
+    else:
+        agent = get_agent_from_user(user, db)
+        matches = property_match_service.matches_for_property(db, prop, agent_id=agent.id) if agent else []
+        if not matches:
+            return _matches_denied("/alerts", MATCHES_NONE_FOR_AGENT)
+        locked_ids = alert_view.get_locked_alert_ids(agent.id, db, company_ids)
+
+    rows = []
+    for match in matches:
+        alert = match.alert
+        criteria = alert.buyer.search_criteria if alert.buyer is not None else None
+        rows.append({
+            "match": match,
+            "alert": alert,
+            "name": property_match_service.buyer_name(alert),
+            "phone": alert.lead_phone,
+            "criteria_summary": buyer_matching.criteria_summary(criteria),
+            "stage": alert_view.current_stage(alert.follow_ups, alert_view.assignment_start(alert)),
+            "sent_at": sent_dates(alert.follow_ups).get(prop.id),
+            # «Ver comprador»: la alerta se abre con las empresas de la petición y
+            # no si está bloqueada en la cola del agente
+            "can_open": alert.company_id in company_ids and alert.id not in locked_ids,
+            **_match_send_state(alert, prop, admin_view, company_ids, locked_ids),
+        })
+
+    # Admin: agrupados por agente (el orden ya viene por agente y comprador)
+    groups = []
+    for row in rows:
+        agent_name = row["alert"].agent.name if row["alert"].agent else "Sin agente"
+        if not groups or groups[-1]["agent_name"] != agent_name:
+            groups.append({"agent_name": agent_name, "rows": []})
+        groups[-1]["rows"].append(row)
+
+    review = db.query(PropertyReview).filter(PropertyReview.property_id == prop.id).first()
+    subtitle_parts = [
+        prop.property_type,
+        prop.city,
+        (f"{prop.num_dormitorios} dorm." if prop.num_dormitorios is not None else None),
+    ]
+
+    return templates.TemplateResponse(
+        request=request,
+        name="properties/matches.html",
+        context={
+            "request": request,
+            "current_user": user,
+            "is_admin": admin_view,
+            "property": prop,
+            "review": review,
+            "subtitle_parts": [p for p in subtitle_parts if p],
+            "rows": rows,
+            "groups": groups,
+            "notified_agents": property_match_service.notified_agents_count(db, prop) if admin_view else None,
+            # La ficha incluye datos del propietario: el admin, o el agente sobre las suyas
+            "show_detail_link": admin_view or (agent is not None and prop.agent_id == agent.id
+                                               and prop.company_id in company_ids),
+            "back_url": f"/properties/{prop.id}" if admin_view else "/alerts",
         }
     )
 

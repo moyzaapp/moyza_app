@@ -491,6 +491,9 @@ class DashboardService:
         pending_buyers = self.pending_buyers_for_agent(agent.id, now=now)
 
         return {
+            # Propiedades nuevas por revisar (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.4-2):
+            # ventana al entrar y bloque propio encima de «Mis resultados»
+            "reviews": self.pending_reviews_for_agent(agent.id),
             "week": self.agent_period_block(agent, week, agents=agents, now=now),
             "month": self.agent_period_block(agent, month, agents=agents, now=now),
             "agenda": self.agenda(agent, now=now),
@@ -499,6 +502,12 @@ class DashboardService:
             "pending_buyers": pending_buyers,
             "pending_summary": attention_summary(pending_buyers),
         }
+
+    def pending_reviews_for_agent(self, agent_id: int) -> list:
+        """Propiedades nuevas que esperan la revisión del agente (`pending` y `fixed`),
+        de todas las empresas del servicio, la más antigua primero."""
+        from app.services import property_review_service
+        return property_review_service.pending_for_agent(self.db, agent_id, self._company_scope())
 
     # ------------------------------------------------------------------
     # Agenda del agente
@@ -841,11 +850,19 @@ class DashboardService:
             ),
             "feed": self.activity_feed(now),
             "trend": self.team_trend(agents, week, now=now),
+            # Propiedades nuevas que el captador pidió corregir: ventana al entrar
+            # y bloque propio (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.4-5)
+            "review_issues": self.review_issues_for_admin(),
             "pending_by_agent": pending,
             "unmanaged_by_agent": self.unmanaged_by_agent(agents, now=now, raw=raw_pending),
             "recent_cessions": self.recent_cessions(now),
             "recent_cessions_days": DashboardThresholds.RECENT_CESSIONS_DAYS,
         }
+
+    def review_issues_for_admin(self) -> list:
+        """Revisiones `issues` de la empresa activa (la más antigua primero)."""
+        from app.services import property_review_service
+        return property_review_service.issues_for_admin(self.db, self.company_id)
 
     def recent_cessions(self, now: Optional[datetime] = None) -> list:
         """Cesiones de compradores entre agentes de la empresa en los últimos días
@@ -1194,6 +1211,31 @@ class DashboardService:
                 "title": f"{errors} {'ficha de visita no enviada' if errors == 1 else 'fichas de visita no enviadas'} por WhatsApp",
                 "text": f"Envíos con error en las últimas {DashboardThresholds.WHATSAPP_ERROR_HOURS} h; se pueden reenviar desde Visitas",
                 "href": "/visits",
+            })
+
+        # Propiedades nuevas (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.4-5): lo que
+        # le toca corregir al admin y lo que el captador no revisa en el plazo
+        from app.services import property_review_service
+        reviews = property_review_service.counts_for_admin(self.db, self.company_id, now)
+        if reviews["issues"]:
+            n = reviews["issues"]
+            items.append({
+                "tone": "amber",
+                "icon": "clipboard",
+                "title": f"{n} {'propiedad' if n == 1 else 'propiedades'} con observaciones del captador",
+                "text": "El captador pide revisar la ficha: corrígela y márcala como corregida",
+                "href": "/properties?filtro=revision",
+            })
+        if reviews["overdue"]:
+            n = reviews["overdue"]
+            hours = settings.PROPERTY_REVIEW_REMINDER_BUSINESS_HOURS
+            items.append({
+                "tone": "amber",
+                "icon": "clipboard",
+                "title": f"{n} {'propiedad nueva sin revisar' if n == 1 else 'propiedades nuevas sin revisar'} "
+                         f"desde hace más de {hours} h hábiles",
+                "text": "El captador aún no ha confirmado la ficha; puedes marcarla correcta tú",
+                "href": "/properties?filtro=revision",
             })
 
         cutoff = now - timedelta(days=DashboardThresholds.INACTIVE_AGENT_DAYS)

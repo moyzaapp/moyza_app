@@ -9,12 +9,35 @@
 {% from "dashboard/components/trend_chart.html" import trend_chart %}
 {% from "dashboard/components/feed_item.html" import feed_item %}
 {% from "dashboard/components/attention_item.html" import attention_item %}
+{% from "dashboard/components/review_issue_item.html" import review_issue_item %}
 {% from "dashboard/components/icons.html" import icon %}
 {% set short_labels = {'hojas_visita': 'Visitas', 'contactos': 'Contactos', 'captaciones_crm': 'Capt.', 'bajadas': 'Bajadas', 'cierres': 'Cierres'} %}
 {% set bar_tones = {'green': 'bg-green-500', 'amber': 'bg-amber-500', 'red': 'bg-red-500', 'gray': 'bg-gray-300'} %}
 {% set text_tones = {'green': 'text-green-700', 'amber': 'text-amber-700', 'red': 'text-red-700', 'gray': 'text-gray-500'} %}
 {% set week = home.week %}
 {% set month = home.month %}
+
+{# ---------------------------------------------------------------- Propiedades por corregir (PLAN_REVISION_PROPIEDADES_NUEVAS.md §4.4-5)
+   Lo que el captador pidió revisar y le toca al admin. Solo si hay alguna; el botón reabre la
+   ventana del inicio de sesión. Violet = «propiedades nuevas»; ámbar = observaciones pendientes. #}
+{% if home.review_issues %}
+{% set ni = home.review_issues | length %}
+<section class="bg-white rounded-2xl border border-violet-200 overflow-hidden" aria-labelledby="reviewIssuesTitle">
+    <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 sm:px-6 py-4 border-b border-violet-200 bg-violet-50">
+        <div class="flex items-start gap-3 min-w-0">
+            <span class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-violet-100 text-violet-600" aria-hidden="true">{{ icon('clipboard') }}</span>
+            <div class="min-w-0">
+                <h2 id="reviewIssuesTitle" class="text-lg font-bold text-violet-900">Propiedades por corregir</h2>
+                <p class="text-xs text-violet-800 mt-0.5">{{ ni }} {{ 'ficha con observaciones' if ni == 1 else 'fichas con observaciones' }} del captador: corrígela{{ '' if ni == 1 else 's' }} y márcala{{ '' if ni == 1 else 's' }} como corregida{{ '' if ni == 1 else 's' }} para que confirme</p>
+            </div>
+        </div>
+        {{ ui.button("Ver todas", "secondary", href="/properties?filtro=revision", full_mobile=True) }}
+    </header>
+    <ul class="divide-y divide-gray-100 px-4 sm:px-6">
+        {% for r in home.review_issues %}{{ review_issue_item(r) }}{% endfor %}
+    </ul>
+</section>
+{% endif %}
 
 {# ---------------------------------------------------------------- KPIs generales (no dependen del período) #}
 <section aria-labelledby="generalKpisTitle" class="space-y-3">
@@ -223,11 +246,30 @@
 {# ---------------------------------------------------------------- Ventana de compradores sin gestionar (§3.4, PLAN_VENTANA_SIN_GESTION.md; se abre al iniciar sesión)
    Solo los que no tienen ninguna gestión desde que se asignaron: los "volver a llamar" y las
    paradas siguen en "Requiere atención". #}
+{# Ventana de propiedades por corregir (§4.4-5): se abre la primera al iniciar sesión, y después
+   la de compradores sin gestionar (orden de `data-auto-open-on-login`, dashboard.js). #}
+{% if home.review_issues %}
+{% set ni = home.review_issues | length %}
+{% call ui.modal("reviewIssuesModal", "Propiedades por corregir", size="lg",
+                 subtitle=(ni ~ (" ficha con observaciones" if ni == 1 else " fichas con observaciones") ~ " del captador · pendientes de que las corrijas")) %}
+<div data-auto-open-on-login="1">
+    <div class="p-4 sm:p-6">
+        <ul class="divide-y divide-gray-100 -my-2">
+            {% for r in home.review_issues %}{{ review_issue_item(r) }}{% endfor %}
+        </ul>
+    </div>
+    <footer class="{{ ui.modal_footer_class }}">
+        {{ ui.button("Lo reviso después", "primary", attrs='data-modal-close', full_mobile=True) }}
+    </footer>
+</div>
+{% endcall %}
+{% endif %}
+
 {% if home.unmanaged_by_agent %}
 {% set total = home.unmanaged_by_agent | sum(attribute='count') %}
 {% call ui.modal("pendingBuyersModal", "Compradores sin gestionar", size="lg",
                  subtitle=(total ~ (" comprador" if total == 1 else " compradores") ~ " · más de " ~ buyer_reminder_hours ~ " h hábiles desde que se asignaron sin ninguna gestión")) %}
-<div data-auto-open-on-login>
+<div data-auto-open-on-login="2">
     <div class="p-4 sm:p-6">
     <ul class="divide-y divide-gray-100 -my-2">
         {% for g in home.unmanaged_by_agent %}

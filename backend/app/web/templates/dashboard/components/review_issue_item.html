@@ -1,0 +1,28 @@
+{#
+  Fila de una propiedad nueva que el captador pidió corregir (PLAN_REVISION_PROPIEDADES_NUEVAS.md
+  §4.4-5): ventana al entrar y bloque «Propiedades por corregir» del Inicio del admin.
+  `r` = PropertyReview `issues` con la propiedad y su captador cargados. El botón lleva a la
+  caja de revisión del detalle, donde el admin ve el comentario y la marca como corregida.
+  Ámbar = observaciones pendientes (tokens.md, dominio `review`).
+#}
+{% import "components/ui_macros.html" as ui %}
+
+{% macro review_issue_item(r) -%}
+{% set p = r.property %}
+<li class="py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+    <div class="min-w-0 flex-1">
+        <p class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span class="text-sm font-medium text-gray-900 break-words">{{ p.title }}</span>
+            {{ ui.status_badge("review", "issues") }}
+        </p>
+        <p class="text-xs text-gray-500 mt-0.5">{{ [p.property_type, p.city, (p.price | eur) if p.price is not none else none] | select | join(' · ') }}</p>
+        {% if r.agent_comment %}
+        <p class="text-sm text-amber-900 mt-1 break-words">{{ r.agent_comment | truncate(160) }}</p>
+        {% endif %}
+        <p class="text-xs text-gray-500 mt-0.5">
+            {{ p.agent.name if p.agent else 'El captador' }} lo pidió{% if r.flagged_at %} el {{ r.flagged_at | madrid_dt('%d/%m/%Y %H:%M') }}{% endif %}{% if r.rounds and r.rounds > 1 %} · {{ r.rounds }}ª vez{% endif %}
+        </p>
+    </div>
+    {{ ui.button("Corregir", "secondary", href="/properties/" ~ p.id ~ "#revision", full_mobile=True) }}
+</li>
+{%- endmacro %}
