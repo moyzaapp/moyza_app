@@ -360,6 +360,17 @@ def test_filtro_por_un_agente(data):
     assert _names(wb) == AGENT_NAMES
 
 
+def test_con_filtro_la_columna_agentes_solo_nombra_a_los_elegidos(data):
+    """§8: «PERFIL» es del agente uno (perfil) y del dos (alerta); filtrado por uno, solo ese."""
+    _, wb = _download(f"&agente={data['agent']}")
+    assert _by(_rows(wb["Compradores"]), "Nombre")[f"{TAG} PERFIL"]["Agentes"] == AGENT_NAME
+    _, wb = _download(f"&agente={data['agent2']}")
+    assert _by(_rows(wb["Compradores"]), "Nombre")[f"{TAG} PERFIL"]["Agentes"] == AGENT2_NAME
+    # Con los dos elegidos, los dos
+    _, wb = _download(f"&agente={data['agent']}&agente={data['agent2']}")
+    assert _by(_rows(wb["Compradores"]), "Nombre")[f"{TAG} PERFIL"]["Agentes"] == f"{AGENT_NAME}, {AGENT2_NAME}"
+
+
 def test_filtro_por_dos_agentes_suma(data):
     status, wb = _download(f"&agente={data['agent']}&agente={data['agent2']}")
     assert status == 200

@@ -258,3 +258,12 @@ ninguna trae operación). Las demás columnas de perfil siguen vacías para un c
 de alquiler. Tests nuevos en `tests/test_buyer_export.py` (compradores «ALQUILER», «AMBOS»
 y «SIN OPERACION»). El filtro por fecha no cambia (sigue siendo la fecha de alta del
 comprador; un comprador antiguo con alerta nueva no sale): el usuario lo dejó así por ahora.
+
+## 8. Ajuste 2026-11-26: «Agentes» con filtro solo nombra a los elegidos
+
+Un comprador puede ser de varios agentes (alertas con agentes distintos, perfil o alta de otro).
+Al filtrar por un agente, la fila nombraba a todos los suyos y el usuario lo leía como un fallo.
+Ahora `_buyer_agents(..., only_agent_ids=agent_ids)` limita la columna a los agentes del filtro;
+sin filtro («Todos») sigue nombrando a todos los del comprador. Test
+`test_con_filtro_la_columna_agentes_solo_nombra_a_los_elegidos`. Alternativa descartada: dejar
+todos los agentes para ver que el comprador es compartido.

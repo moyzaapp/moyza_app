@@ -17,6 +17,9 @@ empresa más la del perfil, «Venta, Alquiler» si tiene de los dos. En Alquiler
 no hay perfil, así que antes salía vacía; el resto de columnas de perfil
 siguen vacías para un comprador solo de alquiler.
 
+«Agentes» con filtro (2026-11-26, §8): al filtrar por agentes la columna solo
+nombra a los elegidos; sin filtro («Todos»), a todos los del comprador.
+
 Es un documento de trabajo: cabecera en negrita, fila fija, autofiltro y
 fechas en hora de Madrid. Sin fórmulas ni estilos corporativos.
 """
@@ -153,15 +156,20 @@ def _agent_filter(company_id: int, agent_ids: list):
     )
 
 
-def _buyer_agents(db: Session, company_id: int, buyer_ids: list) -> dict:
+def _buyer_agents(db: Session, company_id: int, buyer_ids: list, only_agent_ids=None) -> dict:
     """{buyer_id: «nombre, nombre»} con los agentes de la empresa que cumplen D8.
 
     Tres consultas agrupadas (alertas, perfiles y creador por email), sin N+1.
-    Cuenta también a los agentes dados de baja: el dato es histórico.
+    Cuenta también a los agentes dados de baja: el dato es histórico. Con
+    `only_agent_ids` (el filtro por agente, §8) la columna solo nombra a esos:
+    un comprador compartido con otro agente sale sin el otro.
     """
     if not buyer_ids:
         return {}
-    names = dict(scope_agents(db.query(Agent.id, Agent.name), company_id).all())
+    names_query = scope_agents(db.query(Agent.id, Agent.name), company_id)
+    if only_agent_ids:
+        names_query = names_query.filter(Agent.id.in_(only_agent_ids))
+    names = dict(names_query.all())
     if not names:
         return {}
     agent_ids = list(names)
@@ -246,7 +254,7 @@ def _buyer_rows(db: Session, company_id: int, since: datetime, until: datetime,
         query = query.filter(_agent_filter(company_id, agent_ids))
     buyers = query.order_by(Buyer.created_at.asc(), Buyer.id.asc()).all()
     buyer_ids = [b.id for b in buyers]
-    agents = _buyer_agents(db, company_id, buyer_ids)
+    agents = _buyer_agents(db, company_id, buyer_ids, only_agent_ids=agent_ids)
     business_types = _business_types(db, company_id, buyer_ids, buyers)
     rows = []
     for buyer in buyers:
@@ -274,8 +282,8 @@ def build_buyers_workbook(db: Session, company, start: date, end: date,
     entre `start` y `end` (días de Madrid, ambos incluidos).
 
     Con `agent_ids` (no vacío), solo los compradores de alguno de esos agentes
-    (D8); sin ellos, todos. La ruta ya descarta los que no son agentes activos
-    de la empresa.
+    (D8) y la columna «Agentes» solo con ellos (§8); sin ellos, todos. La ruta
+    ya descarta los que no son agentes activos de la empresa.
     """
     since, until = utc_range(start, end)
     ids = sorted(set(agent_ids or ()))
