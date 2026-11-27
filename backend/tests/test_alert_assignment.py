@@ -443,3 +443,57 @@ def test_seguimientos_del_anterior_no_desbloquean_la_cola_del_nuevo(ctx):
     assert sorted(f.action_type for f in moved.follow_ups) == ["CONTACTADO", "PRIMERA_LLAMADA", "REASIGNADA"]
     assert alert_view.visible_follow_ups(moved.follow_ups, moved, is_admin=False)[0].action_type == "CONTACTADO"
     assert len(alert_view.visible_follow_ups(moved.follow_ups, moved, is_admin=True)) == 3
+
+
+# ---------------------------------------------------------------------------
+# Alerta creada por el propio agente (PLAN_ALERTA_AGENTE_SIN_COLA.md)
+# ---------------------------------------------------------------------------
+
+def _own_alert(ctx, agent_key, created_at, name="PYTEST-ASIG PROPIA"):
+    """Alta del propio agente: la asigna el usuario del agente (create_alert)."""
+    from app.models.property_alert import PropertyAlert
+    agent = getattr(ctx, agent_key)
+    user = ctx.users[agent_key]
+    alert = PropertyAlert(property=ctx.prop, lead_name=name, status=AlertStatus.PENDING,
+                          created_by=user.id, created_at=created_at)
+    ctx.db.add(alert)
+    svc.assign(ctx.db, alert, agent, user, None, is_new=True, now=created_at)
+    return alert
+
+
+def test_alta_del_propio_agente_queda_fuera_de_la_cola(ctx):
+    from app.web.routes.alerts import get_locked_alert_ids
+
+    base = datetime.utcnow() - timedelta(days=10)
+    first, _ = _new_alert(ctx, ctx.ana, created_at=base, name="PYTEST-ASIG ADMIN")
+    own = _own_alert(ctx, "ana", base + timedelta(hours=1))
+    ctx.db.flush()
+
+    assert own.self_created is True and first.self_created is False
+    assert get_locked_alert_ids(ctx.ana.id, ctx.db, ctx.moyza.id) == set()
+    # Asignada por un usuario que no es el del agente (admin): sigue en la cola
+    assert svc.is_self_assignment(ctx.ana, ctx.admin) is False
+    assert svc.is_self_assignment(ctx.ana, ctx.users["bea"]) is False
+
+
+@pytest.mark.parametrize("how", ["reassign", "cede"])
+def test_reasignar_o_ceder_la_propia_entra_en_la_cola_del_nuevo(ctx, how):
+    """D4: al cambiar de agente deja de ser «creada por el propio agente»."""
+    from app.web.routes.alerts import get_locked_alert_ids
+
+    base = datetime.utcnow() - timedelta(days=10)
+    bea_first, _ = _new_alert(ctx, ctx.bea, created_at=base, name="PYTEST-ASIG BEA ANTERIOR")
+    own = _own_alert(ctx, "ana", base + timedelta(hours=1))
+    ctx.db.flush()
+    assert own.self_created is True
+
+    moved_at = base + timedelta(days=1)
+    if how == "cede":
+        svc.cede(ctx.db, own, ctx.bea, ctx.users["ana"], "Lo atiende Bea", now=moved_at)
+    else:
+        svc.assign(ctx.db, own, ctx.bea, ctx.admin, None, is_new=False, now=moved_at)
+    ctx.db.flush()
+
+    assert own.self_created is False and own.agent_id == ctx.bea.id
+    # En la cola de Bea, detrás de su anterior sin gestionar: bloqueada
+    assert get_locked_alert_ids(ctx.bea.id, ctx.db, ctx.moyza.id) == {own.id}

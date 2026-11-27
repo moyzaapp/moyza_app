@@ -248,3 +248,37 @@ def test_inicio_admin_actividad_y_equipo(ctx):
     month = svc.period(PeriodType.MONTHLY, "", now=now)
     metrics = svc.team_metrics([ctx.laura.id, ctx.carlos.id], month)
     assert (metrics[ctx.laura.id]["cierres"], metrics[ctx.laura.id]["cierres_venta"]) == (1, 1)
+
+
+def test_cierre_entre_empresas_cuenta_uno_a_cada_agente_en_su_empresa(ctx):
+    """PLAN_CIERRES_ENTRE_EMPRESAS.md: Carlos (MOYZA) y Mía (solo MOES) cierran juntos.
+
+    Cada uno suma 1 en su empresa y ninguna empresa cuenta 2."""
+    from app.services import closing_service
+
+    mia = Agent(name="PYTEST-CIERRES MIA", email="pytest.cierres.mia@example.com")
+    mia.companies.append(ctx.moes)
+    ctx.db.add(mia)
+    ctx.db.flush()
+    closing_service.create_closing(ctx.db, ctx.moyza.id, [ctx.carlos.id, mia.id], "Venta", date(2025, 3, 10),
+                                   created_by=ctx.user.id)
+
+    moyza = PerformanceReportService(ctx.db, ctx.moyza.id)
+    moes = PerformanceReportService(ctx.db, ctx.moes.id)
+    assert moyza.calculate_metrics(ctx.carlos.id, *MARCH)["cierres"] == 1
+    assert moes.calculate_metrics(mia.id, *MARCH)["cierres"] == 1
+    assert moyza.calculate_metrics(mia.id, *MARCH)["cierres"] == 0
+    assert moes.calculate_metrics(ctx.carlos.id, *MARCH)["cierres"] == 0
+
+    agent_ids = [ctx.carlos.id, mia.id]
+    for svc in (moyza, moes):
+        counts = svc.grouped_counts("cierres", *MARCH, agent_ids)
+        assert sum(sum(c.values()) for c in counts.values()) == 1
+
+    # Inicio de cada empresa: un evento con los dos nombres, el agente de la empresa primero
+    now = datetime.utcnow()
+    for company, names in ((ctx.moyza, "PYTEST-CIERRES CARLOS y PYTEST-CIERRES MIA"),
+                           (ctx.moes, "PYTEST-CIERRES MIA y PYTEST-CIERRES CARLOS")):
+        feed = [e for e in DashboardService(ctx.db, company.id).activity_feed(now=now)
+                if e["kind"] == "closing" and "PYTEST-CIERRES" in e["text"]]
+        assert [e["text"] for e in feed] == [f"{names} · firmado el 10/03/2025"]

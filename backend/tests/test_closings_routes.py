@@ -5,7 +5,10 @@ Integración contra la app levantada (patrón de test_commercial_results.py; se
 omiten si la app no responde): solo admin, alta con validación (fecha
 futura, agente de otra empresa, propiedad de otra empresa, operación),
 borrado, recálculo del snapshot congelado, lupa de trazabilidad y CSV, y
-aislamiento por empresa (un cierre de MOES no sale con MOYZA activa). Crean
+aislamiento por empresa (un cierre de MOES no sale con MOYZA activa) y
+cierres entre empresas (PLAN_CIERRES_ENTRE_EMPRESAS.md: el modal ofrece los
+agentes de las dos agrupados, cada registro en la empresa de su agente, la
+fila en las dos pestañas y el borrado desde la otra quita los dos). Crean
 dos agentes, una propiedad por empresa y un usuario agente; lo borran todo
 (también los cierres y snapshots) al final.
 
@@ -125,9 +128,15 @@ def test_pestana_vacia_y_modal(admin, setup):
     assert status == 200
     assert "Aún no hay cierres registrados en 2001" in body
     assert 'id="closingModal"' in body and "Registrar cierre" in body
-    # Agentes activos de la empresa activa y propiedades de la empresa (también vendidas)
-    assert f'<option value="{setup["agent_id"]}">{TAG} AGENTE</option>' in body
-    assert f'value="{setup["moes_agent_id"]}"' not in body
+    # Agentes activos de todas las empresas, agrupados por empresa en los dos selects
+    # (PLAN_CIERRES_ENTRE_EMPRESAS.md, D1), y propiedades de la empresa (también vendidas)
+    for select_id in ("closing_agent", "closing_agent_2"):
+        select = body.split(f'id="{select_id}"', 1)[1].split("</select>", 1)[0]
+        groups = dict(re.findall(r'<optgroup label="([^"]+)">(.*?)</optgroup>', select, re.S))
+        assert list(groups)[0] == "MOYZA"
+        assert f'<option value="{setup["agent_id"]}">{TAG} AGENTE</option>' in groups["MOYZA"]
+        assert f'<option value="{setup["moes_agent_id"]}">{TAG} MOES</option>' in groups["MOES PREMIUM"]
+    assert "Puede ser un agente de cualquier empresa" in body
     # Las propiedades van como JSON para el buscador del modal, no como <select>
     assert 'id="closing_property_search"' in body and '<select id="closing_property"' not in body
     data_json = body.split('id="closingPropertyData">', 1)[1].split("</script>", 1)[0]
@@ -144,7 +153,9 @@ def test_alta_validaciones(admin, setup):
         ({"agent_id": setup["agent_id"], "closed_on": tomorrow, "business_type": "Venta"}, "no puede ser futura"),
         ({"agent_id": setup["agent_id"], "closed_on": "", "business_type": "Venta"}, "fecha"),
         ({"agent_id": setup["agent_id"], "closed_on": "2025-03-10", "business_type": "Traspaso"}, "Venta o de Alquiler"),
-        ({"agent_id": setup["moes_agent_id"], "closed_on": "2025-03-10", "business_type": "Venta"}, "agente activo"),
+        ({"agent_id": "999999999", "closed_on": "2025-03-10", "business_type": "Venta"}, "Elige un agente activo"),
+        ({"agent_id": setup["agent_id"], "agent_id_2": "abc", "closed_on": "2025-03-10", "business_type": "Venta"},
+         "Elige un agente activo como Agente 2"),
         ({"agent_id": setup["agent_id"], "closed_on": "2025-03-10", "business_type": "Venta",
           "property_id": setup["moes_prop_id"]}, "no pertenece a la empresa"),
     ]
@@ -249,3 +260,40 @@ def test_aislamiento_por_empresa(setup):
     status, _, headers = moyza.post(f"/commercial-results/closings/{moes_closing.id}/delete", {})
     assert status == 302 and "no encontrado" in _flash(headers)
     assert [c.id for c in _closings(setup["moes_agent_id"])] == [moes_closing.id]
+
+
+def test_cierre_entre_empresas(setup):
+    """PLAN_CIERRES_ENTRE_EMPRESAS.md: Agente de MOYZA + agente de MOES desde MOYZA."""
+    import html
+
+    moyza, moes = Client(ADMIN_EMAIL, "MOYZA"), Client(ADMIN_EMAIL, "MOES")
+    status, _, headers = _create(moyza, agent_id=setup["agent_id"], agent_id_2=setup["moes_agent_id"],
+                                 closed_on="2023-06-15", business_type="Venta", property_id=setup["prop_id"],
+                                 notes="Entre empresas")
+    assert status == 302 and headers.get("location") == "/commercial-results?tab=cierres&year=2023"
+    assert f"Cierre de {TAG} AGENTE y {TAG} MOES registrado" in _flash(headers)
+
+    (mine,) = [c for c in _closings(setup["agent_id"]) if c.closed_on == date(2023, 6, 15)]
+    (theirs,) = [c for c in _closings(setup["moes_agent_id"]) if c.closed_on == date(2023, 6, 15)]
+    assert (mine.company_id, theirs.company_id) == (setup["moyza_id"], setup["moes_id"])
+    assert mine.pair_key == theirs.pair_key and mine.property_id == theirs.property_id == setup["prop_id"]
+
+    # Cada pestaña muestra su registro como fila compartida, con la empresa del otro agente
+    moyza_body = html.unescape(moyza.get("/commercial-results?tab=cierres&year=2023")[1])
+    row = moyza_body.split(f'data-closing-row="{mine.id}"', 1)[1].split("</tr>", 1)[0]
+    assert f"con {TAG} MOES (MOES PREMIUM)" in row and 'data-closing-shared="1"' in row
+    assert f'href="/properties/{setup["prop_id"]}"' in row
+    assert f'data-closing-row="{theirs.id}"' not in moyza_body
+
+    moes_body = html.unescape(moes.get("/commercial-results?tab=cierres&year=2023")[1])
+    row = moes_body.split(f'data-closing-row="{theirs.id}"', 1)[1].split("</tr>", 1)[0]
+    assert f"con {TAG} AGENTE (MOYZA)" in row and 'data-closing-shared="1"' in row
+    # La propiedad es de MOYZA: con MOES activa su ficha no se abre, solo el texto (D5)
+    assert f"{TAG} PISO" in row and f'href="/properties/{setup["prop_id"]}"' not in row
+    assert f'data-closing-row="{mine.id}"' not in moes_body
+
+    # Borrar desde MOES quita los dos registros (D4)
+    status, _, headers = moes.post(f"/commercial-results/closings/{theirs.id}/delete", {})
+    assert status == 302 and "a los dos agentes" in _flash(headers)
+    remaining = [c.id for c in _closings(setup["agent_id"]) + _closings(setup["moes_agent_id"])]
+    assert mine.id not in remaining and theirs.id not in remaining

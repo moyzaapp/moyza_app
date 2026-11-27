@@ -153,6 +153,58 @@ def test_el_agente_crea_la_busqueda_y_va_a_la_alerta(env):
     assert response.context["work_alert"].id == alert.id
 
 
+def _pending_admin_alert(env):
+    """Alerta anterior de Ana, asignada por el admin y sin gestionar, de otro comprador."""
+    from app.models.buyer import Buyer
+    other = Buyer(name="Otro Comprador", phone="34600999888", company_id=env.moyza.id,
+                  created_by=env.users["ana"].id)
+    env.db.add(other)
+    env.db.commit()
+    return _property_alert(env, "bea", "ana", created_at=T0 - timedelta(days=1), buyer=other)
+
+
+def test_la_busqueda_del_agente_se_abre_aunque_tenga_alertas_en_cola(env):
+    """PLAN_ALERTA_AGENTE_SIN_COLA.md D1: la alerta que crea el agente no entra en su cola."""
+    from app.models.property_alert import PropertyAlert
+    from tests.test_alert_search import _detail
+    previous = _pending_admin_alert(env)
+
+    response = _create_search(env, env.users["ana"])
+    alert = env.db.query(PropertyAlert).filter(PropertyAlert.buyer_id == env.buyer.id).one()
+    assert response.headers["location"] == f"/alerts/{alert.id}"
+    assert alert.self_created is True and previous.self_created is False
+
+    response, _ = _detail(env, env.users["ana"], alert)
+    assert response.status_code == 200
+
+
+def test_la_alerta_del_modal_con_propiedad_propia_se_abre_aunque_tenga_alertas_en_cola(env):
+    from app.models.property_alert import PropertyAlert
+    from tests.test_alert_search import _create, _detail
+    _pending_admin_alert(env)
+
+    response = _create(env, env.users["ana"], property_id=env.props["ana"].id)
+    assert response.headers["location"] == "/alerts"
+    alert = env.db.query(PropertyAlert).filter(PropertyAlert.buyer_id == env.buyer.id).one()
+    assert alert.origin == AlertOrigin.PROPERTY and alert.self_created is True
+
+    response, _ = _detail(env, env.users["ana"], alert)
+    assert response.status_code == 200
+
+
+def test_la_busqueda_que_crea_el_admin_entra_en_la_cola(env):
+    from app.models.property_alert import PropertyAlert
+    from tests.test_alert_search import _detail
+    _pending_admin_alert(env)
+
+    _create_search(env, env.admin, agent_id=env.agents["ana"].id)
+    alert = env.db.query(PropertyAlert).filter(PropertyAlert.buyer_id == env.buyer.id).one()
+    assert alert.self_created is False
+
+    response, _ = _detail(env, env.users["ana"], alert)
+    assert response.status_code == 302 and response.headers["location"] == "/alerts"
+
+
 def test_el_admin_elige_agente_y_sin_el_vuelve_a_la_ficha(env):
     response = _create_search(env, env.admin)
     assert response.headers["location"] == f"/buyers/{env.buyer.id}"

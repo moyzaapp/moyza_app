@@ -287,3 +287,39 @@ Riesgos y pendientes:
 - El cruce es síncrono en la petición del OK: con muchos perfiles abiertos convendría vigilar el
   tiempo (hoy el prefiltro SQL lo deja en pocas filas).
 - «Reserva de compradores» (§6) no implementada: solo el gancho en `candidate_alerts`.
+
+## 11. Seguimiento para el admin (2026-11-27, solo lectura)
+
+Tras el despliegue en producción el equipo dijo que, al confirmar propiedades nuevas, no llegaron
+avisos de compradores. Para saber qué pasó sin tocar nada se añadió una pantalla de diagnóstico,
+solo para el admin y que NO escribe (ni cruza, ni avisa, ni cambia estados):
+
+- `GET /properties/seguimiento-nuevas` (filtros: últimos N días, estado de la revisión, empresa
+  activa o todas las del admin). Resumen por estado, «embudo» de compradores que pueden entrar hoy
+  al cruce (abiertas con comprador → agente activo → Venta → con perfil → completo → agente con
+  usuario) y una fila por propiedad nueva: datos que usa el cruce, captador (con/sin usuario),
+  revisión con fechas y quién, compradores registrados al dar el OK (agentes, con aviso),
+  compradores que ENCAJAN HOY (simulación con los datos actuales), avisos creados/leídos y un
+  diagnóstico en texto con la causa más probable.
+- `GET /properties/seguimiento-nuevas/{id}`: detalle con todos los datos de la propiedad (vacíos
+  marcados), revisión paso a paso, avisos al captador y a los agentes (leído / sin leer), y TODAS
+  las alertas abiertas con comprador evaluadas: registradas, encajan hoy, fuera del cruce (cerrada,
+  sin perfil, incompleto, agente inactivo, Alquiler) y no encajan con TODAS las condiciones que
+  fallan y sus valores («Población: «Jaen» no está en Jaén (solo difiere en acentos…)»,
+  «Dormitorios: sin dato y el perfil pide como máximo 3»). También las cerradas en los últimos 90
+  días que sí encajarían.
+- Servicio `app/services/property_review_audit_service.py`: `reasons_not_matching` es otra
+  réplica de `criteria_matches_property` (lista vacía ⇔ encaja; test cruzado sobre perfiles
+  reales), `explain_alert` sigue el orden de `candidate_alerts`, `audit_rows` / `audit_detail`.
+- Router propio `routes/property_review_audit.py`, incluido ANTES que `properties` en `main.py`
+  (si no, `/properties/{property_id}` captura la ruta). Acceso desde el botón «Seguimiento nuevas»
+  del listado de Propiedades (solo admin). Las `skipped` de la migración (todas con el mismo
+  `created_at`) solo entran al periodo por su `market_entry_date`.
+- Tests: `tests/test_property_review_audit.py`.
+
+Causas que la pantalla hace visibles (las que puede haber en producción): propiedad omitida como
+histórica (`market_entry_date` > 15 días) o sin captador; OK dado por el único agente con
+compradores compatibles (nunca se avisa a sí mismo); agentes sin usuario activo; perfiles
+incompletos (falta población o dormitorios máximos con la regla nueva); población/zona/tipo con
+texto distinto al de la propiedad (acentos); dato vacío en la propiedad (dormitorios, CP);
+precio por encima del máximo; alertas cerradas.

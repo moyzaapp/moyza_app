@@ -644,6 +644,40 @@ docker exec moyza_backend python -c "import openpyxl; print(openpyxl.__version__
   con las hojas Resumen, Compradores y Alertas dados de alta en ese periodo, solo de la
   empresa activa.
 
+### La alerta que crea el propio agente no entra en su cola (PLAN_ALERTA_AGENTE_SIN_COLA.md, 2026-11-27)
+
+```bash
+docker exec moyza_backend alembic upgrade head      # t6u7v8w9x0y1: columna property_alerts.self_created + backfill
+docker restart moyza_backend
+```
+
+- Columna `self_created` (NOT NULL, por defecto false). El backfill marca las alertas
+  abiertas que asignó el usuario del propio agente (email, sin distinguir mayúsculas; no
+  admin) y que nunca se reasignaron ni cedieron. Downgrade: borra la columna.
+- Esas alertas ni se bloquean ni bloquean a las demás en la cola secuencial; siguen en el
+  listado, el Inicio y la ficha con su reloj «Sin gestionar». Reasignarlas o cederlas las
+  devuelve a la cola del nuevo agente. Las de administración no cambian.
+- En esta rama hay una sola cabeza (`t6u7v8w9x0y1`): en una base que solo haya recibido
+  migraciones de `63-agregar-moes`, `alembic upgrade head` basta. El aviso de Captaciones
+  (`q3c4p5t6a7b8`, rama `90-agregar-pestaña-de-captaciones`) solo aplica a una base que ya
+  tenga esa fila en `alembic_version`, como la local: ahí `upgrade head` se niega y hace falta
+  `alembic merge` (mismo aviso que §24 y §25).
+
+### Cierres entre agentes de las dos empresas (PLAN_CIERRES_ENTRE_EMPRESAS.md, 2026-11-27)
+
+Sin migración ni variables nuevas: desplegar el código y `docker restart moyza_backend`.
+
+- «Registrar cierre» (Resultados Comerciales → Cierres) ofrece en Agente 1 y Agente 2 los
+  agentes activos de todas las empresas, agrupados por empresa.
+- Cada registro de `closings` se guarda con la empresa de su agente (la activa si pertenece a
+  ella): cada agente suma 1 cierre en su empresa. Un cierre entre empresas sale en la pestaña
+  de las dos («con Nombre (EMPRESA)») y se borra entero desde cualquiera de ellas.
+- La propiedad opcional sigue siendo de la empresa activa; en la otra pestaña sale sin enlace.
+
+```bash
+docker exec moyza_backend python -m pytest tests/test_closing_service.py tests/test_closings_routes.py tests/test_closings_shared_routes.py tests/test_closings_metric.py -q
+```
+
 ## 16. Excepciones: qué cruza empresas (2026-10-20)
 
 Detalle en `PLAN_SUGERENCIAS_MULTIEMPRESA.md`. Las propiedades **sugeridas**

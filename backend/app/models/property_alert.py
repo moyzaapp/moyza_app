@@ -1,6 +1,7 @@
 import builtins
 from datetime import datetime
 
+from sqlalchemy import Boolean
 from sqlalchemy import Column
 from sqlalchemy import Integer
 from sqlalchemy import String
@@ -193,6 +194,17 @@ class PropertyAlert(Base):
         Integer,
         ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True
+    )
+
+    # La creó el agente que la tiene asignada (PLAN_ALERTA_AGENTE_SIN_COLA.md):
+    # queda fuera de su cola secuencial (ni se bloquea ni bloquea a las demás).
+    # Lo fija `alert_assignment_service.assign` en el alta y se apaga al
+    # reasignarla o cederla.
+    self_created = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false")
     )
 
     # Relaciones. `property` puede ser None (búsqueda sin propiedad asociada):

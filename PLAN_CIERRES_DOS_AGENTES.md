@@ -62,3 +62,7 @@ La explicación de la regla de la lupa añade que un cierre compartido cuenta en
 
 Despliegue: `alembic upgrade head` (`b7c8d9e0f1a2`: columnas `shared_with_agent_id` y
 `pair_key`); sin migración de datos (decisión 4). Sin clases Tailwind nuevas.
+
+2026-11-27: los dos agentes pueden ser de empresas distintas; cada registro lleva la empresa
+de su agente y el cierre sale en la pestaña Cierres de las dos. Ver
+`PLAN_CIERRES_ENTRE_EMPRESAS.md`.

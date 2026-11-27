@@ -71,6 +71,7 @@ from app.services.notification_service import notify_alert_ceded
 from app.services.notification_service import users_for_agent
 from app.services.visit_agents import companion_agent_groups
 from app.services.visit_agents import get_agent_in_any_company
+from app.web.dependencies.auth import is_admin
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +339,17 @@ def cession_note(previous_agent, agent, reason: Optional[str]) -> str:
     return f"{note}: {reason}" if reason else note
 
 
+def is_self_assignment(agent, by_user) -> bool:
+    """True si `by_user` no es admin y es el usuario de `agent` (por email).
+
+    Es el caso de la alerta que crea el propio agente
+    (PLAN_ALERTA_AGENTE_SIN_COLA.md): queda fuera de su cola secuencial.
+    """
+    agent_email = (getattr(agent, "email", None) or "").strip().lower()
+    user_email = (getattr(by_user, "email", None) or "").strip().lower()
+    return bool(agent_email) and agent_email == user_email and not is_admin(by_user)
+
+
 def assign(
     db: Session,
     alert,
@@ -375,6 +387,9 @@ def assign(
     alert.assigned_at = now
     alert.assigned_by = getattr(by_user, "id", None)
     alert.assignment_reason = reason
+    # Fuera de la cola si la crea el propio agente (PLAN_ALERTA_AGENTE_SIN_COLA.md
+    # D1); al reasignarla o cederla entra en la cola del nuevo agente (D4).
+    alert.self_created = is_new and is_self_assignment(agent, by_user)
 
     if not is_new:
         alert.previous_agent = previous_agent

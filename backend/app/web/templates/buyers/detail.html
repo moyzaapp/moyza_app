@@ -102,7 +102,7 @@
             {% endcall %}
             {% else %}
             {% call ui.banner("Sin alerta abierta", "amber",
-                              text=("Para contactarle, tomar su perfil y proponerle propiedades, crea su búsqueda: así entra en la cola y todo queda en el seguimiento." if not is_admin else "Para que un agente le contacte, tome su perfil y le proponga propiedades, crea su búsqueda y asígnala.")) %}
+                              text=("Para contactarle, tomar su perfil y proponerle propiedades, crea su búsqueda y gestiónala ahora mismo: todo queda en el seguimiento." if not is_admin else "Para que un agente le contacte, tome su perfil y le proponga propiedades, crea su búsqueda y asígnala.")) %}
                 {{ ui.button("Crear búsqueda", "secondary", attrs='data-modal-open="createSearchModal"', extra="px-3 py-2 text-xs border-amber-300 text-amber-800") }}
             {% endcall %}
             {% endif %}

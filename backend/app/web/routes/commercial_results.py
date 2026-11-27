@@ -41,6 +41,7 @@ from app.core.constants import PropertyStatus
 from app.db.deps import get_db
 from app.models.agent import Agent
 from app.models.closing import Closing
+from app.models.company import Company
 from app.models.property import Property
 from app.models.property_alert import PropertyAlert
 from app.services import closing_service
@@ -53,6 +54,7 @@ from app.services.notification_service import notify_admin_note
 from app.services.performance_report_service import INDICATOR_ROWS_PAGE
 from app.services.performance_report_service import MIN_PERIOD_YEAR
 from app.services.performance_report_service import PerformanceReportService
+from app.services.visit_agents import companion_agent_groups
 from app.web.dependencies.auth import is_admin
 from app.web.dependencies.company import get_active_company
 from app.web.template_env import madrid_dt
@@ -187,12 +189,17 @@ def _closings_year(year: str, today: date) -> int:
     return today.year
 
 
-def closing_operations(closings) -> list:
+def closing_operations(closings, company_id: int = None, company_names: dict = None) -> list:
     """Agrupa los registros en operaciones: un cierre compartido (mismo `pair_key`) es una sola.
 
     Conserva el orden de `closings`. Cada operación es un dict con `closing`
     (el registro del Agente 1, el de id menor), `partner` (el del Agente 2 o
     None) y `partner_name` (nombre del otro agente; PLAN_CIERRES_DOS_AGENTES.md).
+    En un cierre entre empresas (PLAN_CIERRES_ENTRE_EMPRESAS.md, D3) el
+    registro del otro agente está en la otra empresa y no llega aquí: el
+    nombre sale de `shared_with_agent` y `partner_company` lleva las empresas
+    del otro agente (de `company_names`, id → nombre) cuando no pertenece a
+    `company_id`; si no, None.
     """
     operations = []
     by_pair = {}
@@ -217,6 +224,14 @@ def closing_operations(closings) -> list:
         else:
             operation["partner_name"] = None
         operation["shared"] = bool(main.pair_key)
+        partner_agent = partner.agent if partner is not None else main.shared_with_agent
+        operation["partner_company"] = None
+        if operation["shared"] and partner_agent is not None and company_id is not None:
+            partner_company_ids = [c.id for c in partner_agent.companies]
+            if company_id not in partner_company_ids:
+                operation["partner_company"] = ", ".join(
+                    (company_names or {})[i] for i in sorted(partner_company_ids) if i in (company_names or {})
+                ) or None
     return operations
 
 
@@ -225,10 +240,12 @@ def closings_context(db: Session, company_id: int, year: int, today: date) -> di
 
     El listado y los totales de cabecera son por operación: un cierre
     compartido por dos agentes es una fila y cuenta 1 (en la métrica cuenta 1
-    a cada agente)."""
+    a cada agente). Los agentes del modal son los activos de todas las
+    empresas, agrupados por empresa (PLAN_CIERRES_ENTRE_EMPRESAS.md, D1)."""
     closings = (
         db.query(Closing)
-        .options(joinedload(Closing.agent), joinedload(Closing.shared_with_agent),
+        .options(joinedload(Closing.agent).selectinload(Agent.companies),
+                 joinedload(Closing.shared_with_agent).selectinload(Agent.companies),
                  joinedload(Closing.property), joinedload(Closing.creator))
         .filter(
             Closing.company_id == company_id,
@@ -255,7 +272,8 @@ def closings_context(db: Session, company_id: int, year: int, today: date) -> di
         .order_by(Property.title.asc(), Property.id.asc())
         .all()
     ]
-    operations = closing_operations(closings)
+    company_names = {c.id: c.name for c in db.query(Company).filter(Company.is_active.is_(True))}
+    operations = closing_operations(closings, company_id, company_names)
     return {
         "closings": operations,
         "closings_year": year,
@@ -267,7 +285,10 @@ def closings_context(db: Session, company_id: int, year: int, today: date) -> di
             "alquiler": sum(1 for op in operations if op["closing"].business_type == BusinessType.ALQUILER),
             "shared": sum(1 for op in operations if op["shared"]),
         },
-        "closing_agents": scope_active_agents(db.query(Agent), company_id).order_by(Agent.name.asc()).all(),
+        "closing_agent_groups": companion_agent_groups(db, company_id),
+        # Enlace a la propiedad solo si es de la empresa activa: la ficha de otra
+        # empresa no se abre con esta activa (PLAN_CIERRES_ENTRE_EMPRESAS.md, D5)
+        "closings_company_id": company_id,
         "closing_properties": properties,
         "business_types": BusinessType.values(),
         "today": today,
@@ -710,10 +731,10 @@ async def create_closing(
     notes: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    """Registra un cierre: agente activo de la empresa (y un Agente 2 opcional si
-    cerraron entre dos), fecha no futura, Venta / Alquiler, propiedad opcional
-    de la empresa y nota. Refresca los snapshots congelados
-    (`closing_service.create_closing`)."""
+    """Registra un cierre: agente activo de cualquier empresa (y un Agente 2
+    opcional si cerraron entre dos; PLAN_CIERRES_ENTRE_EMPRESAS.md), fecha no
+    futura, Venta / Alquiler, propiedad opcional de la empresa activa y nota.
+    Refresca los snapshots congelados (`closing_service.create_closing`)."""
     current_user = request.state.user
     if not is_admin(current_user):
         return _forbidden_redirect("Solo administradores pueden registrar cierres")
@@ -723,12 +744,12 @@ async def create_closing(
 
     agent_pk = _parse_int(agent_id)
     if agent_pk is None:
-        return _closing_redirect("error", "Elige un agente activo de la empresa")
+        return _closing_redirect("error", "Elige un agente activo")
     agent_ids = [agent_pk]
     if (agent_id_2 or "").strip():
         second_pk = _parse_int(agent_id_2)
         if second_pk is None:
-            return _closing_redirect("error", "Elige un agente activo de la empresa como Agente 2")
+            return _closing_redirect("error", "Elige un agente activo como Agente 2")
         agent_ids.append(second_pk)
 
     try:

@@ -199,3 +199,7 @@ en producción (como admin y como agente) y deuda detectada. Marcar "Estado".
 - [x] Dashboard del agente y notificación sin motivo
 - [x] Tests
 - [x] Lint, CSS y documentación
+
+Nota 2026-11-27: la alerta que crea el propio agente (`property_alerts.self_created`) queda
+fuera de la cola secuencial: no se bloquea ni bloquea a las demás. Reasignarla o cederla la
+devuelve a la cola del nuevo agente. Ver `PLAN_ALERTA_AGENTE_SIN_COLA.md`.
