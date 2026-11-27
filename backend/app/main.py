@@ -10,6 +10,7 @@ from app.db.base import Base
 from app.db.session import engine
 from app.api.v1.router import api_router
 from app.web.routes import dashboard, clients, agents, auth, properties, reports, report_logs, ai_logs, visits, alerts, activity_logs, commercial_results, company, notifications
+from app.web.routes import property_review_audit
 from app.web.middleware.auth import AuthMiddleware
 from app.web.middleware.flash import FlashMiddleware
 from app.web.middleware.activity import ActivityMiddleware
@@ -52,6 +53,8 @@ app.include_router(dashboard.router)
 app.include_router(clients.router)
 app.include_router(agents.router)
 app.include_router(auth.router)
+# Antes que properties: /properties/seguimiento-nuevas no debe caer en /properties/{property_id}
+app.include_router(property_review_audit.router)
 app.include_router(properties.router)
 app.include_router(visits.router)
 app.include_router(reports.router)

@@ -1,0 +1,184 @@
+{#
+  Detalle del seguimiento de una propiedad nueva (solo admin, solo lectura).
+  Ruta GET /properties/seguimiento-nuevas/{id} (routes/property_review_audit.py).
+
+  - Datos de la propiedad que usa el cruce (todos, con los vacíos marcados).
+  - Revisión paso a paso (fechas, quién) y los avisos creados (al captador y a los agentes
+    con compradores compatibles), con leído / sin leer.
+  - Compradores: registrados al dar el OK; los que encajan hoy; los que quedan fuera del
+    cruce (cerrada, sin perfil, incompleto, agente inactivo, Alquiler); los que no encajan,
+    con TODAS las condiciones que fallan; y los cerrados hace poco que sí encajarían.
+  - Violet = propiedades nuevas, ámbar = atención, rojo = problema (tokens.md).
+#}
+{% extends 'base.html' %}
+{% import "components/ui_macros.html" as ui %}
+
+{% block title %}Seguimiento · {{ property.title }} - {{ brand_name }}{% endblock %}
+
+{% macro buyer_row(row, show_reasons=True) -%}
+{% set alert = row.alert %}
+<li class="px-4 sm:px-6 py-4 space-y-1.5">
+    <div class="flex flex-wrap items-center gap-2">
+        <p class="text-sm font-semibold text-gray-900 break-words">{{ row.buyer_name }}</p>
+        {{ ui.status_badge("alert", alert.status) }}
+        {{ ui.company_badge(row.company, title="Comprador de " ~ (row.company.name if row.company else "—")) }}
+        {% if row.match %}
+        {{ ui.badge("Registrado el " ~ (row.match.created_at | madrid_dt), "violet", dot=True) }}
+        {% if row.match.notified_at %}{{ ui.badge("Avisado el " ~ (row.match.notified_at | madrid_dt), "green", dot=True) }}
+        {% else %}{{ ui.badge("Sin aviso: agente sin usuario", "amber", dot=True) }}{% endif %}
+        {% endif %}
+    </div>
+    <p class="text-xs text-gray-600">
+        Agente: <span class="font-medium text-gray-900">{{ row.agent.name if row.agent else "Sin agente" }}</span>
+        {% if row.agent and not row.agent.is_active %}<span class="text-red-700"> (inactivo)</span>{% endif %}
+        {% if row.agent_users %} · usuario: {{ row.agent_users | map(attribute="email") | join(", ") }}
+        {% elif row.agent %} · <span class="text-red-700">sin usuario activo en la app</span>{% endif %}
+        · alerta #{{ alert.id }} · {{ alert.business_type or "sin operación" }} · creada {{ alert.created_at | madrid_dt('%d/%m/%Y') }}
+        {% if alert.completed_at %} · cerrada {{ alert.completed_at | madrid_dt('%d/%m/%Y') }}{% endif %}
+    </p>
+    <p class="text-xs text-gray-500 break-words">Busca: {{ row.criteria_summary or "sin perfil" }}
+        {% if row.criteria and row.criteria.updated_at %} · perfil actualizado {{ row.criteria.updated_at | madrid_dt('%d/%m/%Y %H:%M') }}{% endif %}
+    </p>
+    {% if show_reasons and (row.excluded or row.reasons) %}
+    <ul class="text-xs space-y-0.5 pl-4 list-disc">
+        {% for text in row.excluded %}<li class="text-amber-800">{{ text }}</li>{% endfor %}
+        {% for text in row.reasons %}<li class="text-red-700">{{ text }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    <p><a href="/alerts/{{ alert.id }}" class="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-2 inline-flex items-center min-h-10 sm:min-h-0">Ver comprador</a></p>
+</li>
+{%- endmacro %}
+
+{% macro section(id, title, hint, rows, tone="gray", show_reasons=True, empty_text="Ninguno") -%}
+<section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="{{ id }}Title">
+    <header class="px-4 sm:px-6 py-4 border-b border-gray-200 flex items-start justify-between gap-3">
+        <div class="min-w-0">
+            <h2 id="{{ id }}Title" class="text-base font-bold text-gray-900">{{ title }} <span class="text-gray-500 font-medium tabular-nums">· {{ rows | length }}</span></h2>
+            <p class="text-xs text-gray-500 mt-0.5">{{ hint }}</p>
+        </div>
+    </header>
+    {% if rows %}
+    <ul class="divide-y divide-gray-100">{% for row in rows %}{{ buyer_row(row, show_reasons) }}{% endfor %}</ul>
+    {% else %}
+    <p class="px-4 sm:px-6 py-4 text-sm text-gray-500">{{ empty_text }}</p>
+    {% endif %}
+</section>
+{%- endmacro %}
+
+{% block content %}
+{% set p = property %}
+{% set r = review %}
+{% set web_url = p | public_url %}
+<div class="max-w-6xl mx-auto space-y-6">
+
+    <a href="{{ base_url }}" class="text-sm text-gray-500 hover:text-gray-700 inline-flex items-center gap-1 min-h-10">← Volver al seguimiento</a>
+
+    <div class="space-y-3">
+        {% call ui.page_header(p.title, ([p.property_type, p.city, p.zona] | select | join(" · ")) ~ " · " ~ (p.price | eur)) %}
+            {{ ui.button("Ver ficha", "secondary", href="/properties/" ~ p.id, full_mobile=True) }}
+            {{ ui.button("Compradores compatibles", "secondary", href="/properties/" ~ p.id ~ "/matches", full_mobile=True) }}
+        {% endcall %}
+        <p class="flex flex-wrap items-center gap-2">
+            {{ ui.company_badge(p.company) }}
+            {% if r %}{% if r.status == 'skipped' %}{{ ui.badge("Sin revisión", "gray") }}{% else %}{{ ui.status_badge("review", r.status) }}{% endif %}{% else %}{{ ui.badge("Sin fila de revisión", "red", dot=True) }}{% endif %}
+            {{ ui.badge("Activa", "green", dot=True) if p.status == "Activa" else ui.badge(p.status, "red", dot=True) }}
+            {% if not web_url %}{{ ui.badge("Sin enlace web", "amber", dot=True) }}{% endif %}
+        </p>
+    </div>
+
+    {# Diagnóstico #}
+    <section class="bg-white rounded-2xl border-2 {{ 'border-violet-300' if registered else 'border-amber-300' }} p-4 sm:p-6" aria-labelledby="diagTitle">
+        <h2 id="diagTitle" class="text-base font-bold text-gray-900">Diagnóstico</h2>
+        <ul class="mt-2 text-sm text-gray-800 space-y-1 list-disc pl-5">
+            {% for note in diagnosis %}<li>{{ note }}</li>{% endfor %}
+        </ul>
+        <p class="text-xs text-gray-500 mt-3">Simulación con los datos de hoy de la propiedad y de los perfiles: no registra cruces ni avisa a nadie. Revisión activada: {{ "sí" if settings.enabled else "no" }} · el job busca propiedades nuevas cada {{ settings.poll_minutes }} min · histórica si entró en el mercado hace más de {{ settings.max_age_days }} días.</p>
+    </section>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {# Datos que usa el cruce #}
+        <section class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6" aria-labelledby="dataTitle">
+            <h2 id="dataTitle" class="text-base font-bold text-gray-900">Datos de la propiedad que usa el cruce</h2>
+            <p class="text-xs text-gray-500 mt-0.5">Un dato vacío nunca cumple un filtro del perfil (salvo «sin ascensor»).</p>
+            <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                {% for label, value, required in [
+                    ("Estado", p.status, True), ("Captador", p.agent.name if p.agent else None, True),
+                    ("Operación", p.business_type, True), ("Tipo", p.property_type, True),
+                    ("Precio", (p.price | eur) if p.price is not none else None, True),
+                    ("Población", p.city, True), ("Zona", p.zona, False),
+                    ("Código postal", p.cod_postal, False), ("País", p.pais or "vacío = España", False),
+                    ("Dormitorios", p.num_dormitorios, True), ("Baños", p.num_banos_aseos, False),
+                    ("Ascensores", p.num_ascensores, False), ("Plazas de garaje", p.num_garaje_aparcam, False),
+                    ("Referencia", p.referencia, False), ("Enlace web", web_url, False),
+                ] %}
+                <dt class="text-gray-500">{{ label }}</dt>
+                <dd class="{{ 'text-red-700 font-medium' if value is none and required else ('text-gray-400' if value is none else 'text-gray-900') }} break-words">{{ value if value is not none else "vacío" }}</dd>
+                {% endfor %}
+            </dl>
+        </section>
+
+        {# Revisión y avisos #}
+        <section class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6" aria-labelledby="reviewTitle">
+            <h2 id="reviewTitle" class="text-base font-bold text-gray-900">Revisión y avisos</h2>
+            {% if r %}
+            <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                <dt class="text-gray-500">En el mercado desde</dt><dd class="text-gray-900">{{ (p.market_entry_date | madrid_dt('%d/%m/%Y')) if p.market_entry_date else "sin fecha" }}{% if facts.historical %} <span class="text-amber-700">(histórica)</span>{% endif %}</dd>
+                <dt class="text-gray-500">Detectada por la app</dt><dd class="text-gray-900">{{ r.created_at | madrid_dt }}</dd>
+                <dt class="text-gray-500">Captador al registrar</dt><dd class="text-gray-900">{{ r.agent.name if r.agent else "—" }}</dd>
+                <dt class="text-gray-500">Usuario del captador</dt><dd class="{{ 'text-gray-900' if facts.captador_users else 'text-red-700 font-medium' }}">{{ (facts.captador_users | map(attribute="email") | join(", ")) if facts.captador_users else "sin usuario activo en la app" }}</dd>
+                <dt class="text-gray-500">Aviso al captador</dt><dd class="{{ 'text-gray-900' if r.notified_at else 'text-red-700' }}">{{ (r.notified_at | madrid_dt) if r.notified_at else ("no procede" if r.status == 'skipped' else "sin aviso") }}</dd>
+                <dt class="text-gray-500">Recordatorio</dt><dd class="text-gray-900">{{ (r.reminded_at | madrid_dt) if r.reminded_at else "—" }}</dd>
+                <dt class="text-gray-500">«Revisar» del captador</dt><dd class="text-gray-900">{{ (r.flagged_at | madrid_dt) if r.flagged_at else "—" }}{% if r.rounds %} · {{ r.rounds }} veces{% endif %}</dd>
+                {% if r.agent_comment %}<dt class="text-gray-500">Comentario</dt><dd class="text-amber-800">{{ r.agent_comment }}</dd>{% endif %}
+                <dt class="text-gray-500">Corregida por el admin</dt><dd class="text-gray-900">{{ (r.fixed_at | madrid_dt) if r.fixed_at else "—" }}{% if r.fixed_by_user %} · {{ r.fixed_by_user.full_name }}{% endif %}</dd>
+                <dt class="text-gray-500">OK definitivo</dt><dd class="{{ 'text-green-700 font-medium' if r.ok_at else 'text-gray-900' }}">{{ (r.ok_at | madrid_dt) if r.ok_at else "todavía no" }}{% if r.ok_by_user %} · {{ r.ok_by_user.full_name }}{% endif %}</dd>
+                {% if facts.overdue %}<dt class="text-gray-500">Plazo</dt><dd class="text-amber-700">Fuera de plazo (espera desde {{ facts.waiting_since | madrid_dt }})</dd>{% endif %}
+                {% if facts.skipped_why %}<dt class="text-gray-500">Por qué sin revisión</dt><dd class="text-gray-900">{{ facts.skipped_why }}</dd>{% endif %}
+            </dl>
+            {% else %}
+            <p class="mt-3 text-sm text-red-700">La propiedad no tiene fila de revisión: el job aún no la ha registrado o está sin captador.</p>
+            {% endif %}
+
+            <h3 class="mt-5 text-sm font-semibold text-gray-900">Avisos de revisión al captador <span class="text-gray-500 font-medium tabular-nums">· {{ review_notifications | length }}</span></h3>
+            {% if review_notifications %}
+            <ul class="mt-1 text-xs text-gray-700 space-y-1">
+                {% for n in review_notifications %}
+                <li>{{ n.created_at | madrid_dt }} · {{ n.user.email if n.user else "?" }} · {{ n.title }} · {% if n.read_at %}<span class="text-green-700">leído {{ n.read_at | madrid_dt }}</span>{% else %}<span class="text-amber-700">sin leer</span>{% endif %}</li>
+                {% endfor %}
+            </ul>
+            {% else %}<p class="mt-1 text-xs text-gray-500">Ninguno.</p>{% endif %}
+
+            <h3 class="mt-4 text-sm font-semibold text-gray-900">Avisos de compradores compatibles a los agentes <span class="text-gray-500 font-medium tabular-nums">· {{ match_notifications | length }}</span></h3>
+            {% if match_notifications %}
+            <ul class="mt-1 text-xs text-gray-700 space-y-1">
+                {% for n in match_notifications %}
+                <li>{{ n.created_at | madrid_dt }} · {{ n.user.email if n.user else "?" }} · {{ n.company.name if n.company else "" }} · {{ n.title }} · {% if n.read_at %}<span class="text-green-700">leído {{ n.read_at | madrid_dt }}</span>{% else %}<span class="text-amber-700">sin leer</span>{% endif %}</li>
+                {% endfor %}
+            </ul>
+            {% else %}<p class="mt-1 text-xs text-gray-500">Ninguno. Se crean solo al dar el OK, uno por agente con compradores compatibles, y nunca al mismo usuario que dio el OK.</p>{% endif %}
+        </section>
+    </div>
+
+    {# Motivos más frecuentes #}
+    {% if reason_counter or excluded_counter %}
+    <section class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6" aria-labelledby="whyTitle">
+        <h2 id="whyTitle" class="text-base font-bold text-gray-900">Por qué se quedan fuera (resumen)</h2>
+        <p class="text-xs text-gray-500 mt-0.5">De las {{ pool_total }} alertas abiertas con comprador: cuántas fallan cada condición (una alerta puede fallar varias).</p>
+        <div class="mt-3 flex flex-wrap gap-2">
+            {% for label, count in excluded_counter %}{{ ui.badge(label ~ " · " ~ count, "amber") }}{% endfor %}
+            {% for label, count in reason_counter %}{{ ui.badge(label ~ " · " ~ count, "red") }}{% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {{ section("registered", "Registrados al dar el OK", "Lo que el cruce guardó en su momento. Si alguno ya no encaja hoy, se indican los motivos.", registered, show_reasons=True, empty_text="Ninguno registrado" ~ (": no se ha dado el OK todavía." if r and r.status != 'ok' else ".")) }}
+
+    {{ section("now", "Encajan con los datos de hoy", "Alertas abiertas con comprador, perfil completo y agente activo cuyo perfil cumple todos los filtros. Si no están registrados, no se les avisó.", matches_now, show_reasons=False, empty_text="Ningún comprador encaja hoy con esta propiedad.") }}
+
+    {{ section("excluded", "Fuera del cruce antes de mirar el perfil", "Sin perfil, perfil incompleto, agente inactivo o alerta de Alquiler. El cruce no llega a compararlos.", excluded, show_reasons=True, empty_text="Ninguna alerta queda fuera por estos motivos.") }}
+
+    {{ section("nomatch", "No encajan", "Perfil completo pero alguna condición no se cumple. Se listan TODAS las que fallan.", no_match, show_reasons=True, empty_text="Todas las alertas con perfil completo encajan.") }}
+
+    {{ section("closed", "Cerradas hace poco que sí encajarían", "Alertas completadas o canceladas en los últimos " ~ settings.closed_days ~ " días cuyo perfil cumple: el cruce no las mira porque solo entran pendientes y en proceso.", closed_fit, show_reasons=False, empty_text="Ninguna.") }}
+</div>
+{% endblock %}

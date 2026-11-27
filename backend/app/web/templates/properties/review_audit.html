@@ -1,0 +1,182 @@
+{#
+  Seguimiento de propiedades nuevas y compradores compatibles (solo admin, solo lectura).
+  Ruta GET /properties/seguimiento-nuevas (routes/property_review_audit.py).
+
+  - Filtros: días hacia atrás, estado de la revisión y empresa (activa o todas las del admin).
+  - Resumen: propiedades del periodo por estado, cuántas tienen cruces registrados y avisos,
+    y el «embudo» de compradores que pueden entrar hoy al cruce (de las dos empresas).
+  - Tabla: una fila por propiedad con la revisión (quién y cuándo), los cruces registrados
+    al dar el OK, la simulación con los datos de hoy, los avisos y un diagnóstico en texto.
+  - Violet = propiedades nuevas (tokens.md). Enlace al detalle con todas las alertas evaluadas.
+#}
+{% extends 'base.html' %}
+{% import "components/ui_macros.html" as ui %}
+
+{% block title %}Seguimiento de propiedades nuevas - {{ brand_name }}{% endblock %}
+
+{% block content %}
+{% set pool = summary.pool %}
+<div class="space-y-6">
+
+    <a href="/properties" class="text-sm text-gray-500 hover:text-gray-700 inline-flex items-center gap-1 min-h-10">← Volver a Propiedades</a>
+
+    {% call ui.page_header("Seguimiento de propiedades nuevas",
+        "Qué pasó con cada propiedad nueva: si se revisó, qué compradores encajaron al dar el OK, a quién se avisó y por qué el resto no encaja. Solo lectura.") %}
+    {% endcall %}
+
+    {# Filtros #}
+    <form method="GET" action="{{ base_url }}" class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-5 flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3 sm:gap-4">
+        <div class="w-full sm:w-72">
+            {{ ui.field("q", "Buscar propiedad", type="search", value=q, placeholder="Título, referencia, población o id", help="Con búsqueda no se limita el periodo") }}
+        </div>
+        <div class="w-full sm:w-40">
+            {{ ui.select("dias", "Periodo", days_options, value=dias, empty=None) }}
+        </div>
+        <div class="w-full sm:w-64">
+            {{ ui.select("estado", "Estado de la revisión", status_options, value=estado, empty=None) }}
+        </div>
+        {% if can_choose_company %}
+        <div class="w-full sm:w-56">
+            {{ ui.select("empresa", "Empresa de la propiedad", [("activa", "Solo " ~ active_company.name), ("todas", "Todas mis empresas")], value=empresa, empty=None) }}
+        </div>
+        {% endif %}
+        <div class="flex flex-col sm:flex-row gap-3">
+            {{ ui.button("Aplicar", "secondary", type="submit", full_mobile=True) }}
+            {% if q %}{{ ui.button("Quitar búsqueda", "secondary", href=base_url ~ "?dias=" ~ dias ~ "&estado=" ~ estado ~ "&empresa=" ~ empresa, full_mobile=True) }}{% endif %}
+        </div>
+    </form>
+
+    {# Resumen #}
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        {{ ui.kpi_card("Propiedades nuevas", summary.total, "violet", hint="Con fila de revisión en el periodo") }}
+        {{ ui.kpi_card("Revisadas (OK)", summary.ok, "green", hint=(summary.pending ~ " por revisar · " ~ summary.issues ~ " con observaciones · " ~ summary.fixed ~ " corregidas")) }}
+        {{ ui.kpi_card("Con compradores registrados", summary.with_registered, "violet", hint=(summary.with_simulated ~ " encajarían con los datos de hoy")) }}
+        {{ ui.kpi_card("Avisos de compradores", summary.notifications, "blue", hint="Notificaciones creadas a los agentes") }}
+    </div>
+
+    {# Embudo de compradores candidatos #}
+    <section class="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6" aria-labelledby="poolTitle">
+        <h2 id="poolTitle" class="text-base font-bold text-gray-900">Compradores que pueden entrar hoy al cruce</h2>
+        <p class="text-xs text-gray-500 mt-0.5">Alertas abiertas (pendientes o en proceso) con comprador, de cualquier agente y de las dos empresas. El cruce solo mira estas.</p>
+        <ol class="mt-4 grid grid-cols-2 md:grid-cols-6 gap-3 text-sm">
+            {% for label, value, hint in [
+                ("Abiertas con comprador", pool.total, "Punto de partida"),
+                ("De agente activo", pool.active_agent, "Agente dado de baja: fuera"),
+                ("En Venta", pool.profile_operation, "Alquiler no tiene perfil"),
+                ("Con perfil guardado", pool.with_criteria, "Sin perfil: fuera"),
+                ("Perfil completo", pool.complete, "Tipo, precio máx., dorm. máx., población"),
+                ("Agente con usuario", pool.with_user, "Sin usuario no hay a quién avisar"),
+            ] %}
+            <li class="rounded-xl border border-gray-200 p-3">
+                <p class="text-xs text-gray-500">{{ loop.index }}. {{ label }}</p>
+                <p class="text-2xl font-bold tabular-nums {{ 'text-violet-600' if loop.last else 'text-gray-900' }}">{{ value }}</p>
+                <p class="text-xs text-gray-400 mt-0.5">{{ hint }}</p>
+            </li>
+            {% endfor %}
+        </ol>
+        {% if pool.by_company %}
+        <p class="mt-3 text-xs text-gray-500">Con perfil completo por empresa del comprador:
+            {% for name, count in pool.by_company %}<span class="font-medium text-gray-700">{{ name }} {{ count }}</span>{{ " · " if not loop.last }}{% endfor %}
+        </p>
+        {% endif %}
+    </section>
+
+    {# Tabla #}
+    <section class="bg-white rounded-2xl border border-gray-200" aria-labelledby="auditTitle">
+        <header class="px-4 sm:px-6 py-4 border-b border-gray-200">
+            <h2 id="auditTitle" class="text-lg font-bold text-gray-900">Propiedades <span class="text-gray-500 font-medium tabular-nums">· {{ rows | length }}</span></h2>
+            <p class="text-xs text-gray-500 mt-0.5">«Al dar el OK» es lo que quedó registrado en ese momento. «Hoy» es una simulación con la propiedad y los perfiles actuales: no registra ni avisa nada.</p>
+        </header>
+        {% if not rows %}
+        {{ ui.empty_state("Ninguna propiedad encontrada" if q else "Ninguna propiedad nueva en el periodo", ("Ninguna propiedad con revisión coincide con «" ~ q ~ "» en esta empresa.") if q else "Amplía el periodo o cambia el estado.") }}
+        {% else %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <tr>
+                        <th scope="col" class="px-4 py-3">Propiedad</th>
+                        <th scope="col" class="px-4 py-3">Captador</th>
+                        <th scope="col" class="px-4 py-3">Revisión</th>
+                        <th scope="col" class="px-4 py-3">Compradores al dar el OK</th>
+                        <th scope="col" class="px-4 py-3">Encajan hoy</th>
+                        <th scope="col" class="px-4 py-3">Avisos</th>
+                        <th scope="col" class="px-4 py-3">Diagnóstico</th>
+                        <th scope="col" class="px-4 py-3"><span class="sr-only">Acciones</span></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 align-top">
+                    {% for row in rows %}
+                    {% set p = row.property %}
+                    {% set r = row.review %}
+                    <tr>
+                        <td class="px-4 py-3 min-w-[14rem]">
+                            <a href="/properties/{{ p.id }}" class="font-semibold text-gray-900 hover:underline underline-offset-2 break-words">{{ p.title }}</a>
+                            <p class="text-xs text-gray-500">{{ [p.property_type, p.city, p.zona] | select | join(" · ") }} · {{ p.price | eur }}</p>
+                            <p class="text-xs text-gray-500">{{ p.business_type or "Sin operación" }} · {{ p.num_dormitorios if p.num_dormitorios is not none else "?" }} dorm. · {{ p.num_banos_aseos if p.num_banos_aseos is not none else "?" }} baños · CP {{ p.cod_postal or "—" }}</p>
+                            <p class="mt-1 flex flex-wrap gap-1.5">
+                                {{ ui.company_badge(p.company) }}
+                                {{ ui.badge("Activa", "green", dot=True) if p.status == "Activa" else ui.badge(p.status, "red", dot=True) }}
+                                {% if not (p | public_url) %}{{ ui.badge("Sin enlace web", "amber", dot=True) }}{% endif %}
+                            </p>
+                            <p class="text-xs text-gray-400 mt-1">
+                                {% if p.market_entry_date %}En el mercado desde {{ p.market_entry_date | madrid_dt('%d/%m/%Y') }} · {% endif %}
+                                Detectada el {{ r.created_at | madrid_dt('%d/%m/%Y %H:%M') }}
+                            </p>
+                        </td>
+                        <td class="px-4 py-3 min-w-[10rem]">
+                            {% if p.agent %}
+                            <p class="text-gray-900">{{ p.agent.name }}</p>
+                            {% if row.facts.captador_users %}
+                            <p class="text-xs text-green-700">Con usuario en la app</p>
+                            {% else %}
+                            <p class="text-xs text-red-700">Sin usuario activo en la app</p>
+                            {% endif %}
+                            {% else %}
+                            <p class="text-red-700">Sin captador</p>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 min-w-[12rem]">
+                            {% if r.status == 'skipped' %}{{ ui.badge("Sin revisión", "gray") }}{% else %}{{ ui.status_badge("review", r.status) }}{% endif %}
+                            {% if row.facts.overdue %}<p class="text-xs text-amber-700 mt-1">Fuera de plazo</p>{% endif %}
+                            <ul class="text-xs text-gray-500 mt-1 space-y-0.5">
+                                {% if r.notified_at %}<li>Aviso al captador: {{ r.notified_at | madrid_dt }}</li>{% elif r.status != 'skipped' %}<li class="text-red-700">Sin aviso al captador</li>{% endif %}
+                                {% if r.reminded_at %}<li>Recordatorio: {{ r.reminded_at | madrid_dt }}</li>{% endif %}
+                                {% if r.flagged_at %}<li>«Revisar» ({{ r.rounds }}ª vez): {{ r.flagged_at | madrid_dt }}</li>{% endif %}
+                                {% if r.fixed_at %}<li>Corregida: {{ r.fixed_at | madrid_dt }}{% if r.fixed_by_user %} por {{ r.fixed_by_user.full_name }}{% endif %}</li>{% endif %}
+                                {% if r.ok_at %}<li class="text-green-700">OK: {{ r.ok_at | madrid_dt }}{% if r.ok_by_user %} por {{ r.ok_by_user.full_name }}{% endif %}</li>{% endif %}
+                            </ul>
+                        </td>
+                        <td class="px-4 py-3 min-w-[10rem]">
+                            {% if r.status == 'ok' %}
+                            <p class="text-2xl font-bold tabular-nums {{ 'text-violet-600' if row.registered else 'text-gray-400' }}">{{ row.registered | length }}</p>
+                            <p class="text-xs text-gray-500">{{ row.registered_agents }} agentes · {{ row.registered_notified }} con aviso</p>
+                            {% else %}
+                            <p class="text-xs text-gray-400">Sin OK: no hubo cruce</p>
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 min-w-[9rem]">
+                            <p class="text-2xl font-bold tabular-nums {{ 'text-gray-900' if row.simulated else 'text-gray-400' }}">{{ row.simulated | length }}</p>
+                            <p class="text-xs text-gray-500">{{ row.simulated_agents }} agentes</p>
+                        </td>
+                        <td class="px-4 py-3 min-w-[9rem]">
+                            <p class="text-gray-900 tabular-nums">{{ row.match_notifications | length }} <span class="text-xs text-gray-500">compradores</span></p>
+                            <p class="text-xs text-gray-500">{{ row.match_read }} leídos</p>
+                            <p class="text-gray-900 tabular-nums mt-1">{{ row.review_notifications | length }} <span class="text-xs text-gray-500">de revisión</span></p>
+                        </td>
+                        <td class="px-4 py-3 min-w-[18rem] max-w-md">
+                            <ul class="text-xs text-gray-700 space-y-1 list-disc pl-4">
+                                {% for note in row.diagnosis %}<li>{{ note }}</li>{% endfor %}
+                            </ul>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            {{ ui.button("Ver detalle", "secondary", href=base_url ~ "/" ~ p.id) }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

@@ -175,6 +175,49 @@ def test_get_locked_alert_ids_dos_consultas(env, reassigned):
     assert len(statements) == 2, statements
 
 
+def _new_own_alert(env, agent_key, name, created_at):
+    """Alta del propio agente (create_alert con su usuario): queda `self_created`."""
+    from app.models.property_alert import PropertyAlert
+    from app.services import alert_assignment_service as svc
+
+    user = env.users[agent_key]
+    alert = PropertyAlert(property=env.prop, lead_name=name, lead_phone="600111222", status=AlertStatus.PENDING,
+                          priority="NORMAL", created_by=user.id, created_at=created_at)
+    env.db.add(alert)
+    svc.assign(env.db, alert, env.agents[agent_key], user, None, is_new=True, now=created_at)
+    env.db.commit()
+    return alert
+
+
+def test_la_alerta_creada_por_el_agente_queda_fuera_de_la_cola(env):
+    """PLAN_ALERTA_AGENTE_SIN_COLA.md D1/D2: ni se bloquea ni bloquea a las demás."""
+    first = _new_alert(env, "ana", "Admin Anterior", T0)
+    own = _new_own_alert(env, "ana", "Comprador Presencial", T0 + timedelta(hours=1))
+    later = _new_alert(env, "ana", "Admin Posterior", T0 + timedelta(hours=2))
+    ana_id = env.agents["ana"].id
+
+    assert own.self_created is True
+    assert first.self_created is False and later.self_created is False
+    # Sigue en la lista del agente en su posición por fecha (D2)
+    assert [a.id for a in alert_view.agent_open_alerts_ordered(ana_id, env.db, env.company.id)] == [
+        first.id, own.id, later.id
+    ]
+    # La suya no se bloquea; la posterior de administración sí, por la anterior
+    assert alert_view.get_locked_alert_ids(ana_id, env.db, env.company.id) == {later.id}
+
+    # Gestionada la anterior, la suya sin gestionar no bloquea a la posterior
+    _follow_up(env, first, env.users["ana"], "CONTACTADO", T0 + timedelta(hours=3))
+    assert alert_view.get_locked_alert_ids(ana_id, env.db, env.company.id) == set()
+
+
+def test_el_agente_abre_su_alerta_aunque_tenga_anteriores_sin_gestionar(env):
+    _new_alert(env, "ana", "Admin Anterior", T0)
+    own = _new_own_alert(env, "ana", "Comprador Presencial", T0 + timedelta(hours=1))
+
+    response, _ = _detail(env, env.users["ana"], own)
+    assert response.status_code == 200
+
+
 # ---------------------------------------------------------------------------
 # Detalle de la alerta
 # ---------------------------------------------------------------------------

@@ -6,6 +6,11 @@ Cierres compartidos por dos agentes (PLAN_CIERRES_DOS_AGENTES.md, fase A).
 los dos refrescan los snapshots congelados de cada agente. La métrica por
 agente no cambia: un cierre compartido suma 1 a cada agente y 2 al equipo.
 
+Cierres entre empresas (PLAN_CIERRES_ENTRE_EMPRESAS.md): los agentes pueden
+ser de cualquier empresa activa; cada registro lleva la empresa de su agente
+(la activa si pertenece a ella) y el borrado quita la pareja desde
+cualquiera de las dos empresas.
+
 Con base de datos (se omiten si no hay conexión), dentro de una transacción
 externa que se deshace al terminar (los commit del servicio solo cierran
 savepoints): no dejan datos.
@@ -50,7 +55,7 @@ def db():
 
 @pytest.fixture
 def ctx(db):
-    """MOYZA y MOES; Ana y Bea en MOYZA, Inés de baja en MOYZA y Mía solo en MOES."""
+    """MOYZA y MOES; Ana y Bea en MOYZA, Inés de baja en MOYZA, Mía solo en MOES y Lola en las dos."""
     from app.models.company import Company
     from app.models.user import User
 
@@ -69,17 +74,19 @@ def ctx(db):
 
     ana, bea = agent("ANA", moyza), agent("BEA", moyza)
     ines, mia = agent("INES", moyza, active=False), agent("MIA", moes)
+    lola = agent("LOLA", moyza)
+    lola.companies.append(moes)
     db.flush()
     prop = Property(title="PYTEST-PAREJA PISO", company_id=moyza.id, agent_id=ana.id,
                     business_type="Venta", market_entry_date=datetime(2020, 1, 1))
     db.add(prop)
     db.flush()
     return SimpleNamespace(db=db, moyza=moyza, moes=moes, user=user, ana=ana, bea=bea, ines=ines, mia=mia,
-                           prop=prop)
+                           lola=lola, prop=prop)
 
 
-def _create(ctx, agent_ids, closed_on=date(2025, 3, 10), business_type="Venta", **kwargs):
-    return closing_service.create_closing(ctx.db, ctx.moyza.id, agent_ids, business_type, closed_on,
+def _create(ctx, agent_ids, closed_on=date(2025, 3, 10), business_type="Venta", company=None, **kwargs):
+    return closing_service.create_closing(ctx.db, (company or ctx.moyza).id, agent_ids, business_type, closed_on,
                                           created_by=ctx.user.id, **kwargs)
 
 
@@ -88,9 +95,9 @@ def _stored(ctx, *agents):
     return ctx.db.query(Closing).filter(Closing.agent_id.in_(ids)).order_by(Closing.id).all()
 
 
-def _locked_month(ctx, agent):
+def _locked_month(ctx, agent, company=None):
     report = AgentPerformanceReport(
-        agent_id=agent.id, company_id=ctx.moyza.id, period_type=PeriodType.MONTHLY,
+        agent_id=agent.id, company_id=(company or ctx.moyza).id, period_type=PeriodType.MONTHLY,
         period_start=MARCH[0], period_end=MARCH[1], is_locked=True, locked_at=datetime(2025, 4, 1, 3, 0),
         cierres=0, cierres_venta=0, cierres_alquiler=0,
     )
@@ -126,14 +133,15 @@ def test_alta_con_dos_agentes_crea_dos_registros_enlazados(ctx):
 @pytest.mark.parametrize("who, message", [
     (lambda c: [c.ana.id, c.ana.id], "distintos"),
     (lambda c: [], "agente activo"),
-    (lambda c: [c.ana.id, c.mia.id], "agente activo"),       # de otra empresa
     (lambda c: [c.ines.id], "agente activo"),                # de baja
+    (lambda c: [c.ana.id, 999999999], "agente activo"),      # inexistente
     (lambda c: [c.ana.id, c.bea.id, c.ines.id], "dos agentes como máximo"),
 ])
 def test_alta_rechaza_agentes_no_validos(ctx, who, message):
     with pytest.raises(ClosingError, match=message):
         _create(ctx, who(ctx))
     assert _stored(ctx, ctx.ana, ctx.bea, ctx.ines, ctx.mia) == []
+    assert ctx.db.query(Closing).filter(Closing.agent_id == 999999999).count() == 0
 
 
 def test_alta_rechaza_operacion_y_propiedad_ajena(ctx):
@@ -202,3 +210,53 @@ def test_metrica_cuenta_uno_por_agente_y_dos_en_el_equipo(ctx):
     month = dash.period(PeriodType.MONTHLY, "2025-03-01", now=datetime(2025, 3, 31, 12, 0))
     metrics = dash.team_metrics([ctx.ana.id, ctx.bea.id], month)
     assert metrics[ctx.ana.id]["cierres"] + metrics[ctx.bea.id]["cierres"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Cierres entre empresas (PLAN_CIERRES_ENTRE_EMPRESAS.md)
+# ---------------------------------------------------------------------------
+
+def test_alta_entre_empresas_cada_registro_con_la_empresa_de_su_agente(ctx):
+    first, second = _create(ctx, [ctx.ana.id, ctx.mia.id], property_id=ctx.prop.id)
+    assert (first.agent_id, first.company_id, first.shared_with_agent_id) == (ctx.ana.id, ctx.moyza.id, ctx.mia.id)
+    assert (second.agent_id, second.company_id, second.shared_with_agent_id) == (ctx.mia.id, ctx.moes.id, ctx.ana.id)
+    assert first.pair_key and first.pair_key == second.pair_key
+    # La propiedad sigue siendo de la empresa activa (D5) y va en los dos registros
+    assert first.property_id == second.property_id == ctx.prop.id
+
+
+@pytest.mark.parametrize("active, agents, expected", [
+    # Agente de las dos empresas: la activa
+    ("moyza", ("lola", "mia"), ("moyza", "moes")),
+    ("moes", ("lola", "ana"), ("moes", "moyza")),
+    # Agente de otra empresa, también suelto: la suya
+    ("moyza", ("mia",), ("moes",)),
+])
+def test_empresa_de_cada_registro(ctx, active, agents, expected):
+    closings = _create(ctx, [getattr(ctx, name).id for name in agents], company=getattr(ctx, active))
+    assert [c.company_id for c in closings] == [getattr(ctx, name).id for name in expected]
+
+
+@pytest.mark.parametrize("delete_from", ["moyza", "moes"])
+def test_borrar_entre_empresas_desde_cualquiera_quita_los_dos(ctx, delete_from):
+    ana_month = _locked_month(ctx, ctx.ana)
+    mia_month = _locked_month(ctx, ctx.mia, company=ctx.moes)
+
+    first, second = _create(ctx, [ctx.ana.id, ctx.mia.id], closed_on=date(2025, 3, 20))
+    # Cada snapshot congelado se refresca con la empresa de su registro
+    assert (ana_month.cierres, ana_month.cierres_venta) == (1, 1)
+    assert (mia_month.cierres, mia_month.cierres_venta) == (1, 1)
+
+    clicked = first if delete_from == "moyza" else second
+    deleted = closing_service.delete_closing(ctx.db, getattr(ctx, delete_from).id, clicked.id)
+    assert deleted.shared and sorted(deleted.agent_ids) == sorted([ctx.ana.id, ctx.mia.id])
+    assert _stored(ctx, ctx.ana, ctx.mia) == []
+    assert (ana_month.cierres, mia_month.cierres) == (0, 0)
+
+
+def test_borrar_entre_empresas_exige_el_registro_de_la_activa(ctx):
+    first, second = _create(ctx, [ctx.ana.id, ctx.mia.id])
+    # El registro de Ana es de MOYZA: con MOES activa no se encuentra
+    with pytest.raises(ClosingError, match="no encontrado"):
+        closing_service.delete_closing(ctx.db, ctx.moes.id, first.id)
+    assert len(_stored(ctx, ctx.ana, ctx.mia)) == 2

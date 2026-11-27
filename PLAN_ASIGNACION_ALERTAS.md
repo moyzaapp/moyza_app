@@ -105,6 +105,8 @@ El detalle de la alerta muestra "Asignada a {agente} · por {usuario} el {fecha}
 - **Cola**: una alerta reasignada entra en la cola del nuevo agente ordenada por `assigned_at` (no por
   `created_at`), para que una alerta antigua no se cuele delante de las suyas ni le bloquee de inmediato.
   `_get_agent_open_alerts_ordered` pasa a ordenar por `coalesce(assigned_at, created_at)`.
+  Desde 2026-11-27 la alerta que crea el propio agente queda fuera de la cola (ni se bloquea ni
+  bloquea): ver `PLAN_ALERTA_AGENTE_SIN_COLA.md` (columna `property_alerts.self_created`).
 - **Recordatorio 48 h**: el reloj de "última gestión" se reinicia con `assigned_at` (se usa
   `greatest(último seguimiento, assigned_at, created_at)`), para no reclamar al nuevo agente por tiempo del anterior.
 - **Métricas**: "contactos" cuentan para el agente que tiene la alerta en el momento de contar (período por

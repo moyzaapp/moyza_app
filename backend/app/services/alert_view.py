@@ -208,6 +208,10 @@ def get_locked_alert_ids(agent_id: int, db: Session, company_id) -> set:
     agente anterior de una alerta reasignada no cuentan, así que esa alerta
     bloquea las siguientes hasta que el nuevo agente registre uno.
 
+    Las alertas que creó el propio agente (`self_created`,
+    PLAN_ALERTA_AGENTE_SIN_COLA.md) quedan fuera del recorrido: ni se
+    bloquean ni cuentan como anterior sin gestionar.
+
     Dos consultas por empresa: la cola y, agrupada, qué alertas de la cola ya
     se iniciaron.
     """
@@ -217,7 +221,10 @@ def get_locked_alert_ids(agent_id: int, db: Session, company_id) -> set:
             locked |= get_locked_alert_ids(agent_id, db, one_company_id)
         return locked
 
-    open_alerts = agent_open_alerts_ordered(agent_id, db, company_id)
+    open_alerts = [
+        alert for alert in agent_open_alerts_ordered(agent_id, db, company_id)
+        if not alert.self_created
+    ]
     if not open_alerts:
         return set()
 
